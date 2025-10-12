@@ -7,6 +7,7 @@
 // Lightning CSS binaries are optional and may not be present in every CI
 // environment. Disable its usage so Tailwind falls back to the JS pipeline.
 process.env.TAILWIND_DISABLE_LIGHTNINGCSS = '1';
+process.env.TAILWIND_DISABLE_OXIDE = '1';
 
 module.exports = {
   plugins: {
