@@ -134,6 +134,17 @@ function normalizeOverrides(raw: any): OverridesShape {
   return out;
 }
 
+function hasAnyOverrides(o?: OverridesShape): boolean {
+  if (!o) return false;
+  return Boolean(
+    (Array.isArray(o.campaigns) && o.campaigns.length) ||
+    (Array.isArray(o.partners) && o.partners.length) ||
+    (Array.isArray(o.databases) && o.databases.length) ||
+    (Array.isArray(o.themes as any) && (o.themes as any).length) ||
+    (Array.isArray(o.types) && o.types.length)
+  );
+}
+
 /* ============================== Merge helpers ============================== */
 function mergeCampaigns(base: CampaignRef[], adds: CampaignIn[] = []): CampaignRef[] {
   const out = [...base.map((c) => ({ ...c }))];
@@ -387,16 +398,27 @@ export function CatalogOverridesProvider({ children }: { children: React.ReactNo
           .from(S_TABLE)
           .select('data, updated_at')
           .eq('key', S_KEY)
-          .single();
+          .maybeSingle();
 
         if (!active) return;
 
-        if (!error && data?.data) {
+        if (!error && data) {
           skipNextSaveRef.current = true; // no salvar de vuelta este set
-          setOverrides(normalizeOverrides(data.data));
-          setLastSyncedAt(data.updated_at ?? new Date().toISOString());
+          const remote = normalizeOverrides(data.data);
+          if (hasAnyOverrides(remote)) {
+            setOverrides(remote);
+            setLastSyncedAt(data.updated_at ?? new Date().toISOString());
+          } else {
+            const hasLocal = hasAnyOverrides(overrides);
+            if (hasLocal && canWriteShared) {
+              await upsertRemote(overrides);
+            }
+          }
         } else {
-          // Si no existe fila remota, mantenemos lo local; se creará al primer write
+          const hasLocal = hasAnyOverrides(overrides);
+          if (hasLocal && canWriteShared) {
+            await upsertRemote(overrides);
+          }
         }
       } finally {
         hydratedRemoteRef.current = true;
@@ -417,9 +439,11 @@ export function CatalogOverridesProvider({ children }: { children: React.ReactNo
         (payload) => {
           const row: any = payload.new || payload.record || null;
           if (!row || !row.data) return;
+          const remote = normalizeOverrides(row.data);
+          if (!hasAnyOverrides(remote)) return; // ignora vacíos para no borrar local
           // Aplicar remoto y evitar eco
           skipNextSaveRef.current = true;
-          setOverrides(normalizeOverrides(row.data));
+          setOverrides(remote);
           setLastSyncedAt(row.updated_at ?? new Date().toISOString());
         }
       )
@@ -433,7 +457,7 @@ export function CatalogOverridesProvider({ children }: { children: React.ReactNo
     if (!canWriteShared) return; // viewers no escriben
     setSyncing(true);
     try {
-      await supabase
+      const { error } = await supabase
         .from(S_TABLE)
         .upsert({
           key: S_KEY,
@@ -442,7 +466,11 @@ export function CatalogOverridesProvider({ children }: { children: React.ReactNo
         }, { onConflict: 'key' })
         .select()
         .single();
+      if (error) throw error as any;
       setLastSyncedAt(new Date().toISOString());
+    } catch (err) {
+      // eslint-disable-next-line no-console
+      console.warn('[CatalogOverrides] Failed to sync overrides to remote:', err);
     } finally {
       setSyncing(false);
     }
