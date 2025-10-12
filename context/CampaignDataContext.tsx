@@ -1,422 +1,314 @@
 'use client';
 
-import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState } from 'react';
-import { CampaignRow } from '@/types/campaign';
-import { autoFromCampaign, autoFromDatabase, autoInvoiceOffice, calcDerived, DEFAULT_ROUTING_RATE } from '@/lib/campaign-calcs';
-import { useAuth } from '@/context/AuthContext'; // 🆕 soft guard por rol
+import {
+  createContext,
+  useCallback,
+  useContext,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+} from 'react';
+
+import type { PostgrestError } from '@supabase/supabase-js';
+
+import type { CampaignRow } from '@/types/campaign';
+import { useAuth } from '@/context/AuthContext';
 import { useRoutingSettings } from '@/context/RoutingSettingsContext';
+import { createClientComponentClient } from '@supabase/auth-helpers-nextjs';
+import { applyBusinessRules } from '@/lib/campaigns/business';
+import {
+  mapFromDb,
+  mapToDb,
+  type CampaignDbInsert,
+  type CampaignDbRow,
+} from '@/lib/campaigns/db';
+import { DEFAULT_ROUTING_RATE } from '@/lib/campaign-calcs';
 
-/* ================================
-   Tipado del contexto (ampliado)
-   ================================ */
-type BulkResult = { added: number; updated: number; skipped: number; total: number };
-type UpsertKey = 'id' | 'composite';
-type OnConflict = 'update' | 'skip';
+type CampaignWithIdx = CampaignRow & { _idx: number };
 
-type ImportCsvOptions = {
-  delimiter?: string;
-  headerMap?: Partial<Record<string, keyof CampaignRow>>;
-  upsertBy?: UpsertKey;
-  onConflict?: OnConflict;
+type CampaignDataContextValue = {
+  rows: CampaignWithIdx[];
+  loading: boolean;
+  refresh: () => Promise<void>;
+  addCampaign: (
+    input: Omit<CampaignRow, 'id'> & { id?: string }
+  ) => Promise<string | null>;
+  updateCampaign: (id: string, patch: Partial<CampaignRow>) => Promise<boolean>;
+  removeCampaign: (id: string) => Promise<boolean>;
+  resetToMock: () => Promise<void>;
+  setRoutingRateOverride: (ids: string[], rate: number | null) => Promise<void>;
 };
 
-type ImportCsvReport = BulkResult & {
-  errors: { line: number; reason: string }[];
-  columns: string[];
-};
+const CampaignDataContext = createContext<CampaignDataContextValue | null>(null);
 
-type Ctx = {
-  rows: (CampaignRow & { _idx: number })[];
-  addCampaign: (r: Omit<CampaignRow, 'id'> & { id?: string }) => void;
-  updateCampaign: (id: string, patch: Partial<CampaignRow>) => void;
-  removeCampaign: (id: string) => void;
-  resetToMock: () => void; // mantiene el nombre por compat, ahora limpia
-  addManyCampaigns: (
-    list: (Omit<CampaignRow, 'id'> & { id?: string })[],
-    opts?: { upsertBy?: UpsertKey; onConflict?: OnConflict }
-  ) => BulkResult;
-  importFromCsv: (csvText: string, opts?: ImportCsvOptions) => ImportCsvReport;
-  setRoutingRateOverride: (ids: string[], rate: number | null) => void;
-};
-
-const CampaignDataContext = createContext<Ctx | null>(null);
-
-const STORAGE_KEY = 'monet_campaigns_v1';
-
-/* ==========================
-   Helpers (reglas & parsing)
-   ========================== */
-function applyBusinessRules(
-  row: CampaignRow,
-  resolveRate: (date: string | null | undefined) => number,
-  fallbackRate: number
-): CampaignRow {
-  const { advertiser } = autoFromCampaign(row.campaign);
-  const dbAuto = autoFromDatabase(row.database);
-  const geo = dbAuto.geo || row.geo || '';
-  const databaseType = (dbAuto.dbType as CampaignRow['databaseType']) || row.databaseType;
-  const invoiceOffice = autoInvoiceOffice(geo, row.partner);
-  const effectiveRate =
-    row.routingRateOverride != null && Number.isFinite(row.routingRateOverride)
-      ? Number(row.routingRateOverride)
-      : resolveRate(row.date ?? null) ?? fallbackRate;
-  const rate = Number.isFinite(effectiveRate) ? Number(effectiveRate) : fallbackRate;
-  const d = calcDerived({ price: row.price, qty: row.qty, vSent: row.vSent }, rate || DEFAULT_ROUTING_RATE);
-
-  return {
-    ...row,
-    advertiser,
-    geo,
-    databaseType,
-    invoiceOffice,
-    routingCosts: d.routingCosts,
-    turnover: d.turnover,
-    margin: d.margin,
-    ecpm: d.ecpm,
-  };
-}
-
-function compositeKey(r: Pick<CampaignRow, 'date' | 'campaign' | 'partner' | 'database'>) {
-  return [r.date, r.campaign, r.partner, r.database].map(s => (s ?? '').trim().toLowerCase()).join('|');
-}
-
-function parseNumberLoose(v: any): number {
-  if (v == null || v === '') return 0;
-  if (typeof v === 'number') return Number.isFinite(v) ? v : 0;
-  let s = String(v).trim();
-  if (!s) return 0;
-  const hasComma = s.includes(',');
-  const hasDot = s.includes('.');
-  if (hasComma && hasDot) {
-    if (s.lastIndexOf(',') > s.lastIndexOf('.')) s = s.replace(/\./g, '').replace(',', '.');
-    else s = s.replace(/,/g, '');
-  } else if (hasComma) {
-    s = s.replace(',', '.');
-  }
-  const n = Number(s);
-  return Number.isFinite(n) ? n : 0;
-}
-
-function parseCsv(text: string, delimiter?: string): { header: string[]; rows: string[][] } {
-  const firstLine = (text.split(/\r?\n/, 1)[0] ?? '');
-  const guess = delimiter || (firstLine.split(';').length > firstLine.split(',').length ? ';' : ',');
-  const d = guess;
-
-  const out: string[][] = [];
-  let row: string[] = [];
-  let cell = '';
-  let inQuotes = false;
-
-  const pushCell = () => { row.push(cell); cell = ''; };
-  const pushRow = () => { if (row.length === 1 && row[0] === '') { row = []; return; } out.push(row); row = []; };
-
-  const len = text.length;
-  for (let i = 0; i < len; i++) {
-    const ch = text[i];
-    if (inQuotes) {
-      if (ch === '"') {
-        if (text[i + 1] === '"') { cell += '"'; i++; }
-        else { inQuotes = false; }
-      } else {
-        cell += ch;
-      }
-    } else {
-      if (ch === '"') { inQuotes = true; }
-      else if (ch === d) { pushCell(); }
-      else if (ch === '\n') { pushCell(); pushRow(); }
-      else if (ch === '\r') { }
-      else { cell += ch; }
+function generateId() {
+  // RFC4122 v4 UUID
+  if (typeof crypto !== 'undefined') {
+    if (typeof crypto.randomUUID === 'function') return crypto.randomUUID();
+    if (crypto.getRandomValues) {
+      const rnds = new Uint8Array(16);
+      crypto.getRandomValues(rnds);
+      rnds[6] = (rnds[6] & 0x0f) | 0x40;
+      rnds[8] = (rnds[8] & 0x3f) | 0x80;
+      const hex: string[] = [];
+      for (let i = 0; i < 256; ++i) hex.push((i + 0x100).toString(16).substring(1));
+      return (
+        hex[rnds[0]] + hex[rnds[1]] + hex[rnds[2]] + hex[rnds[3]] + '-' +
+        hex[rnds[4]] + hex[rnds[5]] + '-' +
+        hex[rnds[6]] + hex[rnds[7]] + '-' +
+        hex[rnds[8]] + hex[rnds[9]] + '-' +
+        hex[rnds[10]] + hex[rnds[11]] + hex[rnds[12]] + hex[rnds[13]] + hex[rnds[14]] + hex[rnds[15]]
+      );
     }
   }
-  pushCell();
-  if (row.length) pushRow();
-
-  if (!out.length) return { header: [], rows: [] };
-  const header = (out.shift() || []).map(h => h.trim());
-  return { header, rows: out };
+  // Fallback poco probable (no-crypto): aún generamos un UUID válido
+  const s: string[] = [];
+  const hex = 'xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx';
+  for (let i = 0; i < hex.length; i++) {
+    const c = hex[i];
+    if (c === 'x' || c === 'y') {
+      const r = Math.floor(Math.random() * 16);
+      const v = c === 'x' ? r : (r & 0x3) | 0x8;
+      s.push(v.toString(16));
+    } else {
+      s.push(c);
+    }
+  }
+  return s.join('');
 }
 
-const REQUIRED_MIN: (keyof CampaignRow)[] = [
-  'date', 'campaign', 'partner', 'database', 'type',
-  'price', 'qty', 'vSent',
-];
+function logError(scope: string, error: unknown | PostgrestError) {
+  if (!error) return;
+  // eslint-disable-next-line no-console
+  console.error(`[CampaignData] ${scope}`, error);
+}
 
-/* =========================
-   Provider sin mocks
-   ========================= */
 export function CampaignDataProvider({ children }: { children: React.ReactNode }) {
-  // 🆕 límites suaves para no-admin
-  const { isAdmin } = useAuth();
+  const supabase = useMemo(() => createClientComponentClient(), []);
+  const { user } = useAuth();
   const { resolveRate, settings } = useRoutingSettings();
   const fallbackRate = settings.defaultRate ?? DEFAULT_ROUTING_RATE;
-  const NON_ADMIN_BULK_LIMIT = 500; // número máximo de filas por operación para no-admin
 
-  // 1) Arrancamos vacío; hidrataremos en efecto
-  const [rows, setRows] = useState<(CampaignRow & { _idx: number })[]>([]);
+  const [rows, setRows] = useState<CampaignWithIdx[]>([]);
+  const [loading, setLoading] = useState(true);
+
   const idxRef = useRef(0);
-
-  // Guardas para StrictMode y para bloquear la primera escritura
-  const didInitRef = useRef(false);
-  const hydratedRef = useRef(false);
-
-  // 2) Hidratar una única vez desde LocalStorage; si no hay datos => quedamos vacíos
+  const rowsRef = useRef<CampaignWithIdx[]>([]);
   useEffect(() => {
-    if (didInitRef.current) return;
-    didInitRef.current = true;
-
-    try {
-      const raw = localStorage.getItem(STORAGE_KEY);
-      let base: CampaignRow[] = [];
-
-      if (raw) {
-        const parsed = JSON.parse(raw);
-        if (Array.isArray(parsed) && parsed.length > 0) base = parsed as CampaignRow[];
-      }
-
-      const withIdx = base.map((r, i) => ({ ...applyBusinessRules(r, resolveRate, fallbackRate), _idx: i }));
-      idxRef.current = withIdx.length;
-      setRows(withIdx);
-    } catch {
-      idxRef.current = 0;
-      setRows([]);
-    } finally {
-      hydratedRef.current = true;
-    }
-  }, []);
-
-  // 3) Persistir SOLO después de hidratar
-  useEffect(() => {
-    if (!hydratedRef.current) return;
-    const plain: CampaignRow[] = rows.map(({ _idx, ...r }) => r);
-    try { localStorage.setItem(STORAGE_KEY, JSON.stringify(plain)); } catch {}
+    rowsRef.current = rows;
   }, [rows]);
 
-  const addCampaign = useCallback((input: Omit<CampaignRow, 'id'> & { id?: string }) => {
-    const id = input.id ?? (globalThis.crypto?.randomUUID ? crypto.randomUUID() : Math.random().toString(36).slice(2));
-    const row: CampaignRow & { _idx: number } = {
-      ...applyBusinessRules({ ...input, id } as CampaignRow, resolveRate, fallbackRate),
-      _idx: idxRef.current++,
-    };
-    setRows(prev => [row, ...prev]);
-  }, [fallbackRate, resolveRate]);
+  const computeRow = useCallback(
+    (row: CampaignRow): CampaignRow =>
+      applyBusinessRules(row, { resolveRate, fallbackRate }),
+    [fallbackRate, resolveRate]
+  );
 
-  const updateCampaign = useCallback((id: string, patch: Partial<CampaignRow>) => {
-    setRows(prev => prev.map(r => {
-      if (r.id !== id) return r;
-      const merged: CampaignRow = { ...r, ...patch };
-      const finalRow = applyBusinessRules(merged, resolveRate, fallbackRate);
-      return { ...finalRow, _idx: r._idx };
-    }));
-  }, [fallbackRate, resolveRate]);
+  const stampRow = useCallback(
+    (row: CampaignRow, idx?: number): CampaignWithIdx => ({
+      ...row,
+      _idx: idx ?? idxRef.current++,
+    }),
+    []
+  );
 
-  const removeCampaign = useCallback((id: string) => {
-    setRows(prev => prev.filter(r => r.id !== id));
-  }, []);
+  const refresh = useCallback(async () => {
+    setLoading(true);
+    const { data, error } = await supabase
+      .from<CampaignDbRow>('campaigns')
+      .select('*')
+      .order('date', { ascending: false })
+      .order('created_at', { ascending: false });
 
-  // Ahora limpia: borra storage y deja dataset vacío
-  const resetToMock = useCallback(() => {
-    try { localStorage.removeItem(STORAGE_KEY); } catch {}
-    idxRef.current = 0;
-    setRows([]);
-  }, []);
-
-  // ============ Inserción masiva / upsert ============
-  const addManyCampaigns = useCallback((
-    list: (Omit<CampaignRow, 'id'> & { id?: string })[],
-    opts?: { upsertBy?: UpsertKey; onConflict?: OnConflict }
-  ): BulkResult => {
-    // 🆕 guard suave para no-admin:
-    const hardTotal = list.length;
-    const effectiveList = isAdmin ? list : list.slice(0, NON_ADMIN_BULK_LIMIT);
-    const trimmedOut = hardTotal - effectiveList.length;
-
-    const upsertBy = opts?.upsertBy ?? 'composite';
-    const onConflictEffective: OnConflict = isAdmin ? (opts?.onConflict ?? 'update') : 'skip';
-
-    let added = 0, updated = 0, skipped = 0;
-
-    setRows(prev => {
-      let next = [...prev];
-
-      for (const input of effectiveList) {
-        const id =
-          input.id ??
-          (globalThis.crypto?.randomUUID
-            ? crypto.randomUUID()
-            : Math.random().toString(36).slice(2));
-
-        const prepared = applyBusinessRules({ ...(input as any), id } as CampaignRow, resolveRate, fallbackRate);
-
-        // Recalcular mapas sobre `next` en cada iteración
-        const byId = new Map<string, number>();
-        const byComposite = new Map<string, number>();
-        for (let i = 0; i < next.length; i++) {
-          const r = next[i];
-          byId.set(r.id, i);
-          byComposite.set(compositeKey(r), i);
-        }
-
-        let targetIndex: number | undefined = undefined;
-        if (upsertBy === 'id' && id) {
-          const idx = byId.get(id);
-          if (idx != null) targetIndex = idx;
-        } else {
-          const key = compositeKey(prepared);
-          const idx = byComposite.get(key);
-          if (idx != null) targetIndex = idx;
-        }
-
-        if (targetIndex == null) {
-          const rowWithIdx = { ...prepared, _idx: idxRef.current++ };
-          next = [rowWithIdx, ...next];
-          added++;
-        } else {
-          if (onConflictEffective === 'skip') {
-            skipped++;
-          } else {
-            const prevRow = next[targetIndex];
-            const preservedIdx =
-              (prevRow as (CampaignRow & { _idx: number }) | undefined)?._idx ?? idxRef.current++;
-            next[targetIndex] = { ...prepared, _idx: preservedIdx };
-            updated++;
-          }
-        }
-      }
-
-      return next;
-    });
-
-    skipped += trimmedOut;
-
-    return { added, updated, skipped, total: hardTotal };
-  }, [fallbackRate, isAdmin, resolveRate]);
-
-  const importFromCsv = useCallback((csvText: string, opts?: ImportCsvOptions): ImportCsvReport => {
-    const parsed = parseCsv(csvText, opts?.delimiter);
-    const headerRaw = parsed.header;
-    const rowsRaw = parsed.rows;
-    const normalize = (s: string) => s.trim().toLowerCase();
-    const columns = headerRaw;
-    const headerMap = new Map<string, keyof CampaignRow>();
-
-    if (opts?.headerMap) {
-      for (const [k, v] of Object.entries(opts.headerMap)) {
-        headerMap.set(normalize(k), v);
-      }
+    if (error) {
+      logError('refresh', error);
+      setRows([]);
+      idxRef.current = 0;
+      setLoading(false);
+      return;
     }
 
-    const possibleFields: (keyof CampaignRow)[] = [
-      'id','date','campaign','advertiser','invoiceOffice','partner','theme','price','priceCurrency','type','vSent','routingCosts','qty','turnover','margin','ecpm','database','geo','databaseType',
-    ];
-    headerRaw.forEach(h => {
-      const n = normalize(h);
-      if (!headerMap.has(n)) {
-        const direct = possibleFields.find(f => normalize(String(f)) === n);
-        if (direct) headerMap.set(n, direct);
-      }
-    });
-
-    const failures: { line: number; reason: string }[] = [];
-    const batch: (Omit<CampaignRow, 'id'> & { id?: string })[] = [];
-
-    rowsRaw.forEach((cells, rowIdx) => {
-      const lineNo = rowIdx + 2;
-      const obj: any = {};
-      headerRaw.forEach((h, i) => {
-        const mapped = headerMap.get(normalize(h));
-        if (!mapped) return;
-        obj[mapped] = cells[i];
-      });
-
-      obj.price = parseNumberLoose(obj.price);
-      obj.qty = Math.round(parseNumberLoose(obj.qty));
-      obj.vSent = Math.round(parseNumberLoose(obj.vSent));
-      if (!obj.priceCurrency) obj.priceCurrency = 'EUR';
-      if (!obj.type) obj.type = 'CPL';
-
-      const missing = REQUIRED_MIN.filter(k => !String(obj[k] ?? '').trim());
-      if (missing.length) {
-        failures.push({ line: lineNo, reason: `Missing required: ${missing.join(', ')}` });
-        return;
-      }
-
-      batch.push({
-        id: obj.id || undefined,
-        date: String(obj.date),
-        campaign: String(obj.campaign),
-        advertiser: String(obj.advertiser || ''),
-        invoiceOffice: String(obj.invoiceOffice || 'DAT'),
-        partner: String(obj.partner),
-        theme: String(obj.theme || ''),
-        price: Number(obj.price || 0),
-        priceCurrency: String(obj.priceCurrency || 'EUR'),
-        type: String(obj.type),
-        vSent: Number(obj.vSent || 0),
-        routingCosts: 0,
-        qty: Number(obj.qty || 0),
-        turnover: 0,
-        margin: 0,
-        ecpm: 0,
-        database: String(obj.database),
-        geo: String(obj.geo || ''),
-        databaseType: String(obj.databaseType || ''),
-      });
-    });
-
-    const bulk = addManyCampaigns(batch, {
-      upsertBy: opts?.upsertBy ?? 'composite',
-      onConflict: isAdmin ? (opts?.onConflict ?? 'update') : 'skip',
-    });
-
-  return {
-    ...bulk,
-    errors: failures,
-    columns,
-  };
-}, [addManyCampaigns, isAdmin]);
-
-  const setRoutingRateOverride = useCallback((ids: string[], rate: number | null) => {
-    if (!Array.isArray(ids) || ids.length === 0) return;
-    const cleanRate =
-      rate == null || Number.isNaN(Number(rate)) ? null : Number(rate);
-
-    setRows(prev =>
-      prev.map(r => {
-        if (!ids.includes(r.id)) return r;
-        const { _idx, ...rest } = r;
-        const payload: CampaignRow = {
-          ...(rest as CampaignRow),
-          routingRateOverride: cleanRate,
-        };
-        const recomputed = applyBusinessRules(payload, resolveRate, fallbackRate);
-        return { ...recomputed, _idx };
-      })
-    );
-  }, [fallbackRate, resolveRate]);
+    const mapped = (data ?? []).map(mapFromDb).map(computeRow);
+    const withIdx = mapped.map((row, index) => stampRow(row, index));
+    idxRef.current = withIdx.length;
+    setRows(withIdx);
+    setLoading(false);
+  }, [computeRow, stampRow, supabase]);
 
   useEffect(() => {
-    if (!hydratedRef.current) return;
-    setRows(prev =>
-      prev.map(r => {
-        const { _idx, ...rest } = r;
-        const recomputed = applyBusinessRules(rest as CampaignRow, resolveRate, fallbackRate);
-        return { ...recomputed, _idx };
+    refresh();
+  }, [refresh]);
+
+  useEffect(() => {
+    if (!rowsRef.current.length) return;
+    setRows((prev) =>
+      prev.map((row) => {
+        const { _idx, ...rest } = row;
+        const recomputed = computeRow(rest as CampaignRow);
+        return stampRow(recomputed, _idx);
       })
     );
-  }, [fallbackRate, resolveRate]);
+  }, [computeRow, stampRow]);
 
-  const value = useMemo<Ctx>(
+  const addCampaign = useCallback(
+    async (input: Omit<CampaignRow, 'id'> & { id?: string }) => {
+      const id = input.id ?? generateId();
+      const base: CampaignRow = computeRow({
+        id,
+        ...input,
+      } as CampaignRow);
+      const optimistic = stampRow(base);
+      setRows((prev) => [optimistic, ...prev]);
+
+      try {
+        const { data, error } = await supabase
+          .from<CampaignDbRow>('campaigns')
+          .insert(mapToDb(base, user?.id ?? null))
+          .select('*')
+          .single();
+
+        if (error || !data) {
+          throw error ?? new Error('Insert failed');
+        }
+
+        const persisted = stampRow(computeRow(mapFromDb(data)), optimistic._idx);
+        setRows((prev) => {
+          const without = prev.filter((row) => row.id !== id);
+          return [persisted, ...without];
+        });
+        return persisted.id;
+      } catch (err) {
+        logError('addCampaign', err);
+        await refresh();
+        return null;
+      }
+    },
+    [computeRow, refresh, stampRow, supabase, user?.id]
+  );
+
+  const updateCampaign = useCallback(
+    async (id: string, patch: Partial<CampaignRow>) => {
+      const current = rowsRef.current.find((row) => row.id === id);
+      if (!current) return false;
+
+      const { _idx, ...rest } = current;
+      const merged = computeRow({
+        ...(rest as CampaignRow),
+        ...patch,
+        id,
+      });
+
+      const optimistic = stampRow(merged, _idx);
+      setRows((prev) =>
+        prev.map((row) => (row.id === id ? { ...optimistic, _idx } : row))
+      );
+
+      try {
+        const { data, error } = await supabase
+          .from('campaigns')
+          .update(mapToDb(merged))
+          .eq('id', id)
+          .select('*')
+          .single();
+
+        if (error) throw error;
+        if (data) {
+          const persisted = stampRow(computeRow(mapFromDb(data)), _idx);
+          setRows((prev) => prev.map((r) => (r.id === id ? persisted : r)));
+        }
+        return true;
+      } catch (err) {
+        logError('updateCampaign', err);
+        await refresh();
+        return false;
+      }
+    },
+    [computeRow, refresh, stampRow, supabase]
+  );
+
+  const removeCampaign = useCallback(
+    async (id: string) => {
+      const existed = rowsRef.current.some((row) => row.id === id);
+      if (!existed) return false;
+
+      setRows((prev) => prev.filter((row) => row.id !== id));
+
+      try {
+        const { error } = await supabase.from('campaigns').delete().eq('id', id);
+        if (error) throw error;
+        return true;
+      } catch (err) {
+        logError('removeCampaign', err);
+        await refresh();
+        return false;
+      }
+    },
+    [refresh, supabase]
+  );
+
+  const setRoutingRateOverride = useCallback(
+    async (ids: string[], rate: number | null) => {
+      if (!Array.isArray(ids) || ids.length === 0) return;
+
+      const cleanRate =
+        rate == null || Number.isNaN(Number(rate))
+          ? null
+          : Number(rate);
+
+      const updates: CampaignDbInsert[] = [];
+      setRows((prev) =>
+        prev.map((row) => {
+          if (!ids.includes(row.id)) return row;
+          const { _idx, ...rest } = row;
+          const next = computeRow({
+            ...(rest as CampaignRow),
+            routingRateOverride: cleanRate,
+          });
+          updates.push(mapToDb(next));
+          return stampRow(next, _idx);
+        })
+      );
+
+      if (!updates.length) return;
+
+      try {
+        const { error } = await supabase.from('campaigns').upsert(updates, { onConflict: 'id' });
+        if (error) throw error;
+      } catch (err) {
+        logError('setRoutingRateOverride', err);
+        await refresh();
+      }
+    },
+    [computeRow, refresh, stampRow, supabase]
+  );
+
+  const resetToMock = useCallback(async () => {
+    try {
+      const { error } = await supabase
+        .from('campaigns')
+        .delete()
+        .neq('id', '');
+      if (error) throw error;
+      await refresh();
+    } catch (err) {
+      logError('resetToMock', err);
+      await refresh();
+    }
+  }, [refresh, supabase]);
+
+  const value = useMemo<CampaignDataContextValue>(
     () => ({
       rows,
+      loading,
+      refresh,
       addCampaign,
       updateCampaign,
       removeCampaign,
-      resetToMock,       // ahora limpia
-      addManyCampaigns,
-      importFromCsv,
+      resetToMock,
       setRoutingRateOverride,
     }),
-    [rows, addCampaign, updateCampaign, removeCampaign, resetToMock, addManyCampaigns, importFromCsv, setRoutingRateOverride]
+    [rows, loading, refresh, addCampaign, updateCampaign, removeCampaign, resetToMock, setRoutingRateOverride]
   );
 
   return <CampaignDataContext.Provider value={value}>{children}</CampaignDataContext.Provider>;

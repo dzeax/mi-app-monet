@@ -397,14 +397,22 @@ export default function CreateCampaignModal({
       };
 
       if (mode === 'edit' && initialRow) {
-        updateCampaign(initialRow.id, payload);
+        const ok = await updateCampaign(initialRow.id, payload);
+        if (!ok) {
+          showToast('Could not update campaign. Please try again.', { variant: 'error' });
+          return;
+        }
         showToast('Campaign updated successfully');
         onSaved?.(initialRow.id);
         onClose();
         return;
       }
 
-      await Promise.resolve(addCampaign(payload));
+      const newId = await addCampaign(payload);
+      if (!newId) {
+        showToast('Could not save campaign. Please try again.', { variant: 'error' });
+        return;
+      }
       showToast(
         submitMode === 'save_add' ? 'Campaign saved. Add another…' : 'Campaign saved successfully'
       );
@@ -414,6 +422,7 @@ export default function CreateCampaignModal({
         setTimeout(() => firstRef.current?.focus(), 0);
       } else {
         reset();
+        onSaved?.(newId);
         onClose();
       }
     } catch (e) {

@@ -458,7 +458,7 @@ export default function CampaignTable() {
     }
     const ids = target.map(r => r.id);
     const value = mode === 'clear' ? null : (rate ?? null);
-    setRoutingRateOverride(ids, value);
+        void setRoutingRateOverride(ids, value);
     setOpenRoutingOverride(false);
   };
 
@@ -709,7 +709,7 @@ export default function CampaignTable() {
                       onDuplicate={() => setSeedCreate(r)}
                       onDelete={() => {
                         if (!confirm('Delete this campaign? This cannot be undone.')) return;
-                        removeCampaign(r.id);
+                        void removeCampaign(r.id);
                       }}
                     />
                   </td>

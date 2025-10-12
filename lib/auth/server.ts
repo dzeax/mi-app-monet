@@ -4,7 +4,8 @@ import { createServerComponentClient } from '@supabase/auth-helpers-nextjs';
 type AppUserRow = { role: 'admin' | 'editor'; is_active: boolean } | null;
 
 export async function getSessionAndAppUser() {
-  const supabase = createServerComponentClient({ cookies });
+  const store = await cookies();
+  const supabase = createServerComponentClient({ cookies: () => store });
   const { data: { session } } = await supabase.auth.getSession();
 
   if (!session) return { session: null, appUser: null as AppUserRow };

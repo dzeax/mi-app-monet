@@ -145,7 +145,7 @@ function getCI(obj: Record<string, string>, key: string): string {
    ======================= */
 export default function ImportCsvModal({ onClose }: { onClose: () => void }) {
   const { isAdmin } = useAuth();                                  // 🆕
-  const { addManyCampaigns } = useCampaignData();
+  const { refresh } = useCampaignData();
 
   const catalogs = useCatalogOverrides();
   const {
@@ -333,17 +333,29 @@ export default function ImportCsvModal({ onClose }: { onClose: () => void }) {
     if (!canImport) return;
     try {
       setImporting(true);
-      const res = await Promise.resolve(
-        addManyCampaigns(drafts, { upsertBy: 'composite', onConflict: 'update' })
-      );
+      const response = await fetch('/api/campaigns/import', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          rows: drafts,
+          options: { upsertBy: 'composite' },
+        }),
+      });
+
+      const payload = await response.json().catch(() => ({}));
+
+      if (!response.ok) {
+        const message = payload?.error || 'Import failed.';
+        alert(message);
+        return;
+      }
 
       alert(
         `Import done:
-Added: ${res.added}
-Updated: ${res.updated}
-Skipped: ${res.skipped}
-Total: ${res.total}`
+Processed: ${payload.total ?? drafts.length}
+Duplicates skipped: ${payload.duplicates ?? 0}`
       );
+      await refresh();
       onClose();
     } catch (e) {
       console.error(e);
