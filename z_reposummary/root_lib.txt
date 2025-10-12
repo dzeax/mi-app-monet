@@ -1,0 +1,347 @@
+﻿===== C:\Users\Usuario\Documents\GitHub\mi-app-monet\lib\campaign-calcs.ts =====
+// lib/campaign-calcs.ts
+import {
+  findCampaignByName,
+  findDatabaseByName,
+  resolveInvoiceOffice,
+} from '@/data/reference';
+
+type NumLike = number | null | undefined;
+
+function n2(v: NumLike): number {
+  const n = typeof v === 'number' ? v : Number(v ?? 0);
+  return Number.isFinite(n) ? n : 0;
+}
+
+export function calcDerived(input: { price: NumLike; qty: NumLike; vSent: NumLike }) {
+  const price = n2(input.price);
+  const qty   = Math.trunc(n2(input.qty));
+  const vSent = Math.trunc(n2(input.vSent));
+
+  const routingCosts = Number(((vSent / 1000) * 0.18).toFixed(2));
+  const turnover     = Number((qty * price).toFixed(2));
+  const margin       = Number((turnover - routingCosts).toFixed(2));
+  const ecpm         = Number(((vSent > 0 ? (turnover / vSent) * 1000 : 0)).toFixed(2));
+  const marginPct    = turnover > 0 ? Number((margin / turnover).toFixed(4)) : null;
+
+  return { routingCosts, turnover, margin, ecpm, marginPct };
+}
+
+export function autoFromCampaign(name?: string) {
+  const c = findCampaignByName(name);
+  return { advertiser: c?.advertiser ?? '' };
+}
+
+export function autoFromDatabase(name?: string) {
+  const db = findDatabaseByName(name);
+  return { geo: db?.geo ?? '', dbType: (db?.dbType as any) ?? '' };
+}
+
+export function autoInvoiceOffice(geo?: string, partner?: string) {
+  return resolveInvoiceOffice(geo || undefined, partner || undefined);
+}
+
+===== C:\Users\Usuario\Documents\GitHub\mi-app-monet\lib\client.ts =====
+'use client';
+
+import { createClient, SupabaseClient } from '@supabase/supabase-js';
+
+let _client: SupabaseClient | null = null;
+
+export function supabaseBrowser(): SupabaseClient {
+  if (_client) return _client;
+  const url = process.env.NEXT_PUBLIC_SUPABASE_URL!;
+  const anon = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!;
+  _client = createClient(url, anon, {
+    auth: {
+      persistSession: true,
+      autoRefreshToken: true,
+      detectSessionInUrl: true,
+    },
+  });
+  return _client;
+}
+
+===== C:\Users\Usuario\Documents\GitHub\mi-app-monet\lib\indexes.ts =====
+// lib/indexes.ts
+import type { NormalizedCampaignRow } from '@/hooks/useNormalizedCampaignRows';
+import { normalizeString } from '@/lib/strings';
+
+export type ColumnIndex = Map<string, Set<number>>;
+
+export type CampaignIndexes = {
+  byPartner: ColumnIndex;
+  byTheme: ColumnIndex;
+  byDatabase: ColumnIndex;
+  byType: ColumnIndex;
+  byGeo: ColumnIndex;
+  byDbType: ColumnIndex;
+  byInvoiceOffice: ColumnIndex;
+  byMonth: ColumnIndex; // YYYY-MM
+};
+
+/** Util: aÃ±ade un Ã­ndice a un mapa Set<number> */
+function addToIndex(map: ColumnIndex, key: string | undefined, idx: number) {
+  if (!key) return;
+  const k = normalizeString(key);
+  if (!k) return;
+  let set = map.get(k);
+  if (!set) {
+    set = new Set<number>();
+    map.set(k, set);
+  }
+  set.add(idx);
+}
+
+/** Deriva YYYY-MM con fallback robusto */
+function toMonthKey(date: string | undefined): string | undefined {
+  if (!date) return undefined;
+  const s = String(date).trim();
+  if (/^\d{4}-\d{2}-\d{2}$/.test(s)) return s.slice(0, 7);
+  if (/^\d{4}-\d{2}$/.test(s)) return s;
+  const t = new Date(s);
+  if (Number.isFinite(t.getTime())) return t.toISOString().slice(0, 7);
+  return undefined;
+}
+
+/** Construye todos los Ã­ndices por columna */
+export function buildIndexes(rows: NormalizedCampaignRow[]): CampaignIndexes {
+  const byPartner: ColumnIndex = new Map();
+  const byTheme: ColumnIndex = new Map();
+  const byDatabase: ColumnIndex = new Map();
+  const byType: ColumnIndex = new Map();
+  const byGeo: ColumnIndex = new Map();
+  const byDbType: ColumnIndex = new Map();
+  const byInvoiceOffice: ColumnIndex = new Map();
+  const byMonth: ColumnIndex = new Map();
+
+  rows.forEach((row, i) => {
+    // leemos normalizados si existen, si no normalizamos on the fly
+    const partner = (row as any).nPartner ?? row.partner;
+    const theme = (row as any).nTheme ?? row.theme;
+    const database = (row as any).nDatabase ?? row.database;
+    const type = (row as any).nType ?? row.type;
+    const geo = (row as any).nGeo ?? row.geo;
+    const dbType = (row as any).nDbType ?? row.databaseType;
+    const invoiceOffice = (row as any).nInvoiceOffice ?? row.invoiceOffice;
+    const month = (row as any).monthKey ?? toMonthKey(row.date);
+
+    addToIndex(byPartner, partner, i);
+    addToIndex(byTheme, theme, i);
+    addToIndex(byDatabase, database, i);
+    addToIndex(byType, type, i);
+    addToIndex(byGeo, geo, i);
+    addToIndex(byDbType, dbType, i);
+    addToIndex(byInvoiceOffice, invoiceOffice, i);
+    addToIndex(byMonth, month, i);
+  });
+
+  return {
+    byPartner,
+    byTheme,
+    byDatabase,
+    byType,
+    byGeo,
+    byDbType,
+    byInvoiceOffice,
+    byMonth,
+  };
+}
+
+/* =========================
+   Set operations helpers
+   ========================= */
+
+/** IntersecciÃ³n de varios sets (optimizada por tamaÃ±o) */
+export function intersectSets(sets: Array<Set<number> | undefined | null>): Set<number> {
+  const filtered = sets.filter((s): s is Set<number> => !!s && s.size > 0);
+  if (filtered.length === 0) return new Set<number>(); // sin restricciÃ³n -> vacÃ­o (Ãºtil para early-bail callers)
+  // ordena por tamaÃ±o asc para menos iteraciones
+  filtered.sort((a, b) => a.size - b.size);
+  const [first, ...rest] = filtered;
+  const out = new Set<number>();
+  main: for (const v of first) {
+    for (const s of rest) {
+      if (!s.has(v)) continue main;
+    }
+    out.add(v);
+  }
+  return out;
+}
+
+/** UniÃ³n de varios sets */
+export function unionSets(sets: Array<Set<number> | undefined | null>): Set<number> {
+  const out = new Set<number>();
+  for (const s of sets) {
+    if (!s) continue;
+    for (const v of s) out.add(v);
+  }
+  return out;
+}
+
+/** Convierte selecciÃ³n mÃºltiple en un set de Ã­ndices (OR dentro de la dimensiÃ³n) */
+export function setForSelection(index: ColumnIndex, selected: string[] | undefined | null): Set<number> | null {
+  const arr = (selected || []).map(normalizeString).filter(Boolean);
+  if (arr.length === 0) return null; // sin restricciÃ³n
+  const sets: Array<Set<number>> = [];
+  for (const v of arr) {
+    const s = index.get(v);
+    if (s && s.size) sets.push(s);
+  }
+  return sets.length ? unionSets(sets) : new Set<number>(); // selecciÃ³n sin matches -> vacÃ­o
+}
+
+/** Filtra filas por un set de Ã­ndices conservando el orden de entrada */
+export function filterByIndexSet<T>(rows: T[], idxSet: Set<number>): T[] {
+  if (!idxSet.size) return [];
+  const out: T[] = [];
+  for (let i = 0; i < rows.length; i++) {
+    if (idxSet.has(i)) out.push(rows[i]);
+  }
+  return out;
+}
+
+===== C:\Users\Usuario\Documents\GitHub\mi-app-monet\lib\roles.ts =====
+import { Role } from '@/types/auth';
+
+export const isAdmin = (r?: Role | null) => r === 'admin';
+export const isEditor = (r?: Role | null) => r === 'editor' || r === 'admin';
+
+===== C:\Users\Usuario\Documents\GitHub\mi-app-monet\lib\strings.ts =====
+// lib/strings.ts
+'use client';
+
+/**
+ * Quita acentos/diacrÃ­ticos usando NFKD.
+ */
+export function stripDiacritics(input: string): string {
+  return (input ?? '')
+    .normalize('NFKD')
+    .replace(/[\u0300-\u036f]/g, '');
+}
+
+/**
+ * NormalizaciÃ³n base: trim + lowercase + sin diacrÃ­ticos + colapsa espacios.
+ * Ãštil para: claves de Ã­ndice, comparaciones de igualdad, etc.
+ */
+export function normalizeStr(input?: string | null): string {
+  const s = String(input ?? '')
+    .trim();
+  if (!s) return '';
+  return stripDiacritics(s)
+    .toLowerCase()
+    .replace(/\s+/g, ' ');
+}
+
+/**
+ * Alias para compatibilidad: varios mÃ³dulos importan `normalizeString`.
+ * MantÃ©n el mismo comportamiento que `normalizeStr`.
+ */
+export const normalizeString = normalizeStr;
+
+/**
+ * NormalizaciÃ³n agresiva para bÃºsqueda libre:
+ * - minÃºsculas, sin diacrÃ­ticos
+ * - reemplaza puntuaciÃ³n por espacios
+ * - colapsa espacios
+ */
+export function normalizeForSearch(input?: string | null): string {
+  const s = String(input ?? '').trim();
+  if (!s) return '';
+  return stripDiacritics(s)
+    .toLowerCase()
+    // sustituye todo lo no alfanumÃ©rico por espacio
+    .replace(/[^a-z0-9]+/gi, ' ')
+    .replace(/\s+/g, ' ')
+    .trim();
+}
+
+/**
+ * YYYY-MM a partir de un ISO date (YYYY-MM-DD). Si no viene bien, devuelve ''.
+ */
+export function toMonthKey(dateISO?: string | null): string {
+  const d = String(dateISO ?? '');
+  if (d.length >= 7) return d.slice(0, 7);
+  return '';
+}
+
+===== C:\Users\Usuario\Documents\GitHub\mi-app-monet\lib\auth\server.ts =====
+import { cookies } from 'next/headers';
+import { createServerComponentClient } from '@supabase/auth-helpers-nextjs';
+
+type AppUserRow = { role: 'admin' | 'editor'; is_active: boolean } | null;
+
+export async function getSessionAndAppUser() {
+  const supabase = createServerComponentClient({ cookies });
+  const { data: { session } } = await supabase.auth.getSession();
+
+  if (!session) return { session: null, appUser: null as AppUserRow };
+
+  const { data, error } = await supabase
+    .from('app_users')
+    .select('role,is_active')
+    .eq('user_id', session.user.id)
+    .single();
+
+  // Si no hay fila en app_users, consideramos null (caerÃ¡ en DEFAULT_ROLE en el cliente)
+  const appUser: AppUserRow = error ? null : (data ?? null);
+
+  return { session, appUser };
+}
+
+===== C:\Users\Usuario\Documents\GitHub\mi-app-monet\lib\supabase\admin.ts =====
+import { createClient, SupabaseClient } from '@supabase/supabase-js';
+
+/**
+ * Cliente con Service Role para uso EXCLUSIVO en servidor
+ * (route handlers / server actions). NO importar desde componentes cliente.
+ */
+let _admin: SupabaseClient | null = null;
+
+export function supabaseAdmin(): SupabaseClient {
+  if (_admin) return _admin;
+
+  const url = process.env.NEXT_PUBLIC_SUPABASE_URL;
+  const serviceKey = process.env.SUPABASE_SERVICE_ROLE_KEY;
+
+  if (!url || !serviceKey) {
+    throw new Error('Faltan variables de entorno de Supabase (URL o SERVICE_ROLE_KEY).');
+  }
+
+  _admin = createClient(url, serviceKey, {
+    auth: { persistSession: false, autoRefreshToken: false },
+  });
+  return _admin;
+}
+
+===== C:\Users\Usuario\Documents\GitHub\mi-app-monet\lib\supabase\client.ts =====
+// lib/supabase/client.ts
+import { createClient, type SupabaseClient } from '@supabase/supabase-js';
+
+/**
+ * Singleton del cliente de Supabase para el NAVEGADOR.
+ * Lo creamos una vez y lo reutilizamos en todo el cliente.
+ */
+let _client: SupabaseClient | null = null;
+
+export function supabaseBrowser(): SupabaseClient {
+  if (_client) return _client;
+  const url = process.env.NEXT_PUBLIC_SUPABASE_URL!;
+  const anon = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!;
+  _client = createClient(url, anon, {
+    auth: {
+      persistSession: true,
+      detectSessionInUrl: true,
+    },
+  });
+  return _client;
+}
+
+===== C:\Users\Usuario\Documents\GitHub\mi-app-monet\lib\supabase\server.ts =====
+import { cookies } from 'next/headers';
+import { createServerComponentClient } from '@supabase/auth-helpers-nextjs';
+
+export function createServerSupabase() {
+  return createServerComponentClient({ cookies });
+}
+

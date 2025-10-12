@@ -1,0 +1,56 @@
+﻿===== C:\Users\Usuario\Documents\GitHub\mi-app-monet\styles\tw.input.css =====
+/* @config "../tailwind.config.ts" */
+@import "tailwindcss";
+
+/* Solo tipografía base; nada de colores globales aquí */
+@layer base {
+  body {
+    font-family: "Inter", ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+  }
+}
+
+/* ---- Date inputs: wrapper con botón + ocultar icono nativo ---- */
+@layer components {
+  .date-wrap {
+    position: relative;
+    display: inline-flex;
+    align-items: center;
+  }
+
+  .date-wrap > input[type="date"] {
+    /* espacio para el botón del calendario */
+    padding-right: 2.25rem;
+    /* tema claro: evita el contraste duro del picker nativo oscuro */
+    color-scheme: light;
+  }
+
+  /* Oculta el icono nativo SOLO cuando usamos .date-wrap */
+  .date-wrap > input[type="date"]::-webkit-calendar-picker-indicator {
+    opacity: 0 !important;
+  }
+
+  .date-btn {
+    position: absolute;
+    right: 0.5rem;
+    top: 50%;
+    transform: translateY(-50%);
+    width: 1.25rem;
+    height: 1.25rem;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    border: 0;
+    background: transparent;
+    /* usa el token del tema en lugar de un hex duro */
+    color: var(--color-text);
+    opacity: 0.6;
+    cursor: pointer;
+    border-radius: 0.375rem; /* ~rounded-md */
+  }
+  .date-btn:hover { opacity: 0.85; }
+  .date-btn:focus-visible {
+    outline: 2px solid color-mix(in oklab, var(--color-primary) 55%, transparent);
+    outline-offset: 2px;
+  }
+}
+

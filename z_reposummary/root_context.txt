@@ -1,0 +1,1356 @@
+﻿===== C:\Users\Usuario\Documents\GitHub\mi-app-monet\context\AuthContext.tsx =====
+'use client';
+
+import {
+  createContext,
+  useCallback,
+  useContext,
+  useEffect,
+  useMemo,
+  useState,
+} from 'react';
+import { createClientComponentClient } from '@supabase/auth-helpers-nextjs';
+import type { SupabaseClient } from '@supabase/supabase-js';
+
+import type { SessionUser, Role } from '@/types/auth';
+import { DEFAULT_ROLE } from '@/types/auth';
+import { isAdmin, isEditor } from '@/lib/roles';
+
+type AuthCtx = {
+  user: SessionUser | null;
+  loading: boolean;
+  signIn: (
+    email: string,
+    password: string
+  ) => Promise<{ ok: true } | { ok: false; message: string }>;
+  signOut: () => Promise<void>;
+  role: Role | null;
+  isAdmin: boolean;
+  isEditor: boolean;
+};
+
+const AuthContext = createContext<AuthCtx | null>(null);
+
+/** Lee el rol desde la tabla app_users (por user_id).
+ *  Si no hay fila, si estÃ¡ inactivo o hay error -> DEFAULT_ROLE.
+ */
+async function fetchRole(sb: SupabaseClient, userId: string): Promise<Role> {
+  const { data, error } = await sb
+    .from('app_users')
+    .select('role, is_active')
+    .eq('user_id', userId)
+    .single();
+
+  if (error || !data?.role || data.is_active === false) return DEFAULT_ROLE;
+
+  const r = String(data.role).toLowerCase();
+  return (r === 'admin' ? 'admin' : 'editor') as Role;
+}
+
+export function AuthProvider({ children }: { children: React.ReactNode }) {
+  const [user, setUser] = useState<SessionUser | null>(null);
+  const [role, setRole] = useState<Role | null>(null);
+  const [loading, setLoading] = useState(true);
+
+  // Cliente Ãºnico y estable para todo el provider
+  const supabase = useMemo(() => createClientComponentClient(), []);
+
+  // Carga inicial de sesiÃ³n + rol y suscripciÃ³n a cambios
+  useEffect(() => {
+    let mounted = true;
+
+    (async () => {
+      const { data: authData } = await supabase.auth.getUser();
+      const authUser = authData.user;
+      if (!mounted) return;
+
+      if (authUser) {
+        const r = await fetchRole(supabase, authUser.id).catch(() => DEFAULT_ROLE);
+        if (!mounted) return;
+        setUser({ id: authUser.id, email: authUser.email, role: r });
+        setRole(r);
+      } else {
+        setUser(null);
+        setRole(null);
+      }
+      setLoading(false);
+    })();
+
+    const { data: sub } = supabase.auth.onAuthStateChange(async (_event, session) => {
+      if (!mounted) return;
+      const authUser = session?.user ?? null;
+      if (authUser) {
+        const r = await fetchRole(supabase, authUser.id).catch(() => DEFAULT_ROLE);
+        setUser({ id: authUser.id, email: authUser.email, role: r });
+        setRole(r);
+      } else {
+        setUser(null);
+        setRole(null);
+      }
+    });
+
+    return () => {
+      mounted = false;
+      sub.subscription.unsubscribe();
+    };
+  }, [supabase]);
+
+  const signIn = useCallback(
+    async (email: string, password: string) => {
+      const { error } = await supabase.auth.signInWithPassword({ email, password });
+      if (error) {
+        return { ok: false as const, message: error.message || 'No se pudo iniciar sesiÃ³n' };
+      }
+      return { ok: true as const };
+    },
+    [supabase]
+  );
+
+  const signOut = useCallback(async () => {
+    await supabase.auth.signOut();
+  }, [supabase]);
+
+  const value = useMemo<AuthCtx>(
+    () => ({
+      user,
+      role,
+      loading,
+      signIn,
+      signOut,
+      isAdmin: isAdmin(role),
+      isEditor: isEditor(role),
+    }),
+    [user, role, loading, signIn, signOut]
+  );
+
+  return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>;
+}
+
+export function useAuth() {
+  const ctx = useContext(AuthContext);
+  if (!ctx) throw new Error('useAuth must be used within AuthProvider');
+  return ctx;
+}
+
+===== C:\Users\Usuario\Documents\GitHub\mi-app-monet\context\CampaignDataContext.tsx =====
+'use client';
+
+import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState } from 'react';
+import { CampaignRow } from '@/types/campaign';
+import { autoFromCampaign, autoFromDatabase, autoInvoiceOffice, calcDerived } from '@/lib/campaign-calcs';
+import { useAuth } from '@/context/AuthContext'; // ðŸ†• soft guard por rol
+
+/* ================================
+   Tipado del contexto (ampliado)
+   ================================ */
+type BulkResult = { added: number; updated: number; skipped: number; total: number };
+type UpsertKey = 'id' | 'composite';
+type OnConflict = 'update' | 'skip';
+
+type ImportCsvOptions = {
+  delimiter?: string;
+  headerMap?: Partial<Record<string, keyof CampaignRow>>;
+  upsertBy?: UpsertKey;
+  onConflict?: OnConflict;
+};
+
+type ImportCsvReport = BulkResult & {
+  errors: { line: number; reason: string }[];
+  columns: string[];
+};
+
+type Ctx = {
+  rows: (CampaignRow & { _idx: number })[];
+  addCampaign: (r: Omit<CampaignRow, 'id'> & { id?: string }) => void;
+  updateCampaign: (id: string, patch: Partial<CampaignRow>) => void;
+  removeCampaign: (id: string) => void;
+  resetToMock: () => void;
+  addManyCampaigns: (
+    list: (Omit<CampaignRow, 'id'> & { id?: string })[],
+    opts?: { upsertBy?: UpsertKey; onConflict?: OnConflict }
+  ) => BulkResult;
+  importFromCsv: (csvText: string, opts?: ImportCsvOptions) => ImportCsvReport;
+};
+
+const CampaignDataContext = createContext<Ctx | null>(null);
+
+const STORAGE_KEY = 'monet_campaigns_v1';
+
+/* ====================
+   Datos mock iniciales
+   ==================== */
+const MOCK_DATA: (CampaignRow & { _idx: number })[] = [
+  { _idx: 0, id: '1', date: '2025-07-01', campaign: 'Helvetia', advertiser: 'Helvetia', invoiceOffice: 'DAT', partner: 'Startend Marketing', theme: 'Insurance', price: 11, priceCurrency: 'EUR', type: 'CPL', vSent: 493987, routingCosts: 123.5, qty: 8, turnover: 88.0, margin: -35.5, ecpm: 0.18, database: 'Tu Opinion', geo: 'ES', databaseType: 'B2C' },
+  { _idx: 1, id: '2', date: '2025-07-01', campaign: 'Allianz sante', advertiser: 'Allianz', invoiceOffice: 'CAR', partner: 'Oceads', theme: 'Insurance', price: 10, priceCurrency: 'EUR', type: 'CPL', vSent: 383443, routingCosts: 95.86, qty: 7, turnover: 70.0, margin: -25.86, ecpm: 0.18, database: 'The coupon party', geo: 'FR', databaseType: 'B2C' },
+  { _idx: 2, id: '3', date: '2025-07-01', campaign: 'North Fox Property Axiom', advertiser: 'North Fox Property', invoiceOffice: 'DAT', partner: 'Loud Europe', theme: 'Services', price: 16, priceCurrency: 'EUR', type: 'CPL', vSent: 246423, routingCosts: 61.61, qty: 3, turnover: 48.0, margin: -13.61, ecpm: 0.19, database: 'Brit Consumer Net', geo: 'UK', databaseType: 'B2C' },
+  { _idx: 3, id: '4', date: '2025-07-02', campaign: 'Melia Hotels CPM - ES', advertiser: 'Melia Hotels', invoiceOffice: 'DAT', partner: 'Feebbo', theme: 'Travel & Tourism', price: 2, priceCurrency: 'EUR', type: 'CPM', vSent: 156563, routingCosts: 39.14, qty: 100, turnover: 200.0, margin: 160.86, ecpm: 1.28, database: 'Tu Opinion', geo: 'ES', databaseType: 'B2B' },
+];
+
+/* ==========================
+   Helpers (reglas & parsing)
+   ========================== */
+function applyBusinessRules(row: CampaignRow): CampaignRow {
+  const { advertiser } = autoFromCampaign(row.campaign);
+  const dbAuto = autoFromDatabase(row.database);
+  const geo = dbAuto.geo || row.geo || '';
+  const databaseType = (dbAuto.dbType as CampaignRow['databaseType']) || row.databaseType;
+  const invoiceOffice = autoInvoiceOffice(geo, row.partner);
+  const d = calcDerived({ price: row.price, qty: row.qty, vSent: row.vSent });
+
+  return {
+    ...row,
+    advertiser,
+    geo,
+    databaseType,
+    invoiceOffice,
+    routingCosts: d.routingCosts,
+    turnover: d.turnover,
+    margin: d.margin,
+    ecpm: d.ecpm,
+  };
+}
+
+function compositeKey(r: Pick<CampaignRow, 'date' | 'campaign' | 'partner' | 'database'>) {
+  return [r.date, r.campaign, r.partner, r.database].map(s => (s ?? '').trim().toLowerCase()).join('|');
+}
+
+function parseNumberLoose(v: any): number {
+  if (v == null || v === '') return 0;
+  if (typeof v === 'number') return Number.isFinite(v) ? v : 0;
+  let s = String(v).trim();
+  if (!s) return 0;
+  const hasComma = s.includes(',');
+  const hasDot = s.includes('.');
+  if (hasComma && hasDot) {
+    if (s.lastIndexOf(',') > s.lastIndexOf('.')) s = s.replace(/\./g, '').replace(',', '.');
+    else s = s.replace(/,/g, '');
+  } else if (hasComma) {
+    s = s.replace(',', '.');
+  }
+  const n = Number(s);
+  return Number.isFinite(n) ? n : 0;
+}
+
+function parseCsv(text: string, delimiter?: string): { header: string[]; rows: string[][] } {
+  const firstLine = (text.split(/\r?\n/, 1)[0] ?? '');
+  const guess = delimiter || (firstLine.split(';').length > firstLine.split(',').length ? ';' : ',');
+  const d = guess;
+
+  const out: string[][] = [];
+  let row: string[] = [];
+  let cell = '';
+  let inQuotes = false;
+
+  const pushCell = () => { row.push(cell); cell = ''; };
+  const pushRow = () => { if (row.length === 1 && row[0] === '') { row = []; return; } out.push(row); row = []; };
+
+  const len = text.length;
+  for (let i = 0; i < len; i++) {
+    const ch = text[i];
+    if (inQuotes) {
+      if (ch === '"') {
+        if (text[i + 1] === '"') { cell += '"'; i++; }
+        else { inQuotes = false; }
+      } else {
+        cell += ch;
+      }
+    } else {
+      if (ch === '"') { inQuotes = true; }
+      else if (ch === d) { pushCell(); }
+      else if (ch === '\n') { pushCell(); pushRow(); }
+      else if (ch === '\r') { }
+      else { cell += ch; }
+    }
+  }
+  pushCell();
+  if (row.length) pushRow();
+
+  if (!out.length) return { header: [], rows: [] };
+  const header = (out.shift() || []).map(h => h.trim());
+  return { header, rows: out };
+}
+
+const REQUIRED_MIN: (keyof CampaignRow)[] = [
+  'date', 'campaign', 'partner', 'database', 'type',
+  'price', 'qty', 'vSent',
+];
+
+/* =========================
+   Provider con nuevas APIs
+   ========================= */
+export function CampaignDataProvider({ children }: { children: React.ReactNode }) {
+  // ðŸ†• lÃ­mites suaves para no-admin
+  const { isAdmin } = useAuth();
+  const NON_ADMIN_BULK_LIMIT = 500; // nÃºmero mÃ¡ximo de filas por operaciÃ³n para no-admin
+
+  // 1) Arrancamos vacÃ­o; hidrataremos en efecto (evita escribir MOCK en LS)
+  const [rows, setRows] = useState<(CampaignRow & { _idx: number })[]>([]);
+  const idxRef = useRef(0);
+
+  // Guardas para StrictMode y para bloquear la primera escritura
+  const didInitRef = useRef(false);     // evita doble hidratar en StrictMode
+  const hydratedRef = useRef(false);    // hasta que no sea true, no persistimos
+
+  // 2) Hidratar una Ãºnica vez desde LS; si no hay datos, caer a MOCK
+  useEffect(() => {
+    if (didInitRef.current) return;
+    didInitRef.current = true;
+
+    try {
+      const raw = localStorage.getItem(STORAGE_KEY);
+      let seed: CampaignRow[] | null = null;
+
+      if (raw) {
+        const parsed = JSON.parse(raw);
+        if (Array.isArray(parsed) && parsed.length > 0) seed = parsed as CampaignRow[];
+      }
+
+      // Si no hay datos en LS, usa mock (quitando _idx del mock)
+      const base = seed ?? MOCK_DATA.map(({ _idx, ...r }) => r);
+
+      const withIdx = base.map((r, i) => ({ ...applyBusinessRules(r), _idx: i }));
+      idxRef.current = withIdx.length;
+      setRows(withIdx);
+    } catch {
+      // fallback total si algo falla
+      idxRef.current = MOCK_DATA.length;
+      setRows(MOCK_DATA);
+    } finally {
+      hydratedRef.current = true;
+    }
+  }, []);
+
+  // 3) Persistir SOLO despuÃ©s de hidratar (evita pisar datos con MOCK)
+  useEffect(() => {
+    if (!hydratedRef.current) return;
+    const plain: CampaignRow[] = rows.map(({ _idx, ...r }) => r);
+    try { localStorage.setItem(STORAGE_KEY, JSON.stringify(plain)); } catch {}
+  }, [rows]);
+
+  const addCampaign = useCallback((input: Omit<CampaignRow, 'id'> & { id?: string }) => {
+    const id = input.id ?? (globalThis.crypto?.randomUUID ? crypto.randomUUID() : Math.random().toString(36).slice(2));
+    const row: CampaignRow & { _idx: number } = { ...applyBusinessRules({ ...input, id } as CampaignRow), _idx: idxRef.current++ };
+    setRows(prev => [row, ...prev]);
+  }, []);
+
+  const updateCampaign = useCallback((id: string, patch: Partial<CampaignRow>) => {
+    setRows(prev => prev.map(r => {
+      if (r.id !== id) return r;
+      const merged: CampaignRow = { ...r, ...patch };
+      const finalRow = applyBusinessRules(merged);
+      return { ...finalRow, _idx: r._idx };
+    }));
+  }, []);
+
+  const removeCampaign = useCallback((id: string) => {
+    setRows(prev => prev.filter(r => r.id !== id));
+  }, []);
+
+  const resetToMock = useCallback(() => {
+    idxRef.current = MOCK_DATA.length;
+    setRows(MOCK_DATA);
+  }, []);
+
+  // ============ InserciÃ³n masiva / upsert ============
+  const addManyCampaigns = useCallback((
+    list: (Omit<CampaignRow, 'id'> & { id?: string })[],
+    opts?: { upsertBy?: UpsertKey; onConflict?: OnConflict }
+  ): BulkResult => {
+    // ðŸ†• guard suave para no-admin:
+    // - limita tamaÃ±o de lote
+    // - fuerza onConflict = 'skip' para evitar overwrites
+    const hardTotal = list.length;
+    const effectiveList = isAdmin ? list : list.slice(0, NON_ADMIN_BULK_LIMIT);
+    const trimmedOut = hardTotal - effectiveList.length;
+
+    const upsertBy = opts?.upsertBy ?? 'composite';
+    const onConflictEffective: OnConflict = isAdmin ? (opts?.onConflict ?? 'update') : 'skip';
+
+    let added = 0, updated = 0, skipped = 0;
+
+    setRows(prev => {
+      let next = [...prev];
+
+      for (const input of effectiveList) {
+        const id =
+          input.id ??
+          (globalThis.crypto?.randomUUID
+            ? crypto.randomUUID()
+            : Math.random().toString(36).slice(2));
+
+        const prepared = applyBusinessRules({ ...(input as any), id } as CampaignRow);
+
+        // Recalcular mapas sobre `next` en cada iteraciÃ³n
+        const byId = new Map<string, number>();
+        const byComposite = new Map<string, number>();
+        for (let i = 0; i < next.length; i++) {
+          const r = next[i];
+          byId.set(r.id, i);
+          byComposite.set(compositeKey(r), i);
+        }
+
+        let targetIndex: number | undefined = undefined;
+        if (upsertBy === 'id' && id) {
+          const idx = byId.get(id);
+          if (idx != null) targetIndex = idx;
+        } else {
+          const key = compositeKey(prepared);
+          const idx = byComposite.get(key);
+          if (idx != null) targetIndex = idx;
+        }
+
+        if (targetIndex == null) {
+          // Alta nueva al principio
+          const rowWithIdx = { ...prepared, _idx: idxRef.current++ };
+          next = [rowWithIdx, ...next];
+          added++;
+        } else {
+          if (onConflictEffective === 'skip') {
+            skipped++;
+          } else {
+            // Update in-place preservando _idx
+            const prevRow = next[targetIndex];
+            const preservedIdx =
+              (prevRow as (CampaignRow & { _idx: number }) | undefined)?._idx ?? idxRef.current++;
+            next[targetIndex] = { ...prepared, _idx: preservedIdx };
+            updated++;
+          }
+        }
+      }
+
+      return next;
+    });
+
+    // lo recortado por el guard cuenta como skipped
+    skipped += trimmedOut;
+
+    return { added, updated, skipped, total: hardTotal };
+  }, [isAdmin]);
+
+  const importFromCsv = useCallback((csvText: string, opts?: ImportCsvOptions): ImportCsvReport => {
+    const parsed = parseCsv(csvText, opts?.delimiter);
+    const headerRaw = parsed.header;
+    const rowsRaw = parsed.rows;
+    const normalize = (s: string) => s.trim().toLowerCase();
+    const columns = headerRaw;
+    const headerMap = new Map<string, keyof CampaignRow>();
+
+    if (opts?.headerMap) {
+      for (const [k, v] of Object.entries(opts.headerMap)) {
+        headerMap.set(normalize(k), v);
+      }
+    }
+
+    const possibleFields: (keyof CampaignRow)[] = [
+      'id','date','campaign','advertiser','invoiceOffice','partner','theme','price','priceCurrency','type','vSent','routingCosts','qty','turnover','margin','ecpm','database','geo','databaseType',
+    ];
+    headerRaw.forEach(h => {
+      const n = normalize(h);
+      if (!headerMap.has(n)) {
+        const direct = possibleFields.find(f => normalize(String(f)) === n);
+        if (direct) headerMap.set(n, direct);
+      }
+    });
+
+    const failures: { line: number; reason: string }[] = [];
+    const batch: (Omit<CampaignRow, 'id'> & { id?: string })[] = [];
+
+    rowsRaw.forEach((cells, rowIdx) => {
+      const lineNo = rowIdx + 2;
+      const obj: any = {};
+      headerRaw.forEach((h, i) => {
+        const mapped = headerMap.get(normalize(h));
+        if (!mapped) return;
+        obj[mapped] = cells[i];
+      });
+
+      obj.price = parseNumberLoose(obj.price);
+      obj.qty = Math.round(parseNumberLoose(obj.qty));
+      obj.vSent = Math.round(parseNumberLoose(obj.vSent));
+      if (!obj.priceCurrency) obj.priceCurrency = 'EUR';
+      if (!obj.type) obj.type = 'CPL';
+
+      const missing = REQUIRED_MIN.filter(k => !String(obj[k] ?? '').trim());
+      if (missing.length) {
+        failures.push({ line: lineNo, reason: `Missing required: ${missing.join(', ')}` });
+        return;
+      }
+
+      batch.push({
+        id: obj.id || undefined,
+        date: String(obj.date),
+        campaign: String(obj.campaign),
+        advertiser: String(obj.advertiser || ''),
+        invoiceOffice: String(obj.invoiceOffice || 'DAT'),
+        partner: String(obj.partner),
+        theme: String(obj.theme || ''),
+        price: Number(obj.price || 0),
+        priceCurrency: String(obj.priceCurrency || 'EUR'),
+        type: String(obj.type),
+        vSent: Number(obj.vSent || 0),
+        routingCosts: 0,
+        qty: Number(obj.qty || 0),
+        turnover: 0,
+        margin: 0,
+        ecpm: 0,
+        database: String(obj.database),
+        geo: String(obj.geo || ''),
+        databaseType: String(obj.databaseType || ''),
+      });
+    });
+
+    // ðŸ†• aplica guard suave tambiÃ©n en CSV: no-admin => conflictos a 'skip'
+    const bulk = addManyCampaigns(batch, {
+      upsertBy: opts?.upsertBy ?? 'composite',
+      onConflict: isAdmin ? (opts?.onConflict ?? 'update') : 'skip',
+    });
+
+    return {
+      ...bulk,
+      errors: failures,
+      columns,
+    };
+  }, [addManyCampaigns, isAdmin]);
+
+  const value = useMemo<Ctx>(
+    () => ({
+      rows,
+      addCampaign,
+      updateCampaign,
+      removeCampaign,
+      resetToMock,
+      addManyCampaigns,
+      importFromCsv,
+    }),
+    [rows, addCampaign, updateCampaign, removeCampaign, resetToMock, addManyCampaigns, importFromCsv]
+  );
+
+  return <CampaignDataContext.Provider value={value}>{children}</CampaignDataContext.Provider>;
+}
+
+export function useCampaignData() {
+  const ctx = useContext(CampaignDataContext);
+  if (!ctx) throw new Error('useCampaignData must be used within CampaignDataProvider');
+  return ctx;
+}
+
+===== C:\Users\Usuario\Documents\GitHub\mi-app-monet\context\CatalogOverridesContext.tsx =====
+'use client';
+
+import React, {
+  createContext,
+  useCallback,
+  useContext,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+} from 'react';
+
+import {
+  CAMPAIGNS as BASE_CAMPAIGNS,
+  PARTNERS as BASE_PARTNERS,
+  DATABASES as BASE_DATABASES,
+  THEMES as BASE_THEMES,
+  TYPES as BASE_TYPES,
+  INVOICE_RULES,
+} from '@/data/reference';
+import type {
+  CampaignRef,
+  PartnerRef,
+  DatabaseRef,
+  DBType,
+  InvoiceOffice,
+  InvoiceRule,
+} from '@/data/reference';
+
+import { createClientComponentClient } from '@supabase/auth-helpers-nextjs';
+import { useAuth } from '@/context/AuthContext';
+
+const STORAGE_KEY = 'monet_catalog_overrides_v1';
+
+/* ============================== NormalizaciÃ³n ============================== */
+type CampaignIn = { name: string; advertiser?: string };
+type PartnerIn  = { name: string; invoiceOffice: string };
+type DatabaseIn = { id?: string; name: string; geo: string; dbType: DBType };
+
+type OverridesShape = {
+  campaigns?: CampaignIn[];
+  partners?: PartnerIn[];
+  databases?: DatabaseIn[];
+  themes?: string[] | { label: string }[];
+  types?: string[];
+};
+
+function trimCollapse(s: string) {
+  return (s ?? '').trim().replace(/\s+/g, ' ');
+}
+function norm(s?: string) {
+  return (s ?? '').trim().toLowerCase();
+}
+function toSlug(s?: string) {
+  const x = (s ?? '')
+    .normalize('NFKD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, '-')
+    .replace(/^-+|-+$/g, '')
+    .slice(0, 60);
+  return x || 'item';
+}
+function mapInvoiceOffice(s: string): { office: InvoiceOffice; isInternal?: boolean } {
+  const v = norm(s);
+  if (v === 'car') return { office: 'CAR' };
+  if (v === 'dat') return { office: 'DAT' };
+  if (v === 'internal' || v === 'int') return { office: 'INT', isInternal: true };
+  return { office: 'DAT' };
+}
+
+/** ===== GEO estricto: ISO-3166-1 alpha-2 + MULTI, con alias UKâ†’GB ===== */
+function isIsoCountry(code: string): boolean {
+  const c = (code || '').toUpperCase();
+  if (!/^[A-Z]{2}$/.test(c)) return false;
+  try {
+    const dn = new (Intl as any).DisplayNames(['en'], { type: 'region' });
+    const name = dn?.of?.(c);
+    return typeof name === 'string' && name && name !== c;
+  } catch {
+    return false;
+  }
+}
+function normalizeGeoStrict(raw?: string): string | null {
+  const g = trimCollapse(raw || '').toUpperCase();
+  if (!g) return null;
+  if (g === 'MULTI') return 'MULTI';
+  const mapped = g === 'UK' ? 'GB' : g;
+  return isIsoCountry(mapped) ? mapped : null;
+}
+
+function normalizeOverrides(raw: any): OverridesShape {
+  const out: OverridesShape = {};
+  if (Array.isArray(raw?.campaigns)) {
+    out.campaigns = raw.campaigns
+      .map((c: any) => ({
+        name: trimCollapse(c?.name || ''),
+        advertiser: trimCollapse(c?.advertiser || 'White Label'),
+      }))
+      .filter((c: any) => !!c.name);
+  }
+  if (Array.isArray(raw?.partners)) {
+    out.partners = raw.partners
+      .map((p: any) => ({
+        name: trimCollapse(p?.name || ''),
+        invoiceOffice: (p?.invoiceOffice || 'DAT') as string,
+      }))
+      .filter((p: any) => !!p.name);
+  }
+  if (Array.isArray(raw?.databases)) {
+    out.databases = raw.databases
+      .map((d: any) => {
+        const name = trimCollapse(d?.name || '');
+        const geoNorm = normalizeGeoStrict(d?.geo);
+        return {
+          id: trimCollapse(d?.id || ''),
+          name,
+          geo: geoNorm ?? '',
+          dbType: (d?.dbType || 'B2C') as DBType,
+        };
+      })
+      .filter((d: any) => !!d.name && !!normalizeGeoStrict(d.geo));
+  }
+  if (Array.isArray(raw?.themes)) {
+    out.themes = raw.themes
+      .map((t: any) => (typeof t === 'string' ? trimCollapse(t) : trimCollapse(t?.label || '')))
+      .filter((t: string) => !!t);
+  }
+  if (Array.isArray(raw?.types)) {
+    out.types = raw.types
+      .map((t: any) => trimCollapse(String(t || '')).toUpperCase())
+      .filter((t: string) => !!t);
+  }
+  return out;
+}
+
+/* ============================== Merge helpers ============================== */
+function mergeCampaigns(base: CampaignRef[], adds: CampaignIn[] = []): CampaignRef[] {
+  const out = [...base.map((c) => ({ ...c }))];
+  const usedIds = new Set(out.map((c) => c.id));
+  const seenNames = new Set(out.map((c) => norm(c.name)));
+
+  for (const r of adds) {
+    const name = trimCollapse(r.name);
+    if (!name) continue;
+    const key = norm(name);
+    if (seenNames.has(key)) continue;
+    seenNames.add(key);
+
+    const advertiser = trimCollapse(r.advertiser || 'White Label');
+    let id = toSlug(name);
+    let n = 2;
+    while (usedIds.has(id)) id = `${id}-${n++}`;
+    usedIds.add(id);
+
+    out.push({ id, name, advertiser });
+  }
+  out.sort((a, b) => a.name.localeCompare(b.name, 'es'));
+  return out;
+}
+
+function mergePartners(base: PartnerRef[], adds: PartnerIn[] = []): PartnerRef[] {
+  const out = [...base.map((p) => ({ ...p }))];
+  const usedIds = new Set(out.map((p) => p.id));
+  const seenNames = new Set(out.map((p) => norm(p.name)));
+
+  for (const r of adds) {
+    const name = trimCollapse(r.name);
+    if (!name) continue;
+    const key = norm(name);
+    if (seenNames.has(key)) continue;
+    seenNames.add(key);
+
+    const baseId = toSlug(name);
+    let id = baseId;
+    let n = 2;
+    while (usedIds.has(id)) id = `${baseId}-${n++}`;
+    usedIds.add(id);
+
+    const { office, isInternal } = mapInvoiceOffice(r.invoiceOffice);
+    out.push({
+      id,
+      name,
+      defaultInvoiceOffice: office,
+      ...(isInternal ? { isInternal: true } : {}),
+    });
+  }
+  out.sort((a, b) => a.name.localeCompare(b.name, 'es'));
+  return out;
+}
+
+function mergeDatabases(base: DatabaseRef[], adds: DatabaseIn[] = []): DatabaseRef[] {
+  const out = [...base.map((d) => ({ ...d }))];
+  const usedIds = new Set(out.map((d) => d.id));
+  const seen = new Set(out.map((d) => norm(d.name)));
+
+  for (const r of adds) {
+    const name = trimCollapse(r.name);
+    if (!name) continue;
+    const key = norm(name);
+    if (seen.has(key)) continue;
+
+    const geoStrict = normalizeGeoStrict(r.geo);
+    if (!geoStrict) continue;
+
+    // ID autogenerado (o normalizado si viene)
+    const baseId = toSlug(r.id ? r.id : name);
+    let id = baseId || 'db';
+    let n = 2;
+    while (usedIds.has(id)) id = `${baseId}-${n++}`;
+
+    usedIds.add(id);
+    seen.add(key);
+
+    out.push({
+      id,
+      name,
+      geo: geoStrict,
+      dbType: r.dbType,
+    });
+  }
+  out.sort((a, b) => a.name.localeCompare(b.name, 'es'));
+  return out;
+}
+
+function mergeThemes(base: string[], adds: (string | { label: string })[] = []): string[] {
+  const out = new Set(base);
+  for (const t of adds) {
+    const label = typeof t === 'string' ? t : t?.label;
+    const v = trimCollapse(label || '');
+    if (!v) continue;
+    out.add(v);
+  }
+  const arr = [...out];
+  arr.sort((a, b) => {
+    const ax = a.toLowerCase() === 'unknown';
+    const bx = b.toLowerCase() === 'unknown';
+    if (ax && !bx) return 1;
+    if (!ax && bx) return -1;
+    return a.localeCompare(b, 'es');
+  });
+  return arr;
+}
+
+function mergeTypes(base: readonly string[], adds: string[] = []): string[] {
+  const out = new Set<string>(base);
+  for (const t of adds) {
+    const v = trimCollapse(t).toUpperCase();
+    if (!v) continue;
+    out.add(v);
+  }
+  return [...out].sort();
+}
+
+/* ====== Resolver de invoice office con reglas + partners fusionados ======= */
+function makeResolveInvoiceOffice(rules: InvoiceRule[], partners: PartnerRef[]) {
+  return (geo?: string, partnerNameOrId?: string): InvoiceOffice => {
+    const g = norm(geo);
+    const pRaw = norm(partnerNameOrId);
+
+    const partnerObj =
+      partners.find((pp) => norm(pp.id) === pRaw || norm(pp.name) === pRaw) || null;
+    const p = partnerObj ? norm(partnerObj.name) : pRaw;
+
+    const rulesEff = rules.filter((r) => !!(r.geo || r.partner));
+
+    const exact = rulesEff.find(
+      (r) => r.geo && r.partner && norm(r.geo) === g && norm(r.partner) === p,
+    );
+    if (exact) return exact.invoiceOffice;
+
+    const byPartner = rulesEff.find((r) => r.partner && !r.geo && norm(r.partner) === p);
+    if (byPartner) return byPartner.invoiceOffice;
+
+    if (partnerObj?.defaultInvoiceOffice) return partnerObj.defaultInvoiceOffice;
+
+    const byGeo = rulesEff.find((r) => r.geo && !r.partner && norm(r.geo) === g);
+    if (byGeo) return byGeo.invoiceOffice;
+
+    return 'DAT';
+  };
+}
+
+/* ================================ Contexto ================================= */
+export type CatalogsCtx = {
+  // Colecciones fusionadas (BASE + overrides compartidos)
+  CAMPAIGNS: CampaignRef[];
+  PARTNERS: PartnerRef[];
+  DATABASES: DatabaseRef[];
+  THEMES: string[];
+  TYPES: string[];
+  resolveInvoiceOfficeMerged: (geo?: string, partner?: string) => InvoiceOffice;
+
+  // CRUD (APIs existentes - compat)
+  addCampaignRef: (c: CampaignIn) => void;
+  addPartnerRef:  (p: PartnerIn) => void;
+  addDatabaseRef: (d: DatabaseIn) => void;
+  addTheme: (t: string) => void;
+  addType:  (t: string) => void;
+
+  updateCampaignRef: (name: string, patch: Partial<CampaignIn>) => void;
+  removeCampaignRef: (name: string) => void;
+
+  updatePartnerRef: (name: string, patch: Partial<PartnerIn>) => void;
+  removePartnerRef: (name: string) => void;
+
+  updateDatabaseRef: (name: string, patch: Partial<DatabaseIn>) => void;
+  removeDatabaseRef: (name: string) => void;
+
+  removeTheme: (t: string) => void;
+  removeType:  (t: string) => void;
+
+  // Mantenimiento
+  resetOverrides: () => void;
+  exportOverrides: () => string;
+
+  // Estado
+  hasLocalChanges: boolean;
+
+  // ImportaciÃ³n segura
+  importOverrides: (data: string | OverridesShape) => { ok: true } | { ok: false; reason: string };
+
+  // Info remota
+  syncing: boolean;
+  lastSyncedAt: string | null;
+  canWriteShared: boolean;
+};
+
+const CatalogOverridesContext = createContext<CatalogsCtx | null>(null);
+
+/* ======================= Supabase adapter (tabla Ãºnica) ====================
+
+  Tabla sugerida en Supabase (SQL):
+
+  create table if not exists catalog_overrides (
+    key text primary key,
+    data jsonb not null default '{}',
+    updated_at timestamptz not null default now(),
+    updated_by uuid references auth.users(id)
+  );
+
+  -- Para realtime
+  alter publication supabase_realtime add table catalog_overrides;
+
+  Usamos la fila con key='global'. Puedes cambiarlo a nivel organizaciÃ³n si lo necesitÃ¡is.
+============================================================================= */
+
+const S_TABLE = 'catalog_overrides';
+const S_KEY   = 'global';
+
+export function CatalogOverridesProvider({ children }: { children: React.ReactNode }) {
+  const { user, isAdmin, isEditor } = useAuth();
+  const canWriteShared = Boolean(isAdmin || isEditor);
+
+  const supabase = useMemo(() => createClientComponentClient(), []);
+
+  const [overrides, setOverrides] = useState<OverridesShape>(() => {
+    try {
+      const raw = localStorage.getItem(STORAGE_KEY);
+      return raw ? (JSON.parse(raw) as OverridesShape) : {};
+    } catch {
+      return {};
+    }
+  });
+
+  const [syncing, setSyncing] = useState(false);
+  const [lastSyncedAt, setLastSyncedAt] = useState<string | null>(null);
+
+  // Para evitar bucles de eco: cuando aplicamos remoto, no disparemos guardado
+  const skipNextSaveRef = useRef(false);
+  const hydratedRemoteRef = useRef(false);
+  const saveTimerRef = useRef<number | null>(null);
+
+  // Persistir en cache local siempre (mejor UX offline)
+  useEffect(() => {
+    try { localStorage.setItem(STORAGE_KEY, JSON.stringify(overrides)); } catch {}
+  }, [overrides]);
+
+  /* -------------------------- Carga inicial remota ------------------------- */
+  useEffect(() => {
+    let active = true;
+
+    (async () => {
+      try {
+        setSyncing(true);
+        const { data, error } = await supabase
+          .from(S_TABLE)
+          .select('data, updated_at')
+          .eq('key', S_KEY)
+          .single();
+
+        if (!active) return;
+
+        if (!error && data?.data) {
+          skipNextSaveRef.current = true; // no salvar de vuelta este set
+          setOverrides(normalizeOverrides(data.data));
+          setLastSyncedAt(data.updated_at ?? new Date().toISOString());
+        } else {
+          // Si no existe fila remota, mantenemos lo local; se crearÃ¡ al primer write
+        }
+      } finally {
+        hydratedRemoteRef.current = true;
+        setSyncing(false);
+      }
+    })();
+
+    return () => { active = false; };
+  }, [supabase]);
+
+  /* --------------------------- SuscripciÃ³n realtime ------------------------ */
+  useEffect(() => {
+    const channel = supabase
+      .channel('catalog_overrides_global')
+      .on(
+        'postgres_changes',
+        { event: '*', schema: 'public', table: S_TABLE, filter: `key=eq.${S_KEY}` },
+        (payload) => {
+          const row: any = payload.new || payload.record || null;
+          if (!row || !row.data) return;
+          // Aplicar remoto y evitar eco
+          skipNextSaveRef.current = true;
+          setOverrides(normalizeOverrides(row.data));
+          setLastSyncedAt(row.updated_at ?? new Date().toISOString());
+        }
+      )
+      .subscribe();
+
+    return () => { supabase.removeChannel(channel); };
+  }, [supabase]);
+
+  /* ----------------------------- Guardado remoto --------------------------- */
+  const upsertRemote = useCallback(async (data: OverridesShape) => {
+    if (!canWriteShared) return; // viewers no escriben
+    setSyncing(true);
+    try {
+      await supabase
+        .from(S_TABLE)
+        .upsert({
+          key: S_KEY,
+          data,
+          updated_by: user?.id ?? null,
+        }, { onConflict: 'key' })
+        .select()
+        .single();
+      setLastSyncedAt(new Date().toISOString());
+    } finally {
+      setSyncing(false);
+    }
+  }, [supabase, user?.id, canWriteShared]);
+
+  // Debounce: cada cambio local (user action) -> upsert remoto (si procede)
+  useEffect(() => {
+    if (!hydratedRemoteRef.current) return; // hasta cargar remoto
+    if (skipNextSaveRef.current) {
+      skipNextSaveRef.current = false;
+      return;
+    }
+    if (!canWriteShared) return; // viewers no suben
+
+    if (saveTimerRef.current) window.clearTimeout(saveTimerRef.current);
+    saveTimerRef.current = window.setTimeout(() => {
+      upsertRemote(overrides);
+    }, 500);
+
+    return () => {
+      if (saveTimerRef.current) {
+        window.clearTimeout(saveTimerRef.current);
+        saveTimerRef.current = null;
+      }
+    };
+  }, [overrides, canWriteShared, upsertRemote]);
+
+  /* -------------------------- Fusionados (memo) ---------------------------- */
+  const CAMPAIGNS = useMemo(
+    () => mergeCampaigns(BASE_CAMPAIGNS, overrides.campaigns),
+    [overrides.campaigns],
+  );
+  const PARTNERS = useMemo(
+    () => mergePartners(BASE_PARTNERS, overrides.partners),
+    [overrides.partners],
+  );
+  const DATABASES = useMemo(
+    () => mergeDatabases(BASE_DATABASES, overrides.databases),
+    [overrides.databases],
+  );
+  const THEMES = useMemo(
+    () => mergeThemes(BASE_THEMES, overrides.themes as any),
+    [overrides.themes],
+  );
+  const TYPES = useMemo(
+    () => mergeTypes(BASE_TYPES, overrides.types),
+    [overrides.types],
+  );
+
+  const resolveInvoiceOfficeMerged = useMemo(
+    () => makeResolveInvoiceOffice(INVOICE_RULES, PARTNERS),
+    [PARTNERS],
+  );
+
+  /* ---------------------------- Mutadores (compat) ------------------------- */
+  const setLocal = <T,>(updater: (prev: OverridesShape) => OverridesShape) => {
+    setOverrides(prev => updater(prev));
+  };
+
+  const addCampaignRef = useCallback((c: CampaignIn) => {
+    setLocal(prev => {
+      const list = [...(prev.campaigns || [])];
+      const key = norm(c.name);
+      const exists =
+        list.some((x) => norm(x.name) === key) ||
+        CAMPAIGNS.some((x) => norm(x.name) === key);
+      if (!exists) {
+        list.push({
+          name: trimCollapse(c.name),
+          advertiser: trimCollapse(c.advertiser || 'White Label'),
+        });
+      }
+      return { ...prev, campaigns: list };
+    });
+  }, [CAMPAIGNS]);
+
+  const addPartnerRef = useCallback((p: PartnerIn) => {
+    setLocal(prev => {
+      const list = [...(prev.partners || [])];
+      const key = norm(p.name);
+      const exists =
+        list.some((x) => norm(x.name) === key) ||
+        PARTNERS.some((x) => norm(x.name) === key);
+      if (!exists) {
+        list.push({ name: trimCollapse(p.name), invoiceOffice: p.invoiceOffice });
+      }
+      return { ...prev, partners: list };
+    });
+  }, [PARTNERS]);
+
+  const addDatabaseRef = useCallback((d: DatabaseIn) => {
+    setLocal(prev => {
+      const list = [...(prev.databases || [])];
+
+      // Dedupe por nombre (case-insensitive)
+      const key = norm(d.name);
+      const exists =
+        list.some((x) => norm(x.name) === key) ||
+        DATABASES.some((x) => norm(x.name) === key);
+      if (exists) return prev;
+
+      // GEO validado (estricto)
+      const geoStrict = normalizeGeoStrict(d.geo);
+      if (!geoStrict) {
+        console.warn('Invalid GEO ignored in addDatabaseRef:', d.geo);
+        return prev;
+      }
+
+      // ID autogenerado Ãºnico (ignora cualquier id externo)
+      const usedIds = new Set<string>([
+        ...DATABASES.map(db => db.id.toLowerCase()),
+        ...list.map(db => (db.id || '').toLowerCase()),
+      ]);
+      const baseId = toSlug(d.name) || 'db';
+      let id = baseId;
+      let n = 2;
+      while (usedIds.has(id.toLowerCase())) id = `${baseId}-${n++}`;
+
+      list.push({
+        id,
+        name: trimCollapse(d.name),
+        geo: geoStrict,      // UKâ†’GB, permite MULTI
+        dbType: d.dbType,
+      });
+      return { ...prev, databases: list };
+    });
+  }, [DATABASES]);
+
+  const addTheme = useCallback((t: string) => {
+    setLocal(prev => {
+      const list = Array.isArray(prev.themes) ? [...prev.themes] : [];
+      const label = trimCollapse(t);
+      if (!label) return prev;
+      const exists =
+        (list as any[]).some(
+          (x) => trimCollapse(typeof x === 'string' ? x : x?.label) === label,
+        ) || THEMES.some((v) => v === label);
+      if (!exists) (list as any[]).push(label);
+      return { ...prev, themes: list as any };
+    });
+  }, [THEMES]);
+
+  const addType = useCallback((t: string) => {
+    setLocal(prev => {
+      const list = [...(prev.types || [])];
+      const v = trimCollapse(t).toUpperCase();
+      if (!v) return prev;
+      const exists = list.includes(v) || TYPES.includes(v);
+      if (!exists) list.push(v);
+      return { ...prev, types: list };
+    });
+  }, [TYPES]);
+
+  const updateCampaignRef = useCallback((name: string, patch: Partial<CampaignIn>) => {
+    const key = norm(name);
+    setLocal(prev => {
+      const list = [...(prev.campaigns || [])];
+      const idx = list.findIndex((x) => norm(x.name) === key);
+      if (idx >= 0) {
+        list[idx] = {
+          ...list[idx],
+          ...(patch.name ? { name: trimCollapse(patch.name) } : {}),
+          ...(patch.advertiser ? { advertiser: trimCollapse(patch.advertiser) } : {}),
+        };
+      } else {
+        list.push({
+          name: trimCollapse(patch.name || name),
+          advertiser: trimCollapse(patch.advertiser || 'White Label'),
+        });
+      }
+      return { ...prev, campaigns: list };
+    });
+  }, []);
+
+  const removeCampaignRef = useCallback((name: string) => {
+    const key = norm(name);
+    setLocal(prev => ({
+      ...prev,
+      campaigns: (prev.campaigns || []).filter((x) => norm(x.name) !== key),
+    }));
+  }, []);
+
+  const updatePartnerRef = useCallback((name: string, patch: Partial<PartnerIn>) => {
+    const key = norm(name);
+    setLocal(prev => {
+      const list = [...(prev.partners || [])];
+      const idx = list.findIndex((x) => norm(x.name) === key);
+      const invoiceOffice = patch.invoiceOffice ?? list[idx]?.invoiceOffice ?? 'DAT';
+      if (idx >= 0) {
+        list[idx] = {
+          ...list[idx],
+          ...(patch.name ? { name: trimCollapse(patch.name) } : {}),
+          invoiceOffice,
+        };
+      } else {
+        list.push({ name: trimCollapse(patch.name || name), invoiceOffice });
+      }
+      return { ...prev, partners: list };
+    });
+  }, []);
+
+  const removePartnerRef = useCallback((name: string) => {
+    const key = norm(name);
+    setLocal(prev => ({
+      ...prev,
+      partners: (prev.partners || []).filter((x) => norm(x.name) !== key),
+    }));
+  }, []);
+
+  const updateDatabaseRef = useCallback((name: string, patch: Partial<DatabaseIn>) => {
+    const key = norm(name);
+    setLocal(prev => {
+      const list = [...(prev.databases || [])];
+      const idx = list.findIndex((x) => norm(x.name) === key);
+
+      const applyGeo = (g?: string) => {
+        if (g == null) return undefined;
+        const strict = normalizeGeoStrict(g);
+        return strict ?? undefined;
+      };
+
+      // Helper para generar ID Ãºnico si se edita el id
+      const makeUniqueId = (desiredBase: string) => {
+        const used = new Set<string>([
+          ...DATABASES.map(db => db.id.toLowerCase()),
+          ...list.map(db => (db.id || '').toLowerCase()),
+        ]);
+        const baseId = toSlug(desiredBase) || 'db';
+        let id = baseId, n = 2;
+        while (used.has(id.toLowerCase())) id = `${baseId}-${n++}`;
+        return id;
+      };
+
+      if (idx >= 0) {
+        const next = { ...list[idx] };
+        if (patch.name) next.name = trimCollapse(patch.name);
+        const g = applyGeo(patch.geo);
+        if (g) next.geo = g; // si no es vÃ¡lido, se ignora cambio de GEO
+        if (patch.dbType) next.dbType = patch.dbType;
+        if (patch.id) next.id = makeUniqueId(patch.id || next.name);
+        list[idx] = next;
+      } else {
+        // Si no existÃ­a, creamos nuevo (con validaciÃ³n)
+        const nm = trimCollapse(patch.name || name);
+        const g = applyGeo(patch.geo || '');
+        if (!nm || !g) return prev;
+        list.push({
+          id: makeUniqueId(patch.id || nm),
+          name: nm,
+          geo: g,
+          dbType: (patch.dbType || 'B2C') as DBType,
+        });
+      }
+      return { ...prev, databases: list };
+    });
+  }, [DATABASES]);
+
+  const removeDatabaseRef = useCallback((name: string) => {
+    const key = norm(name);
+    setLocal(prev => ({
+      ...prev,
+      databases: (prev.databases || []).filter((x) => norm(x.name) !== key),
+    }));
+  }, []);
+
+  const removeTheme = useCallback((t: string) => {
+    const lbl = trimCollapse(t);
+    setLocal(prev => ({
+      ...prev,
+      themes: (prev.themes || []).filter((x: any) =>
+        trimCollapse(typeof x === 'string' ? x : x?.label) !== lbl,
+      ),
+    }));
+  }, []);
+
+  const removeType = useCallback((t: string) => {
+    const v = trimCollapse(t).toUpperCase();
+    setLocal(prev => ({
+      ...prev,
+      types: (prev.types || []).filter((x) => x !== v),
+    }));
+  }, []);
+
+  /* ----------------------------- Mantenimiento ----------------------------- */
+  const resetOverrides = useCallback(() => {
+    setOverrides({});
+  }, []);
+
+  const exportOverrides = useCallback(() => {
+    const data: OverridesShape = {};
+    if (overrides.campaigns?.length)  data.campaigns = overrides.campaigns;
+    if (overrides.partners?.length)   data.partners  = overrides.partners;
+    if (overrides.databases?.length)  data.databases = overrides.databases;
+    if (overrides.themes && (overrides.themes as any[]).length) data.themes = overrides.themes;
+    if (overrides.types?.length)      data.types     = overrides.types;
+    return JSON.stringify(data, null, 2);
+  }, [overrides]);
+
+  const hasLocalChanges = useMemo(() => {
+    const o = overrides;
+    return Boolean(
+      (o.campaigns && o.campaigns.length) ||
+      (o.partners && o.partners.length) ||
+      (o.databases && o.databases.length) ||
+      (o.themes && (o.themes as any[]).length) ||
+      (o.types && o.types.length)
+    );
+  }, [overrides]);
+
+  const importOverrides = useCallback((data: string | OverridesShape) => {
+    try {
+      const src = typeof data === 'string' ? JSON.parse(data) : data;
+      const normd = normalizeOverrides(src);
+      setOverrides(normd);
+      return { ok: true as const };
+    } catch (e) {
+      console.error(e);
+      return { ok: false as const, reason: 'Invalid JSON' };
+    }
+  }, []);
+
+  const value: CatalogsCtx = {
+    CAMPAIGNS,
+    PARTNERS,
+    DATABASES,
+    THEMES,
+    TYPES,
+    resolveInvoiceOfficeMerged,
+
+    addCampaignRef,
+    addPartnerRef,
+    addDatabaseRef,
+    addTheme,
+    addType,
+
+    updateCampaignRef,
+    removeCampaignRef,
+    updatePartnerRef,
+    removePartnerRef,
+    updateDatabaseRef,
+    removeDatabaseRef,
+    removeTheme,
+    removeType,
+
+    resetOverrides,
+    exportOverrides,
+
+    hasLocalChanges,
+    importOverrides,
+
+    syncing,
+    lastSyncedAt,
+    canWriteShared,
+  };
+
+  return (
+    <CatalogOverridesContext.Provider value={value}>
+      {children}
+    </CatalogOverridesContext.Provider>
+  );
+}
+
+/** Hook principal */
+export function useCatalogs() {
+  const ctx = useContext(CatalogOverridesContext);
+  if (!ctx) throw new Error('useCatalogs must be used within CatalogOverridesProvider');
+  return ctx;
+}
+
+/** Alias de compatibilidad */
+export function useCatalogOverrides() {
+  return useCatalogs();
+}
+

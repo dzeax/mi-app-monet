@@ -1,0 +1,236 @@
+[
+  {
+    "id": "gestioncorp",
+    "name": "GestionCorp",
+    "geo": "ES",
+    "dbType": "B2B"
+  },
+  {
+    "id": "gestao-negocios",
+    "name": "Gestão Negócios",
+    "geo": "PT",
+    "dbType": "B2B"
+  },
+  {
+    "id": "idee-del-giorno",
+    "name": "Idee Del Giorno",
+    "geo": "IT",
+    "dbType": "B2C"
+  },
+  {
+    "id": "coin-affaires",
+    "name": "Coin Affaires",
+    "geo": "FR",
+    "dbType": "B2B"
+  },
+  {
+    "id": "smart-deals",
+    "name": "Smart Deals",
+    "geo": "ES",
+    "dbType": "Mixed"
+  },
+  {
+    "id": "conso-autokoo",
+    "name": "Conso-Autokoo",
+    "geo": "FR",
+    "dbType": "B2C"
+  },
+  {
+    "id": "tuopinion-sms",
+    "name": "TuOpinion SMS",
+    "geo": "ES",
+    "dbType": "B2C"
+  },
+  {
+    "id": "gestione-impresa",
+    "name": "Gestione Impresa",
+    "geo": "IT",
+    "dbType": "B2B"
+  },
+  {
+    "id": "tuopinion",
+    "name": "TuOpinion",
+    "geo": "ES",
+    "dbType": "B2C"
+  },
+  {
+    "id": "canada",
+    "name": "Canada",
+    "geo": "CA",
+    "dbType": "B2B"
+  },
+  {
+    "id": "promomex",
+    "name": "PromoMex",
+    "geo": "MX",
+    "dbType": "B2C"
+  },
+  {
+    "id": "biz-data-hub",
+    "name": "Biz Data Hub",
+    "geo": "UK",
+    "dbType": "B2B"
+  },
+  {
+    "id": "argentina",
+    "name": "Argentina",
+    "geo": "AR",
+    "dbType": "B2B"
+  },
+  {
+    "id": "chile",
+    "name": "Chile",
+    "geo": "CL",
+    "dbType": "B2B"
+  },
+  {
+    "id": "world-scope-deals",
+    "name": "World Scope Deals",
+    "geo": "MULTI",
+    "dbType": "Mixed"
+  },
+  {
+    "id": "conso-enquete",
+    "name": "Conso Enquête",
+    "geo": "FR",
+    "dbType": "B2C"
+  },
+  {
+    "id": "autokoo",
+    "name": "Autokoo",
+    "geo": "FR",
+    "dbType": "B2C"
+  },
+  {
+    "id": "markt-fusion",
+    "name": "Markt Fusion",
+    "geo": "BE",
+    "dbType": "B2B"
+  },
+  {
+    "id": "nexo-profesional",
+    "name": "Nexo Profesional",
+    "geo": "ES",
+    "dbType": "B2B"
+  },
+  {
+    "id": "brit-consumer-net",
+    "name": "Brit Consumer Net",
+    "geo": "UK",
+    "dbType": "B2C"
+  },
+  {
+    "id": "vida-conexao",
+    "name": "Vida Conexão",
+    "geo": "PT",
+    "dbType": "B2C"
+  },
+  {
+    "id": "datavision",
+    "name": "Datavision",
+    "geo": "FR",
+    "dbType": "B2C"
+  },
+  {
+    "id": "connessione-clienti",
+    "name": "Connessione Clienti",
+    "geo": "IT",
+    "dbType": "B2C"
+  },
+  {
+    "id": "rete-aziendale",
+    "name": "Rete Aziendale",
+    "geo": "IT",
+    "dbType": "B2B"
+  },
+  {
+    "id": "sconti-subito",
+    "name": "Sconti Subito",
+    "geo": "IT",
+    "dbType": "B2C"
+  },
+  {
+    "id": "solucoes-pro",
+    "name": "Soluções pro",
+    "geo": "PT",
+    "dbType": "B2B"
+  },
+  {
+    "id": "netherlands",
+    "name": "Netherlands",
+    "geo": "NL",
+    "dbType": "B2B"
+  },
+  {
+    "id": "ireland",
+    "name": "Ireland",
+    "geo": "IE",
+    "dbType": "B2B"
+  },
+  {
+    "id": "poland",
+    "name": "Poland",
+    "geo": "PL",
+    "dbType": "B2B"
+  },
+  {
+    "id": "autcon",
+    "name": "Autcon",
+    "geo": "FR",
+    "dbType": "B2C"
+  },
+  {
+    "id": "belgian-bazaar",
+    "name": "Belgian Bazaar",
+    "geo": "BE",
+    "dbType": "B2C"
+  },
+  {
+    "id": "piazza-digitale",
+    "name": "Piazza Digitale",
+    "geo": "IT",
+    "dbType": "B2C"
+  },
+  {
+    "id": "impresa-connect",
+    "name": "Impresa Connect",
+    "geo": "IT",
+    "dbType": "B2B"
+  },
+  {
+    "id": "greengo",
+    "name": "Greengo",
+    "geo": "IT",
+    "dbType": "B2C"
+  },
+  {
+    "id": "gestao-negocios-b2b-pt",
+    "name": "Gestão Negócios B2B PT",
+    "geo": "PT",
+    "dbType": "B2B"
+  },
+  {
+    "id": "solucoes-pro-2",
+    "name": "Soluções Pro",
+    "geo": "PT",
+    "dbType": "B2B"
+  },
+  {
+    "id": "redcom",
+    "name": "RedCom",
+    "geo": "ES",
+    "dbType": "B2B"
+  },
+  {
+    "id": "the-coupon-party",
+    "name": "The coupon party",
+    "geo": "FR",
+    "dbType": "B2C"
+  },
+  {
+    "id": "synercom",
+    "name": "SynerCom",
+    "geo": "FR",
+    "dbType": "B2B"
+  }
+]
