@@ -1,5 +1,11 @@
 import type { NextConfig } from 'next';
 
+// Tailwind 4 uses native @tailwindcss/oxide bindings; force the WASM fallback so
+// builds succeed on platforms where the native binary is unavailable (e.g. Vercel).
+if (!process.env.TAILWIND_DISABLE_OXIDE) {
+  process.env.TAILWIND_DISABLE_OXIDE = '1';
+}
+
 const nextConfig: NextConfig = {
   eslint: {
     // Existing lint debt blocks production builds; keep lint for CI/local commands.
