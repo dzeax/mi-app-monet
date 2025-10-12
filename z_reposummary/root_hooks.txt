@@ -1,0 +1,967 @@
+﻿===== C:\Users\Usuario\Documents\GitHub\mi-app-monet\hooks\useCampaignFilterEngine.ts =====
+// hooks/useCampaignFilterEngine.ts
+'use client';
+
+import { useMemo, useState, useTransition, useCallback } from 'react';
+import type { CampaignRow } from '@/types/campaign';
+import { useDebouncedValue } from '@/hooks/useDebouncedValue';
+import { useNormalizedCampaignRows, type NormalizedCampaignRow } from '@/hooks/useNormalizedCampaignRows';
+import { buildIndexes, type CampaignIndexes } from '@/lib/indexes';
+import {
+  useFilterPredicates,
+  type Filters as RawFilters,
+  type UseFilterPredicatesResult,
+} from '@/hooks/useFilterPredicates';
+
+export type Filters = RawFilters;
+
+export const defaultFilters: Filters = {
+  q: '',
+  partners: [],
+  themes: [],
+  databases: [],
+  types: [],
+  geos: [],
+  dbTypes: [],
+  invoiceOffices: [],
+  monthRange: undefined,
+  dateRange: undefined,
+  priceMin: null,
+  priceMax: null,
+  marginSign: undefined,
+};
+
+export type UseCampaignFilterEngineResult = {
+  // estado de filtros
+  filters: Filters;
+  setFilters: React.Dispatch<React.SetStateAction<Filters>>;
+  updateFilters: (patch: Partial<Filters>) => void;
+  resetFilters: () => void;
+
+  // derivadas
+  qDebounced: string;
+  normalizedRows: NormalizedCampaignRow[];
+  indexes: CampaignIndexes;
+
+  // resultado
+  filteredRows: NormalizedCampaignRow[];
+  totals: UseFilterPredicatesResult['totals'];
+  predicate: UseFilterPredicatesResult['predicate'];
+
+  // UX
+  pending: boolean; // true mientras recalculamos bajo startTransition
+};
+
+export function useCampaignFilterEngine(
+  rows: CampaignRow[],
+  opts?: {
+    initial?: Partial<Filters>;
+    debounceMs?: number;
+  }
+): UseCampaignFilterEngineResult {
+  const debounceMs = opts?.debounceMs ?? 300;
+
+  // 1) estado de filtros
+  const [filters, setFilters] = useState<Filters>(() => ({
+    ...defaultFilters,
+    ...(opts?.initial || {}),
+  }));
+
+  // 2) transiciÃ³n para evitar jank en recomputos pesados
+  const [pending, startTransition] = useTransition();
+
+  // 3) debounced search
+  const qDebounced = useDebouncedValue(filters.q ?? '', debounceMs);
+
+  // 4) normalizaciÃ³n Ãºnica por fila (strings lower/trim/sin acentos + monthKey, nTextâ€¦)
+  const normalizedRows = useNormalizedCampaignRows(rows);
+
+  // 5) Ã­ndices por columna (partner/theme/database/type/geo/dbType/invoice/month)
+  const indexes = useMemo<CampaignIndexes>(() => buildIndexes(normalizedRows), [normalizedRows]);
+
+  // 6) filtros efectivos (sustituimos q por su versiÃ³n debounced)
+  const effectiveFilters: Filters = useMemo(
+    () => ({ ...filters, q: qDebounced }),
+    [filters, qDebounced]
+  );
+
+  // 7) pasada Ãºnica con predicados + acumulaciÃ³n de totales
+  const { filteredRows, totals, predicate } = useFilterPredicates({
+    rows: normalizedRows,
+    indexes,
+    filters: effectiveFilters,
+  });
+
+  // 8) helpers de mutaciÃ³n (agrupan cambios y usan transiciÃ³n)
+  const updateFilters = useCallback((patch: Partial<Filters>) => {
+    startTransition(() => {
+      setFilters(prev => ({ ...prev, ...patch }));
+    });
+  }, [startTransition]);
+
+  const resetFilters = useCallback(() => {
+    startTransition(() => setFilters(defaultFilters));
+  }, [startTransition]);
+
+  return {
+    filters,
+    setFilters,      // por si necesitas un control mÃ¡s fino
+    updateFilters,   // recomendado para cambios desde la UI
+    resetFilters,
+
+    qDebounced,
+    normalizedRows,
+    indexes,
+
+    filteredRows,
+    totals,
+    predicate,
+
+    pending,
+  };
+}
+
+===== C:\Users\Usuario\Documents\GitHub\mi-app-monet\hooks\useCatalogs.ts =====
+export { useCatalogs } from '@/context/CatalogOverridesContext';
+
+===== C:\Users\Usuario\Documents\GitHub\mi-app-monet\hooks\useDebouncedValue.ts =====
+// hooks/useDebouncedValue.ts
+'use client';
+
+import { useEffect, useRef, useState } from 'react';
+
+/**
+ * Devuelve una versiÃ³n "debounced" del valor.
+ * Ãštil para bÃºsquedas: evita recomputar en cada tecla.
+ *
+ * @param value Valor de entrada (cualquier tipo)
+ * @param delay Retardo en ms (por defecto 300ms)
+ */
+export function useDebouncedValue<T>(value: T, delay = 300): T {
+  const [debounced, setDebounced] = useState<T>(value);
+  const firstRun = useRef(true);
+
+  useEffect(() => {
+    // Evita el retardo en el primer render para que la UI pinte rÃ¡pido
+    if (firstRun.current) {
+      firstRun.current = false;
+      setDebounced(value);
+      return;
+    }
+
+    const id = window.setTimeout(() => setDebounced(value), Math.max(0, delay));
+    return () => window.clearTimeout(id);
+  }, [value, delay]);
+
+  return debounced;
+}
+
+export default useDebouncedValue;
+
+===== C:\Users\Usuario\Documents\GitHub\mi-app-monet\hooks\useFilterPredicates.ts =====
+// hooks/useFilterPredicates.ts
+'use client';
+
+import { useMemo } from 'react';
+import type { NormalizedCampaignRow } from '@/hooks/useNormalizedCampaignRows';
+import { normalizeString } from '@/lib/strings';
+import {
+  buildIndexes as _noopBuild, // tip aid
+  filterByIndexSet,
+  intersectSets,
+  setForSelection,
+  type CampaignIndexes,
+} from '@/lib/indexes';
+
+export type Filters = {
+  // texto libre (ya puedes pasar aquÃ­ el valor "debounced")
+  q?: string;
+
+  // multi-selects
+  partners?: string[];
+  themes?: string[];
+  databases?: string[];
+  types?: string[];
+  geos?: string[];
+  dbTypes?: Array<'B2B' | 'B2C' | 'Mixed'>;
+  invoiceOffices?: Array<'DAT' | 'CAR' | 'INT'>;
+
+  // rangos temporales
+  /** YYYY-MM inclusive */
+  monthRange?: [string | null | undefined, string | null | undefined];
+  /** YYYY-MM-DD inclusive (tiene prioridad sobre monthRange si ambos existen) */
+  dateRange?: [string | null | undefined, string | null | undefined];
+
+  // numÃ©ricos
+  priceMin?: number | null;
+  priceMax?: number | null;
+  /** -1 -> negativos, 0 -> ~0, 1 -> positivos */
+  marginSign?: -1 | 0 | 1;
+};
+
+export type Totals = {
+  count: number;
+  vSent: number;
+  qty: number;
+  turnover: number;
+  margin: number;
+  ecpm: number; // ponderado por vSent
+};
+
+export type UseFilterPredicatesResult = {
+  filteredRows: NormalizedCampaignRow[];
+  totals: Totals;
+  /** Predicado de depuraciÃ³n (el usado en la pasada final) */
+  predicate: (r: NormalizedCampaignRow) => boolean;
+};
+
+/** Util: comprueba ISO date (YYYY-MM-DD) y compara lexicogrÃ¡ficamente */
+function inIsoDateRange(dateISO: string, from?: string | null, to?: string | null): boolean {
+  const d = (dateISO || '').slice(0, 10);
+  if (!d) return false;
+  if (from && d < from) return false;
+  if (to && d > to) return false;
+  return true;
+}
+
+/** Genera meses YYYY-MM entre lÃ­mites (inclusive) */
+function enumerateMonths(a?: string | null, b?: string | null): string[] {
+  const start = (a || '').slice(0, 7);
+  const end = (b || '').slice(0, 7);
+  if (!start && !end) return [];
+  const s = start || end;
+  const e = end || start;
+  if (!s || !e) return [s || e].filter(Boolean) as string[];
+
+  const [sy, sm] = s.split('-').map(Number);
+  const [ey, em] = e.split('-').map(Number);
+  let y = sy, m = sm;
+  const out: string[] = [];
+  while (y < ey || (y === ey && m <= em)) {
+    out.push(`${y.toString().padStart(4, '0')}-${m.toString().padStart(2, '0')}`);
+    m++;
+    if (m > 12) { m = 1; y++; }
+  }
+  return out;
+}
+
+/** Crea un matcher de texto: todas las palabras deben aparecer en nText */
+function makeTextMatcher(q?: string): ((row: NormalizedCampaignRow) => boolean) | null {
+  const norm = normalizeString(q || '');
+  if (!norm) return null;
+  const tokens = norm.split(/\s+/).filter(Boolean);
+  if (!tokens.length) return null;
+  return (row: any) => {
+    const haystack: string =
+      row.nText ||
+      normalizeString(
+        [
+          row.campaign, row.advertiser, row.partner, row.theme,
+          row.database, row.type, row.geo, row.invoiceOffice,
+        ]
+          .filter(Boolean)
+          .join(' '),
+      );
+    for (const tk of tokens) {
+      if (!haystack.includes(tk)) return false;
+    }
+    return true;
+  };
+}
+
+function signOf(n: number): -1 | 0 | 1 {
+  if (Object.is(n, -0)) return 0;
+  if (Math.abs(n) < 1e-9) return 0;
+  return n > 0 ? 1 : -1;
+}
+
+export function useFilterPredicates({
+  rows,
+  indexes,
+  filters,
+}: {
+  rows: NormalizedCampaignRow[];
+  indexes: CampaignIndexes;
+  filters: Filters;
+}): UseFilterPredicatesResult {
+  // Memo de normalizados/estructuras derivadas de filtros
+  const {
+    q,
+    partners, themes, databases, types, geos, dbTypes, invoiceOffices,
+    dateRange, monthRange,
+    priceMin, priceMax, marginSign,
+  } = filters;
+
+  const textMatcher = useMemo(() => makeTextMatcher(q), [q]);
+
+  // 1) IntersecciÃ³n por Ã­ndices (OR dentro de cada dimensiÃ³n; AND entre dimensiones)
+  const candidateIdxSet = useMemo(() => {
+    // Dimensiones categÃ³ricas indexadas
+    const byPartner = setForSelection(indexes.byPartner, partners);
+    const byTheme = setForSelection(indexes.byTheme, themes);
+    const byDatabase = setForSelection(indexes.byDatabase, databases);
+    const byType = setForSelection(indexes.byType, types);
+    const byGeo = setForSelection(indexes.byGeo, geos);
+    const byDbType = setForSelection(indexes.byDbType, dbTypes as string[] | undefined);
+    const byInv = setForSelection(indexes.byInvoiceOffice, invoiceOffices as string[] | undefined);
+
+    // Rango por meses: union de meses -> otro set OR que intersectaremos
+    let byMonth: Set<number> | null = null;
+    if (!dateRange && monthRange) {
+      const [mFrom, mTo] = monthRange;
+      const months = enumerateMonths(mFrom, mTo);
+      const monthSets = months.map((m) => indexes.byMonth.get(normalizeString(m))).filter(Boolean) as Set<number>[];
+      byMonth = monthSets.length ? (monthSets.length === 1 ? monthSets[0] : (monthSets.reduce((acc, s) => {
+        const out = new Set<number>(acc);
+        for (const v of s) out.add(v);
+        return out;
+      }))) : new Set<number>();
+    }
+
+    // Si ninguna dimensiÃ³n estÃ¡ activa, devolvemos null para indicar "sin restricciÃ³n previa"
+    const dims = [byPartner, byTheme, byDatabase, byType, byGeo, byDbType, byInv, byMonth];
+    const hasAnyDim = dims.some((s) => s && s.size >= 0); // size>=0 permite el caso 'vacÃ­o' (que debe vaciar el resultado)
+    if (!hasAnyDim) return null;
+
+    // Si alguna dimensiÃ³n produjo set vacÃ­o -> no hay matches
+    for (const s of dims) {
+      if (s && s.size === 0) return new Set<number>();
+    }
+
+    // IntersecciÃ³n de todas las dimensiones activas
+    const inter = intersectSets(dims.filter(Boolean) as Set<number>[]);
+    return inter;
+  }, [
+    indexes,
+    partners, themes, databases, types, geos, dbTypes, invoiceOffices,
+    monthRange, dateRange,
+  ]);
+
+  // 2) Pasada final: aplica texto, rango fecha (ISO), numÃ©ricos y acumula totales
+  const { filteredRows, totals, predicate } = useMemo(() => {
+    const pred = (r: NormalizedCampaignRow): boolean => {
+      // 2.a) pre-candidate por Ã­ndices (si existen)
+      // map rows->idx: usamos posiciÃ³n actual del array
+      // (candidateIdxSet === null) => no restricciÃ³n previa
+      if (candidateIdxSet && candidateIdxSet.size && !candidateIdxSet.has((r as any).__rowIndex ?? -1)) {
+        return false;
+      }
+
+      // 2.b) filtros de fecha (si hay dateRange tiene prioridad sobre monthRange)
+      if (dateRange && (dateRange[0] || dateRange[1])) {
+        if (!inIsoDateRange(r.date, dateRange[0] || undefined, dateRange[1] || undefined)) return false;
+      } else if (monthRange && (monthRange[0] || monthRange[1])) {
+        const month = (r as any).monthKey || (r.date || '').slice(0, 7);
+        const [mFrom, mTo] = monthRange;
+        const ms = enumerateMonths(mFrom, mTo);
+        const want = new Set(ms.map(normalizeString));
+        if (!want.has(normalizeString(month))) return false;
+      }
+
+      // 2.c) texto
+      if (textMatcher && !textMatcher(r as any)) return false;
+
+      // 2.d) numÃ©ricos
+      if (priceMin != null && r.price < priceMin) return false;
+      if (priceMax != null && r.price > priceMax) return false;
+      if (marginSign != null) {
+        const s = signOf(r.margin);
+        if (s !== marginSign) return false;
+      }
+
+      return true;
+    };
+
+    const out: NormalizedCampaignRow[] = [];
+    let vSent = 0, qty = 0, turnover = 0, margin = 0;
+
+    // recorremos una sola vez
+    for (let i = 0; i < rows.length; i++) {
+      const r = rows[i] as any;
+      // anotamos index para la comprobaciÃ³n candidateIdxSet (sin mutar el objeto â€œrealâ€)
+      r.__rowIndex = i;
+      if (!pred(r)) continue;
+      out.push(r);
+      vSent += r.vSent || 0;
+      qty += r.qty || 0;
+      turnover += r.turnover || 0;
+      margin += r.margin || 0;
+    }
+
+    const ecpm = vSent > 0 ? (turnover / vSent) * 1000 : 0;
+    const t: Totals = {
+      count: out.length,
+      vSent,
+      qty,
+      turnover: Number(turnover.toFixed(2)),
+      margin: Number(margin.toFixed(2)),
+      ecpm: Number(ecpm.toFixed(2)),
+    };
+
+    return { filteredRows: out as NormalizedCampaignRow[], totals: t, predicate: pred };
+  }, [rows, candidateIdxSet, textMatcher, dateRange, monthRange, priceMin, priceMax, marginSign]);
+
+  return { filteredRows, totals, predicate };
+}
+
+===== C:\Users\Usuario\Documents\GitHub\mi-app-monet\hooks\useNormalizedCampaignRows.ts =====
+// hooks/useNormalizedCampaignRows.ts
+'use client';
+
+import { useMemo } from 'react';
+import { useCampaignData } from '@/context/CampaignDataContext';
+import type { RowWithIdx } from '@/types/campaign';
+import { normalizeStr, normalizeForSearch, toMonthKey } from '@/lib/strings';
+
+export type NormalizedCampaignRow = RowWithIdx & {
+  norm: {
+    date: string;         // "2025-07-01"
+    month: string;        // "2025-07"
+    campaign: string;
+    advertiser: string;
+    partner: string;
+    theme: string;
+    type: string;
+    database: string;
+    geo: string;
+    databaseType: string;
+    invoiceOffice: string;
+    priceCurrency: string;
+    blob: string;         // concatenaciÃ³n para bÃºsqueda rÃ¡pida
+  };
+};
+
+/**
+ * Devuelve las filas con campos ya normalizados para filtros/bÃºsqueda.
+ * Se recalcula SOLO cuando cambian las `rows` del store.
+ */
+export function useNormalizedCampaignRows(): NormalizedCampaignRow[] {
+  const { rows } = useCampaignData();
+
+  const normalized = useMemo<NormalizedCampaignRow[]>(() => {
+    return rows.map((r) => {
+      const nCampaign      = normalizeStr(r.campaign);
+      const nAdvertiser    = normalizeStr(r.advertiser);
+      const nPartner       = normalizeStr(r.partner);
+      const nTheme         = normalizeStr(r.theme);
+      const nType          = normalizeStr(r.type);
+      const nDatabase      = normalizeStr(r.database);
+      const nGeo           = normalizeStr(r.geo);
+      const nDbType        = normalizeStr(r.databaseType);
+      const nInvoiceOffice = normalizeStr(r.invoiceOffice);
+      const nCurrency      = normalizeStr(r.priceCurrency);
+
+      // Blob para bÃºsqueda libre
+      const blob = normalizeForSearch(
+        [
+          r.campaign,
+          r.advertiser,
+          r.partner,
+          r.theme,
+          r.type,
+          r.database,
+          r.geo,
+          r.databaseType,
+          r.invoiceOffice,
+        ].join(' | ')
+      );
+
+      return {
+        ...r,
+        norm: {
+          date: r.date,
+          month: toMonthKey(r.date),
+          campaign: nCampaign,
+          advertiser: nAdvertiser,
+          partner: nPartner,
+          theme: nTheme,
+          type: nType,
+          database: nDatabase,
+          geo: nGeo,
+          databaseType: nDbType,
+          invoiceOffice: nInvoiceOffice,
+          priceCurrency: nCurrency,
+          blob,
+        },
+      };
+    });
+  }, [rows]);
+
+  return normalized;
+}
+
+export default useNormalizedCampaignRows;
+
+===== C:\Users\Usuario\Documents\GitHub\mi-app-monet\hooks\useReportData.ts =====
+// hooks/useReportData.ts
+'use client';
+
+import { useMemo, useState, useCallback } from 'react';
+import { addDays, parseISO, format, differenceInDays } from 'date-fns';
+import { useCampaignData } from '@/context/CampaignDataContext';
+import { useCatalogOverrides } from '@/context/CatalogOverridesContext';
+import type {
+  ReportFilters,
+  GroupBy,
+  Metric,
+  AggregateRow,
+  TrendPoint,
+} from '@/types/reports';
+
+/** Entrada opcional del hook (todas las props son iniciales) */
+type UseReportParams = {
+  groupBy?: GroupBy;
+  metric?: Metric;
+  topN?: number;
+  filters?: ReportFilters;
+};
+
+type TrendMetric = 'ecpm' | 'turnover' | 'margin' | 'marginPct' | 'vSent';
+
+/** Serie para charts de lÃ­neas */
+type TrendSeries = {
+  data: Array<Record<string, number | string>>;
+  keys: string[];
+};
+
+/** Args del generador de series unificado */
+type MakeTrendArgs = {
+  metric?: TrendMetric;                            // mÃ©trica a graficar
+  by?: 'none' | 'database' | 'partner' | 'geo';    // agrupaciÃ³n por lÃ­nea
+  topN?: number;                                   // nÂº de lÃ­neas Top
+  includeOthers?: boolean;                         // incluir "Others"
+  only?: string[];                                 // foco: restringe a estas claves
+  bucket?: 'auto' | 'day' | 'month';               // agrupaciÃ³n temporal
+};
+
+/** Resultado del hook */
+export type UseReportDataResult = {
+  // estado + setters
+  filters: ReportFilters;
+  setFilters: (next: ReportFilters | ((prev: ReportFilters) => ReportFilters)) => void;
+
+  groupBy: GroupBy;
+  setGroupBy: (g: GroupBy) => void;
+
+  metric: Metric;
+  setMetric: (m: Metric) => void;
+
+  topN: number;
+  setTopN: (n: number) => void;
+
+  // datos derivados
+  ranking: AggregateRow[];      // Top-N ya cortado
+  fullRanking: AggregateRow[];  // ranking completo (para export/paginaciÃ³n)
+  ecpmTrend: TrendPoint[];      // serie temporal eCPM ponderado
+
+  summary: {
+    totals: { vSent: number; turnover: number; margin: number; ecpm: number; marginPct: number | null };
+    filteredRows: number; // nÂº filas tras filtro
+    groups: number;       // nÂº grupos tras agregaciÃ³n (antes de cortar TopN)
+  };
+
+  // helpers
+  quickLast30: () => void;
+
+  // generadores de series
+  makeTrendSeries: (opts?: MakeTrendArgs) => TrendSeries;
+  makeTurnoverSeries: (opts?: Omit<MakeTrendArgs, 'metric'>) => TrendSeries;
+
+  // utilidades
+  listAvailableKeys: (by: 'database' | 'partner' | 'geo') => string[];
+
+  // NUEVO: agregador genÃ©rico de totales sobre el dataset filtrado (con predicado opcional)
+  computeTotals: (predicate?: (row: any) => boolean) => {
+    vSent: number; turnover: number; margin: number; ecpm: number; marginPct: number | null; count: number;
+  };
+};
+
+const normalizeStr = (s?: string) => (s ?? '').trim();
+const lc = (s?: string) => normalizeStr(s).toLowerCase();
+
+/** Predicado de fecha inclusivo (strings ISO yyyy-mm-dd) */
+function within(dateISO: string, from?: string, to?: string) {
+  if (!from && !to) return true;
+  if (from && dateISO < from) return false;
+  if (to && dateISO > to) return false;
+  return true;
+}
+
+export function useReportData(params: UseReportParams = {}): UseReportDataResult {
+  const { rows } = useCampaignData();
+  const { PARTNERS } = useCatalogOverrides();
+
+  // -------- iniciales seguros
+  const initialGroupBy: GroupBy = params.groupBy ?? 'database';
+  const initialMetric:  Metric  = params.metric  ?? 'margin';
+  const initialTopN             = Math.max(1, Math.min(50, params.topN ?? 10));
+  const initialFilters: ReportFilters = params.filters ?? {};
+
+  // -------- estado controlado
+  const [groupBy, setGroupBy] = useState<GroupBy>(initialGroupBy);
+  const [metric, setMetric]   = useState<Metric>(initialMetric);
+  const [topN, setTopN]       = useState<number>(initialTopN);
+  const [filters, setFilters] = useState<ReportFilters>(initialFilters);
+
+  // -------- sets normalizados para filtros
+  const sets = useMemo(() => {
+    const toSetLC = (arr?: string[]) => new Set((arr ?? []).map((s) => lc(s)));
+    const toSetUP = (arr?: string[]) => new Set((arr ?? []).map((s) => normalizeStr(s).toUpperCase()));
+
+    const internalPartnerNamesLC = new Set(
+      PARTNERS.filter((p) => p.isInternal).map((p) => lc(p.name)),
+    );
+
+    return {
+      geos: toSetUP(filters.geos),
+      partners: toSetLC(filters.partners),
+      campaigns: toSetLC(filters.campaigns),
+      advertisers: toSetLC(filters.advertisers),
+      themes: toSetLC(filters.themes),
+      databases: toSetLC(filters.databases),
+      types: new Set(filters.types ?? []),               // union ya vÃ¡lida
+      dbTypes: new Set(filters.databaseTypes ?? []),     // union ya vÃ¡lida
+      onlyInternalPartners: !!filters.onlyInternalPartners,
+      internalPartnerNamesLC,
+    };
+  }, [filters, PARTNERS]);
+
+  // -------- 1) Filtrado fila a fila
+  const filtered = useMemo(() => {
+    const f = filters;
+    const s = sets;
+
+    return rows.filter((r) => {
+      // fechas
+      if (!within(r.date, f.from, f.to)) return false;
+
+      // GEO
+      if (s.geos.size && !s.geos.has((r.geo || '').toUpperCase())) return false;
+
+      // Partner (incluye flag "solo internos")
+      const partnerLC = lc(r.partner);
+      if (s.onlyInternalPartners && !s.internalPartnerNamesLC.has(partnerLC)) return false;
+      if (s.partners.size && !s.partners.has(partnerLC)) return false;
+
+      // Campaign / Advertiser / Theme / Database
+      if (s.campaigns.size && !s.campaigns.has(lc(r.campaign))) return false;
+      if (s.advertisers.size && !s.advertisers.has(lc(r.advertiser))) return false;
+      if (s.themes.size && !s.themes.has(lc(r.theme))) return false;
+      if (s.databases.size && !s.databases.has(lc(r.database))) return false;
+
+      // Type / DBType
+      if (s.types.size && !s.types.has(r.type)) return false;
+      if (s.dbTypes.size && !s.dbTypes.has(r.databaseType)) return false;
+
+      return true;
+    });
+  }, [rows, filters, sets]);
+
+  // -------- 2) KPIs globales
+  const totals = useMemo(() => {
+    let vSent = 0, turnover = 0, margin = 0, wEcpm = 0;
+
+    for (const r of filtered) {
+      vSent     += r.vSent || 0;
+      turnover  += r.turnover || 0;
+      margin    += r.margin || 0;
+      wEcpm     += (r.ecpm || 0) * (r.vSent || 0);
+    }
+    const ecpm = vSent > 0 ? wEcpm / vSent : 0;
+    const marginPct = turnover > 0 ? margin / turnover : null;
+
+    return { vSent, turnover, margin, ecpm, marginPct };
+  }, [filtered]);
+
+  // -------- 3) AgregaciÃ³n por dimensiÃ³n (groupBy)
+  const { fullRanking, groupCount } = useMemo(() => {
+    type Acc = {
+      key: string;
+      label: string;
+      vSent: number;
+      turnover: number;
+      margin: number;
+      qty: number;
+      _w: number; // peso vSent
+      count: number;
+    };
+
+    const keyOf = (r: typeof filtered[number]): string => {
+      switch (groupBy) {
+        case 'database':    return r.database || '(unknown)';
+        case 'partner':     return r.partner || '(unknown)';
+        case 'campaign':    return r.campaign || '(unknown)';
+        case 'advertiser':  return r.advertiser || '(unknown)';
+        case 'theme':       return r.theme || '(unknown)';
+        case 'geo':         return (r.geo || '(unknown)').toUpperCase();
+        case 'type':        return r.type || '(unknown)';
+        case 'databaseType':return r.databaseType || '(unknown)';
+      }
+    };
+
+    const map = new Map<string, Acc>();
+    for (const r of filtered) {
+      const key = keyOf(r);
+      const curr = map.get(key) ?? {
+        key, label: key, vSent: 0, turnover: 0, margin: 0, qty: 0, _w: 0, count: 0,
+      };
+      curr.vSent     += r.vSent || 0;
+      curr.turnover  += r.turnover || 0;
+      curr.margin    += r.margin || 0;
+      curr.qty       += r.qty || 0;
+      curr._w        += r.vSent || 0;
+      curr.count     += 1;
+      map.set(key, curr);
+    }
+
+    const arr: AggregateRow[] = Array.from(map.values()).map(a => ({
+      key: a.key,
+      label: a.label,
+      vSent: a.vSent,
+      turnover: +a.turnover.toFixed(2),
+      margin: +a.margin.toFixed(2),
+      ecpm: a._w > 0 ? +((a.turnover / a._w) * 1000).toFixed(2) : 0,
+      qty: a.qty,
+      count: a.count,
+    }));
+
+    // ordenar por mÃ©trica y por label como desempate estable
+    arr.sort((x, y) => {
+      const d = (y as any)[metric] - (x as any)[metric];
+      return d !== 0 ? d : x.label.localeCompare(y.label, 'es');
+    });
+
+    return { fullRanking: arr, groupCount: arr.length };
+  }, [filtered, groupBy, metric]);
+
+  // -------- 4) Top-N
+  const ranking = useMemo<AggregateRow[]>(() => fullRanking.slice(0, topN), [fullRanking, topN]);
+
+  // -------- 5) Serie temporal (eCPM ponderado por dÃ­a) [legacy: eCPM]
+  const ecpmTrend = useMemo<TrendPoint[]>(() => {
+    const map = new Map<string, { vSent: number; turnover: number }>();
+    for (const r of filtered) {
+      const key = r.date;
+      const curr = map.get(key) ?? { vSent: 0, turnover: 0 };
+      curr.vSent    += r.vSent || 0;
+      curr.turnover += r.turnover || 0;
+      map.set(key, curr);
+    }
+    return Array.from(map.entries())
+      .map(([date, v]) => ({
+        date,
+        vSent: v.vSent,
+        turnover: +v.turnover.toFixed(2),
+        ecpm: v.vSent > 0 ? +((v.turnover / v.vSent) * 1000).toFixed(2) : 0,
+      }))
+      .sort((a, b) => a.date.localeCompare(b.date));
+  }, [filtered]);
+
+  // -------- Lista de claves disponibles para un agrupador (para Focus)
+  const listAvailableKeys = useCallback((by: 'database' | 'partner' | 'geo'): string[] => {
+    const s = new Set<string>();
+    for (const r of filtered) {
+      if (by === 'database') s.add((r.database || '(unknown)').trim());
+      else if (by === 'partner') s.add((r.partner || '(unknown)').trim());
+      else if (by === 'geo') s.add((r.geo || '(unknown)').toUpperCase());
+    }
+    return Array.from(s).sort((a, b) => a.localeCompare(b, 'es'));
+  }, [filtered]);
+
+  // -------- Generador de series UNIFICADO
+  const makeTrendSeries = useCallback((opts?: MakeTrendArgs): TrendSeries => {
+    const metric: TrendMetric = opts?.metric ?? 'turnover';
+    const by = opts?.by ?? 'none';
+    const includeOthers = opts?.includeOthers ?? true;
+    const only = (opts?.only ?? []).map(s => s.trim()).filter(Boolean);
+    const top = Math.max(1, Math.min(20, opts?.topN ?? 5));
+
+    // bucket temporal: auto => month si rango > 45 dÃ­as
+    let bucket: 'day' | 'month' = 'day';
+    if (opts?.bucket === 'month') bucket = 'month';
+    else if (opts?.bucket === 'day') bucket = 'day';
+    else {
+      // auto
+      if (filtered.length > 1) {
+        const min = filtered.reduce((m, r) => (r.date < m ? r.date : m), filtered[0].date);
+        const max = filtered.reduce((m, r) => (r.date > m ? r.date : m), filtered[0].date);
+        const days = differenceInDays(parseISO(max), parseISO(min));
+        if (days > 45) bucket = 'month';
+      }
+    }
+
+    const bucketKey = (d: string) => bucket === 'month'
+      ? format(parseISO(d), 'yyyy-MM')
+      : d;
+
+    type Sum = { v: number; t: number; m: number };
+    const keyOf = (r: typeof filtered[number]) => {
+      if (by === 'database') return (r.database || '(unknown)').trim();
+      if (by === 'partner')  return (r.partner || '(unknown)').trim();
+      if (by === 'geo')      return (r.geo || '(unknown)').toUpperCase();
+      return 'total';
+    };
+
+    if (by === 'none') {
+      // una sola serie "total"
+      const map = new Map<string, Sum>();
+      for (const r of filtered) {
+        const b = bucketKey(r.date);
+        const s = map.get(b) ?? { v: 0, t: 0, m: 0 };
+        s.v += r.vSent || 0;
+        s.t += r.turnover || 0;
+        s.m += r.margin || 0;
+        map.set(b, s);
+      }
+      const data = Array.from(map.entries())
+        .sort(([a], [b]) => a.localeCompare(b))
+        .map(([date, s]) => {
+          const row: Record<string, number | string> = { date };
+          let val = 0;
+          if (metric === 'vSent') val = s.v;
+          else if (metric === 'turnover') val = +s.t.toFixed(2);
+          else if (metric === 'margin') val = +s.m.toFixed(2);
+          else if (metric === 'ecpm') val = s.v > 0 ? +((s.t / s.v) * 1000).toFixed(2) : 0;
+          else if (metric === 'marginPct') val = s.t > 0 ? +(s.m / s.t).toFixed(6) : 0; // 0..1
+          row['total'] = val;
+          return row;
+        });
+      return { data, keys: ['total'] };
+    }
+
+    // Totales por clave (para Top-N si no hay "only")
+    const totals = new Map<string, Sum>();
+    for (const r of filtered) {
+      const k = keyOf(r);
+      const s = totals.get(k) ?? { v: 0, t: 0, m: 0 };
+      s.v += r.vSent || 0;
+      s.t += r.turnover || 0;
+      s.m += r.margin || 0;
+      totals.set(k, s);
+    }
+
+    const useOnly = only.length > 0;
+    let keys: string[];
+    if (useOnly) {
+      const onlySet = new Set(only);
+      keys = Array.from(totals.keys()).filter(k => onlySet.has(k));
+      if (keys.length === 0) return { data: [], keys: [] };
+    } else {
+      // rankeamos por turnover acumulado
+      const topKeys = Array.from(totals.entries())
+        .sort((a, b) => b[1].t - a[1].t)
+        .slice(0, top)
+        .map(([k]) => k);
+      keys = includeOthers ? [...topKeys, 'Others'] : topKeys;
+    }
+    const topSet = new Set(keys);
+
+    // AgregaciÃ³n por fecha y clave (con Others si aplica)
+    const dateMap = new Map<string, Map<string, Sum>>();
+    const push = (d: string, k: string, add: Sum) => {
+      const inner = dateMap.get(d) ?? new Map<string, Sum>();
+      const s = inner.get(k) ?? { v: 0, t: 0, m: 0 };
+      s.v += add.v; s.t += add.t; s.m += add.m;
+      inner.set(k, s);
+      dateMap.set(d, inner);
+    };
+
+    for (const r of filtered) {
+      const d = bucketKey(r.date);
+      const k = keyOf(r);
+      const add: Sum = { v: r.vSent || 0, t: r.turnover || 0, m: r.margin || 0 };
+
+      if (useOnly) {
+        if (topSet.has(k)) push(d, k, add);
+      } else {
+        const seriesKey = topSet.has(k) ? k : (includeOthers ? 'Others' : null);
+        if (seriesKey) push(d, seriesKey, add);
+      }
+    }
+
+    const data = Array.from(dateMap.entries())
+      .sort(([a], [b]) => a.localeCompare(b))
+      .map(([date, inner]) => {
+        const row: Record<string, number | string> = { date };
+        for (const k of keys) {
+          const s = inner.get(k) ?? { v: 0, t: 0, m: 0 };
+          let val = 0;
+          if (metric === 'vSent') val = s.v;
+          else if (metric === 'turnover') val = +s.t.toFixed(2);
+          else if (metric === 'margin') val = +s.m.toFixed(2);
+          else if (metric === 'ecpm') val = s.v > 0 ? +((s.t / s.v) * 1000).toFixed(2) : 0;
+          else if (metric === 'marginPct') val = s.t > 0 ? +(s.m / s.t).toFixed(6) : 0; // 0..1
+          row[k] = val;
+        }
+        return row;
+      });
+
+    return { data, keys };
+  }, [filtered]);
+
+  // Compat: turnover especÃ­fico
+  const makeTurnoverSeries = useCallback(
+    (opts?: Omit<MakeTrendArgs, 'metric'>) =>
+      makeTrendSeries({ metric: 'turnover', ...opts }),
+    [makeTrendSeries]
+  );
+
+  // -------- NUEVO: agregador genÃ©rico de totales sobre el "filtered" actual
+  const computeTotals = useCallback((
+    predicate?: (row: typeof filtered[number]) => boolean
+  ) => {
+    let vSent = 0, turnover = 0, margin = 0, wEcpm = 0, count = 0;
+    for (const r of filtered) {
+      if (predicate && !predicate(r)) continue;
+      vSent    += r.vSent || 0;
+      turnover += r.turnover || 0;
+      margin   += r.margin || 0;
+      wEcpm    += (r.ecpm || 0) * (r.vSent || 0);
+      count++;
+    }
+    const ecpm = vSent > 0 ? wEcpm / vSent : 0;
+    const marginPct = turnover > 0 ? margin / turnover : null;
+    return { vSent, turnover, margin, ecpm, marginPct, count };
+  }, [filtered]);
+
+  // -------- helper: Ãºltimos 30 dÃ­as respecto al mÃ¡ximo disponible
+  const quickLast30 = useCallback(() => {
+    const max = rows.reduce(
+      (m, r) => (r.date > m ? r.date : m),
+      rows[0]?.date ?? new Date().toISOString().slice(0, 10),
+    );
+    const fromDate = format(addDays(parseISO(max), -29), 'yyyy-MM-dd');
+    setFilters(prev => ({ ...prev, from: fromDate, to: max }));
+  }, [rows, setFilters]);
+
+  // -------- resumen para cabeceras
+  const summary = useMemo(() => ({
+    totals,
+    filteredRows: filtered.length,
+    groups: groupCount,
+  }), [totals, filtered.length, groupCount]);
+
+  return {
+    // estado
+    filters, setFilters,
+    groupBy, setGroupBy,
+    metric, setMetric,
+    topN, setTopN,
+
+    // datos
+    ranking,
+    fullRanking,
+    ecpmTrend,
+    summary,
+
+    // helpers y series
+    quickLast30,
+    makeTrendSeries,
+    makeTurnoverSeries,
+    listAvailableKeys,
+
+    // utilidades nuevas
+    computeTotals,
+  };
+}
+

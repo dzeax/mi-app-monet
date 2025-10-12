@@ -1,0 +1,1882 @@
+﻿===== C:\Users\Usuario\Documents\GitHub\mi-app-monet\data\reference.ts =====
+// data/reference.ts
+import { z } from 'zod';
+import rawCampaigns from './catalogs/campaigns.json';
+import rawPartners from './catalogs/partners.json';
+import rawDatabases from './catalogs/databases.json';
+import rawRules from './catalogs/invoice_rules.json';
+import rawThemes from './catalogs/themes.json';
+
+// ---------------- Constantes (tuplas as const) ----------------
+export const DB_TYPES = ['B2B', 'B2C', 'Mixed'] as const;
+export const INVOICE_OFFICES = ['CAR', 'DAT', 'INT'] as const;
+export const TYPES = ['CPL', 'CPM', 'CPC', 'CPA'] as const;
+
+// ---------------- Tipos base ----------------
+export type DBType = 'B2C' | 'B2B' | 'Mixed';
+export type InvoiceOffice = 'CAR' | 'DAT' | 'INT';
+
+export type CampaignRef = { id: string; name: string; advertiser: string };
+
+export type PartnerRef = {
+  id: string;                          // slug estable
+  name: string;                        // visible en UI
+  defaultInvoiceOffice: InvoiceOffice; // fallback si no hay regla por GEO/partner
+  isInternal?: boolean;                // flag si viene "Internal"/"INT" en la fuente
+};
+
+export type DatabaseRef = { id: string; name: string; geo: string; dbType: DBType };
+export type ThemeRef = { id: string; label: string };
+
+// ---------------- Utils (funciones hoisted) ----------------
+export function trimCollapse(s: string) {
+  return (s ?? '').trim().replace(/\s+/g, ' ');
+}
+export function toSlug(s: string) {
+  return (s ?? '')
+    .normalize('NFKD').replace(/[\u0300-\u036f]/g, '')
+    .toLowerCase().replace(/[^a-z0-9]+/g, '-')
+    .replace(/^-+|-+$/g, '').slice(0, 60);
+}
+function norm(s?: string) {
+  return (s ?? '').trim().toLowerCase();
+}
+
+// ---------------- THEMES (JSON) ----------------
+const ThemeInZ = z.object({ label: z.string() });
+type ThemeIn = z.infer<typeof ThemeInZ>;
+
+function normalizeThemes(input: unknown): ThemeRef[] {
+  const parsed = z.array(ThemeInZ).parse(input);
+
+  const seen = new Set<string>();
+  const out: ThemeRef[] = [];
+
+  for (const r of parsed) {
+    const label = trimCollapse(r.label);
+    if (!label) continue;
+    const key = label.toLowerCase();
+    if (seen.has(key)) continue; // dedupe case-insensitive
+    seen.add(key);
+
+    const base = toSlug(label) || 'theme';
+    let id = base, n = 2;
+    while (out.some(t => t.id === id)) id = `${base}-${n++}`;
+
+    out.push({ id, label });
+  }
+
+  // Orden alfabÃ©tico, dejando "Unknown" al final si existe
+  out.sort((a, b) => {
+    const ax = a.label.toLowerCase() === 'unknown';
+    const bx = b.label.toLowerCase() === 'unknown';
+    if (ax && !bx) return 1;
+    if (!ax && bx) return -1;
+    return a.label.localeCompare(b.label, 'es');
+  });
+
+  return out;
+}
+
+export const THEMES_META: ThemeRef[] = normalizeThemes(rawThemes);
+export const THEMES: string[] = THEMES_META.map(t => t.label);
+
+// ---------------- CAMPAIGNS (JSON) ----------------
+const CampaignInZ = z.object({ name: z.string(), advertiser: z.string() });
+type CampaignIn = z.infer<typeof CampaignInZ>;
+
+function normalizeCampaigns(input: unknown): CampaignRef[] {
+  const parsed = z.array(CampaignInZ).parse(input);
+
+  const used = new Set<string>();
+  const rows = parsed.map((r) => {
+    const name = trimCollapse(r.name);
+    const advertiser = trimCollapse(r.advertiser);
+    const base = toSlug(name) || toSlug(`${name}-${advertiser || 'wl'}`) || 'campaign';
+    let id = base;
+    let n = 2;
+    while (used.has(id)) id = `${base}-${n++}`;
+    used.add(id);
+    return { id, name, advertiser };
+  });
+
+  rows.sort((a, b) => a.name.localeCompare(b.name, 'es'));
+  return rows;
+}
+
+export const CAMPAIGNS: CampaignRef[] = normalizeCampaigns(rawCampaigns);
+
+// ---------------- PARTNERS (JSON) ----------------
+const PartnerInZ = z.object({
+  name: z.string(),
+  invoiceOffice: z.string(), // puede venir "Internal", "CAR", "DAT"
+});
+type PartnerIn = z.infer<typeof PartnerInZ>;
+
+function mapInvoiceOffice(s: string): { office: InvoiceOffice; isInternal?: boolean } {
+  const v = norm(s);
+  if (v === 'car') return { office: 'CAR' };
+  if (v === 'dat') return { office: 'DAT' };
+  if (v === 'internal' || v === 'int') return { office: 'INT', isInternal: true };
+  // fallback prudente
+  return { office: 'DAT' };
+}
+
+function normalizePartners(input: unknown): PartnerRef[] {
+  const parsed = z.array(PartnerInZ).parse(input);
+  const used = new Set<string>();
+  const out: PartnerRef[] = [];
+
+  for (const r of parsed) {
+    const name = trimCollapse(r.name);
+    const base = toSlug(name) || 'partner';
+    let id = base;
+    let n = 2;
+    while (used.has(id)) id = `${base}-${n++}`;
+    used.add(id);
+
+    const { office, isInternal } = mapInvoiceOffice(r.invoiceOffice);
+    out.push({
+      id,
+      name,
+      defaultInvoiceOffice: office,
+      ...(isInternal ? { isInternal: true } : {}),
+    });
+  }
+
+  out.sort((a, b) => a.name.localeCompare(b.name, 'es'));
+  return out;
+}
+
+export const PARTNERS: PartnerRef[] = normalizePartners(rawPartners);
+
+// ---------------- DATABASES (JSON) ----------------
+const DatabaseInZ = z.object({
+  id: z.string(),
+  name: z.string(),
+  geo: z.string(),                         // tal cual (ES, FR, UK, MULTI, etc.)
+  dbType: z.enum(DB_TYPES),
+});
+type DatabaseIn = z.infer<typeof DatabaseInZ>;
+
+function normalizeDatabases(input: unknown): DatabaseRef[] {
+  const parsed = z.array(DatabaseInZ).parse(input);
+  return parsed
+    .map(d => ({ ...d, name: trimCollapse(d.name), geo: trimCollapse(d.geo).toUpperCase() }))
+    .sort((a, b) => a.name.localeCompare(b.name, 'es'));
+}
+
+export const DATABASES: DatabaseRef[] = normalizeDatabases(rawDatabases);
+
+// ---------------- REGLAS de invoice (JSON) ----------------
+const RuleInZ = z.object({
+  geo: z.string().optional(),
+  partner: z.string().optional(), // por nombre o id; resolvemos abajo
+  office: z.enum(INVOICE_OFFICES),
+});
+type RuleIn = z.infer<typeof RuleInZ>;
+
+export type InvoiceRule = { geo?: string; partner?: string; invoiceOffice: InvoiceOffice };
+
+function normalizeRules(input: unknown): InvoiceRule[] {
+  const parsed = z.array(RuleInZ).parse(input);
+  // Guardamos tal cual; la resoluciÃ³n harÃ¡ el matching por id o nombre.
+  return parsed.map(r => ({ geo: r.geo, partner: r.partner, invoiceOffice: r.office }));
+}
+
+export const INVOICE_RULES: InvoiceRule[] = normalizeRules(rawRules);
+
+// ---------------- ResoluciÃ³n de Invoice Office ----------------
+// Precedencia:
+// 1) Regla exacta geo+partner
+// 2) Regla por partner (sin geo)
+// 3) Default del partner
+// 4) Regla por geo (sin partner)
+// 5) Fallback DAT
+export function resolveInvoiceOffice(geo?: string, partnerNameOrId?: string): InvoiceOffice {
+  const g = norm(geo);
+  const pRaw = norm(partnerNameOrId);
+
+  // Localiza partner por id o por nombre (soportamos ambos)
+  const partnerObj = PARTNERS.find(pp => norm(pp.id) === pRaw || norm(pp.name) === pRaw);
+  const pByName = partnerObj ? norm(partnerObj.name) : pRaw;
+  const pById = partnerObj ? norm(partnerObj.id) : pRaw;
+
+  const matchGeo = (rg?: string) => !!rg && norm(rg) === g;
+  const matchPartner = (rp?: string) => {
+    if (!rp) return false;
+    const rpNorm = norm(rp);
+    // match por nombre o por id
+    return rpNorm === pByName || rpNorm === pById;
+  };
+
+  // Solo reglas con al menos una condiciÃ³n
+  const rules = INVOICE_RULES.filter(r => !!(r.geo || r.partner));
+
+  // 1) geo+partner
+  const exact = rules.find(r => matchGeo(r.geo) && matchPartner(r.partner));
+  if (exact) return exact.invoiceOffice;
+
+  // 2) solo partner
+  const byPartner = rules.find(r => !r.geo && matchPartner(r.partner));
+  if (byPartner) return byPartner.invoiceOffice;
+
+  // 3) default del partner
+  if (partnerObj?.defaultInvoiceOffice) return partnerObj.defaultInvoiceOffice;
+
+  // 4) solo geo
+  const byGeo = rules.find(r => matchGeo(r.geo) && !r.partner);
+  if (byGeo) return byGeo.invoiceOffice;
+
+  // 5) fallback
+  return 'DAT';
+}
+
+// Alias opcional por legibilidad â€” mismo comportamiento
+export const resolveInvoiceOfficeMerged = resolveInvoiceOffice;
+
+// ---------------- Helpers ----------------
+export function findCampaignByName(name?: string) {
+  const n = (name ?? '').trim().toLowerCase();
+  if (!n) return undefined;
+  return CAMPAIGNS.find(c => c.name.toLowerCase() === n)
+      ?? CAMPAIGNS.find(c => toSlug(c.name) === toSlug(n));
+}
+export function findPartnerByName(name?: string) {
+  const n = norm(name);
+  return PARTNERS.find(p => norm(p.name) === n);
+}
+export function findPartnerById(id?: string) {
+  const i = norm(id);
+  return PARTNERS.find(p => norm(p.id) === i);
+}
+export function findDatabaseByName(name?: string) {
+  const n = norm(name);
+  return DATABASES.find(d => norm(d.name) === n);
+}
+export function findDatabaseById(id?: string) {
+  const i = norm(id);
+  return DATABASES.find(d => norm(d.id) === i);
+}
+
+===== C:\Users\Usuario\Documents\GitHub\mi-app-monet\data\catalogs\campaigns.json =====
+[
+  {
+    "name": "Assurland Auto",
+    "advertiser": "Assurland"
+  },
+  {
+    "name": "Cofidis",
+    "advertiser": "Cofidis"
+  },
+  {
+    "name": "Credit Dispo",
+    "advertiser": "White Label"
+  },
+  {
+    "name": "We sur Auto",
+    "advertiser": "We sur Auto"
+  },
+  {
+    "name": "X trade",
+    "advertiser": "X trade"
+  },
+  {
+    "name": "adoucisseur d'eau",
+    "advertiser": "adoucisseur d'eau"
+  },
+  {
+    "name": "Ascenseur Maison",
+    "advertiser": "White Label"
+  },
+  {
+    "name": "Assurland Assurance RC Pro B2B",
+    "advertiser": "Assurland"
+  },
+  {
+    "name": "Commercial Cleaning FR",
+    "advertiser": "White Label"
+  },
+  {
+    "name": "Distributeur automatique",
+    "advertiser": "White Label"
+  },
+  {
+    "name": "Garantie Decenale",
+    "advertiser": "White Label"
+  },
+  {
+    "name": "Mergers & Acquisitions // Fusac",
+    "advertiser": "White Label"
+  },
+  {
+    "name": "Prevoyance B2B",
+    "advertiser": "White Label"
+  },
+  {
+    "name": "Telecoms providers",
+    "advertiser": "White Label"
+  },
+  {
+    "name": "Ticket Restaurant FR",
+    "advertiser": "Edenred"
+  },
+  {
+    "name": "Tracking FR",
+    "advertiser": "White Label"
+  },
+  {
+    "name": "voiture",
+    "advertiser": "White Label"
+  },
+  {
+    "name": "Water Coolers",
+    "advertiser": "White Label"
+  },
+  {
+    "name": "website designer",
+    "advertiser": "White Label"
+  },
+  {
+    "name": "Ulys",
+    "advertiser": "Ulys"
+  },
+  {
+    "name": "volkswagen",
+    "advertiser": "volkswagen"
+  },
+  {
+    "name": "Allianz Auto FR",
+    "advertiser": "Allianz"
+  },
+  {
+    "name": "Allianz MRH",
+    "advertiser": "Allianz"
+  },
+  {
+    "name": "Allianz sante",
+    "advertiser": "Allianz"
+  },
+  {
+    "name": "Arts et fenetres",
+    "advertiser": "White Label"
+  },
+  {
+    "name": "Comparateur mutuelle",
+    "advertiser": "White Label"
+  },
+  {
+    "name": "ikki sante",
+    "advertiser": "Ikki"
+  },
+  {
+    "name": "Investiment immobilier",
+    "advertiser": "White Label"
+  },
+  {
+    "name": "Isolation",
+    "advertiser": "White Label"
+  },
+  {
+    "name": "ITE",
+    "advertiser": "ITE"
+  },
+  {
+    "name": "Monte Escalier",
+    "advertiser": "White Label"
+  },
+  {
+    "name": "PER",
+    "advertiser": "White Label"
+  },
+  {
+    "name": "Radiateur Electrique",
+    "advertiser": "White Label"
+  },
+  {
+    "name": "Sodedif santÃ©",
+    "advertiser": "Sodedif santÃ©"
+  },
+  {
+    "name": "Chez les seniors obseques",
+    "advertiser": "White Label"
+  },
+  {
+    "name": "Prevoyance",
+    "advertiser": "Prevoyance"
+  },
+  {
+    "name": "Comme J'aime",
+    "advertiser": "Comme J'aime"
+  },
+  {
+    "name": "Credit mini taux",
+    "advertiser": "White Label"
+  },
+  {
+    "name": "Mateva",
+    "advertiser": "Mateva"
+  },
+  {
+    "name": "Melia Mutuelle",
+    "advertiser": "Melia Mutuelle"
+  },
+  {
+    "name": "Agos",
+    "advertiser": "Agos"
+  },
+  {
+    "name": "Arquati",
+    "advertiser": "Arquati"
+  },
+  {
+    "name": "Attiva Risparmia Enel",
+    "advertiser": "Enel"
+  },
+  {
+    "name": "Bagnitaliani",
+    "advertiser": "White Label"
+  },
+  {
+    "name": "BNT",
+    "advertiser": "BNT"
+  },
+  {
+    "name": "Citroen",
+    "advertiser": "Citroen"
+  },
+  {
+    "name": "Climatizzatore",
+    "advertiser": "White Label"
+  },
+  {
+    "name": "Dam Service Tim",
+    "advertiser": "Tim"
+  },
+  {
+    "name": "Depuragreen",
+    "advertiser": "Depuragreen"
+  },
+  {
+    "name": "Fastweb",
+    "advertiser": "Fastweb"
+  },
+  {
+    "name": "Febal Casa",
+    "advertiser": "Febal Casa"
+  },
+  {
+    "name": "Intelligenza artificiale",
+    "advertiser": "White Label"
+  },
+  {
+    "name": "Lenergy",
+    "advertiser": "Lenergy"
+  },
+  {
+    "name": "Movenzia Panda",
+    "advertiser": "Movenzia"
+  },
+  {
+    "name": "Murprotec ES",
+    "advertiser": "Murprotect"
+  },
+  {
+    "name": "Murprotec IT",
+    "advertiser": "Murprotect"
+  },
+  {
+    "name": "Nielsen",
+    "advertiser": "Nielsen"
+  },
+  {
+    "name": "Remail Docce",
+    "advertiser": "White Label"
+  },
+  {
+    "name": "Satispay",
+    "advertiser": "Satispay"
+  },
+  {
+    "name": "Studium",
+    "advertiser": "White Label"
+  },
+  {
+    "name": "Verisure IT",
+    "advertiser": "Verisure"
+  },
+  {
+    "name": "Wallstreet english",
+    "advertiser": "Wallstreet english"
+  },
+  {
+    "name": "Svenson",
+    "advertiser": "Svenson"
+  },
+  {
+    "name": "Accounting ES",
+    "advertiser": "White Label"
+  },
+  {
+    "name": "Commercial Cleaning",
+    "advertiser": "White Label"
+  },
+  {
+    "name": "Fuel Card - ES",
+    "advertiser": "White Label"
+  },
+  {
+    "name": "Merchant Service",
+    "advertiser": "White Label"
+  },
+  {
+    "name": "Tracking ES",
+    "advertiser": "White Label"
+  },
+  {
+    "name": "Miatel",
+    "advertiser": "Miatel"
+  },
+  {
+    "name": "Sanitas",
+    "advertiser": "Sanitas"
+  },
+  {
+    "name": "Endesa",
+    "advertiser": "Endesa"
+  },
+  {
+    "name": "Ricoh Print ES",
+    "advertiser": "Ricoh"
+  },
+  {
+    "name": "Caixa research CPM",
+    "advertiser": "Caixa"
+  },
+  {
+    "name": "Justalia",
+    "advertiser": "Justalia"
+  },
+  {
+    "name": "aldeas infantiles",
+    "advertiser": "aldeas infantiles"
+  },
+  {
+    "name": "Clinica Baviera",
+    "advertiser": "Clinica Baviera"
+  },
+  {
+    "name": "dacia",
+    "advertiser": "Dacia"
+  },
+  {
+    "name": "Dacia",
+    "advertiser": "Dacia"
+  },
+  {
+    "name": "FlexiCar",
+    "advertiser": "FlexiCar"
+  },
+  {
+    "name": "Lowi",
+    "advertiser": "Lowi"
+  },
+  {
+    "name": "Melia Hotels CPM - ES",
+    "advertiser": "Melia Hotels"
+  },
+  {
+    "name": "Movistar Prosegur Alarmas",
+    "advertiser": "Movistar Prosegur"
+  },
+  {
+    "name": "Movistar+ CPC",
+    "advertiser": "Movistar+"
+  },
+  {
+    "name": "naturgy",
+    "advertiser": "naturgy"
+  },
+  {
+    "name": "Northgate Particulares",
+    "advertiser": "Northgate"
+  },
+  {
+    "name": "para y compara",
+    "advertiser": "White Label"
+  },
+  {
+    "name": "Repsol EnergÃ­a y Gas",
+    "advertiser": "Repsol"
+  },
+  {
+    "name": "Sanitas Dental",
+    "advertiser": "Sanitas"
+  },
+  {
+    "name": "Securitas CPM",
+    "advertiser": "Securitas Direct"
+  },
+  {
+    "name": "Securitas Direct ES",
+    "advertiser": "Securitas Direct"
+  },
+  {
+    "name": "Tarifalo Solar",
+    "advertiser": "Tarifalo Solar"
+  },
+  {
+    "name": "Veci",
+    "advertiser": "Veci"
+  },
+  {
+    "name": "Ariel Caldaie",
+    "advertiser": "Ariel Caldaie"
+  },
+  {
+    "name": "Banklider Home",
+    "advertiser": "Banklider"
+  },
+  {
+    "name": "Banklider Paneles Solares",
+    "advertiser": "Banklider"
+  },
+  {
+    "name": "Badkamerrenoveren",
+    "advertiser": "Badkamerrenoveren"
+  },
+  {
+    "name": "Capitall",
+    "advertiser": "Capitall"
+  },
+  {
+    "name": "Dakreiniging",
+    "advertiser": "Dakreiniging"
+  },
+  {
+    "name": "dakrenovatie",
+    "advertiser": "dakrenovatie"
+  },
+  {
+    "name": "Helan Hospitalia",
+    "advertiser": "Helan Hospitalia"
+  },
+  {
+    "name": "IBIS BENL",
+    "advertiser": "Ibis"
+  },
+  {
+    "name": "Laadpalen",
+    "advertiser": "Laadpalen"
+  },
+  {
+    "name": "Nomad",
+    "advertiser": "Nomad"
+  },
+  {
+    "name": "Panneaux Solaires",
+    "advertiser": "White Label"
+  },
+  {
+    "name": "Warmtepomp",
+    "advertiser": "White Label"
+  },
+  {
+    "name": "Zonnepanelen BENL",
+    "advertiser": "Zonnepanelen"
+  },
+  {
+    "name": "Adeslas",
+    "advertiser": "Adeslas"
+  },
+  {
+    "name": "Adeslas",
+    "advertiser": "Adeslas"
+  },
+  {
+    "name": "Aquaservice",
+    "advertiser": "Aquaservice"
+  },
+  {
+    "name": "Asisa Decesos",
+    "advertiser": "Asisa"
+  },
+  {
+    "name": "DKV Decesos",
+    "advertiser": "DKV"
+  },
+  {
+    "name": "Iberdrola",
+    "advertiser": "Iberdrola"
+  },
+  {
+    "name": "Preventiva",
+    "advertiser": "Preventiva"
+  },
+  {
+    "name": "Santa Lucia",
+    "advertiser": "Santa Lucia"
+  },
+  {
+    "name": "Revolut",
+    "advertiser": "Revolut"
+  },
+  {
+    "name": "Borne Recharge",
+    "advertiser": "White Label"
+  },
+  {
+    "name": "Business Alarm",
+    "advertiser": "White Label"
+  },
+  {
+    "name": "cartes cadeaux",
+    "advertiser": "White Label"
+  },
+  {
+    "name": "Company Car",
+    "advertiser": "White Label"
+  },
+  {
+    "name": "Copiers And Printers",
+    "advertiser": "White Label"
+  },
+  {
+    "name": "Mutuelle FR",
+    "advertiser": "White Label"
+  },
+  {
+    "name": "Vending Machines",
+    "advertiser": "White Label"
+  },
+  {
+    "name": "Allianz Coche",
+    "advertiser": "Allianz"
+  },
+  {
+    "name": "Investiment immobilier",
+    "advertiser": "White Label"
+  },
+  {
+    "name": "Orange maison protegee",
+    "advertiser": "White Label"
+  },
+  {
+    "name": "Primaliance",
+    "advertiser": "White Label"
+  },
+  {
+    "name": "Sector Alarm",
+    "advertiser": "White Label"
+  },
+  {
+    "name": "April Assurance",
+    "advertiser": "April"
+  },
+  {
+    "name": "Assurance ObsÃ¨ques",
+    "advertiser": "White Label"
+  },
+  {
+    "name": "Canal plus B2B",
+    "advertiser": "White Label"
+  },
+  {
+    "name": "Culligan Adoucisseur",
+    "advertiser": "Culligan"
+  },
+  {
+    "name": "Mobility Fleet",
+    "advertiser": "White Label"
+  },
+  {
+    "name": "Verisure FR",
+    "advertiser": "Verisure"
+  },
+  {
+    "name": "Alfa Romeo Stelvio",
+    "advertiser": "Alfa Romeo"
+  },
+  {
+    "name": "amazon",
+    "advertiser": "White Label"
+  },
+  {
+    "name": "Audifonos",
+    "advertiser": "White Label"
+  },
+  {
+    "name": "Energia 3c",
+    "advertiser": "Energia 3c"
+  },
+  {
+    "name": "Equity Release",
+    "advertiser": "White Label"
+  },
+  {
+    "name": "Groene Energie",
+    "advertiser": "Groene Energie"
+  },
+  {
+    "name": "TelePass",
+    "advertiser": "TelePass"
+  },
+  {
+    "name": "Unipegasso",
+    "advertiser": "Unipegasso"
+  },
+  {
+    "name": "Acqualife IT",
+    "advertiser": "Acqualife"
+  },
+  {
+    "name": "Cartel de coches",
+    "advertiser": "Cartel de coches"
+  },
+  {
+    "name": "Pharmacy2U",
+    "advertiser": "Pharmacy2U"
+  },
+  {
+    "name": "Help by windows",
+    "advertiser": "White Label"
+  },
+  {
+    "name": "Accounting software ES",
+    "advertiser": "White Label"
+  },
+  {
+    "name": "Fuel Cards ES",
+    "advertiser": "White Label"
+  },
+  {
+    "name": "Tracking GÃ©olocalisation ES",
+    "advertiser": "White Label"
+  },
+  {
+    "name": "EF Cpm",
+    "advertiser": "EF"
+  },
+  {
+    "name": "Linea Directa",
+    "advertiser": "Linea Directa"
+  },
+  {
+    "name": "Medicos sin fronteras",
+    "advertiser": "Medicos sin fronteras"
+  },
+  {
+    "name": "OCU",
+    "advertiser": "OCU"
+  },
+  {
+    "name": "Ok Mobility",
+    "advertiser": "Ok Mobility"
+  },
+  {
+    "name": "Sicor Alarmas",
+    "advertiser": "Sicor"
+  },
+  {
+    "name": "Eni Plenitud Fotovoltaico",
+    "advertiser": "Eni Plenitud"
+  },
+  {
+    "name": "Air ConditionnÃ© BENL",
+    "advertiser": "White Label"
+  },
+  {
+    "name": "Decesos Marca Blanca",
+    "advertiser": "White Label"
+  },
+  {
+    "name": "Helvetia",
+    "advertiser": "Helvetia"
+  },
+  {
+    "name": "Olio frantoio",
+    "advertiser": "Olio frantoio"
+  },
+  {
+    "name": "Ricoh Docuware",
+    "advertiser": "Ricoh"
+  },
+  {
+    "name": "Yooz CPM",
+    "advertiser": "Yooz"
+  },
+  {
+    "name": "pompe a chaleur",
+    "advertiser": "White Label"
+  },
+  {
+    "name": "Costa Croisieres",
+    "advertiser": "Costa Croisieres"
+  },
+  {
+    "name": "Gift Vouchers",
+    "advertiser": "White Label"
+  },
+  {
+    "name": "daikin",
+    "advertiser": "daikin"
+  },
+  {
+    "name": "mutuelle senior immediate devis",
+    "advertiser": "White Label"
+  },
+  {
+    "name": "afi sante",
+    "advertiser": "afi sante"
+  },
+  {
+    "name": "Banque et credit",
+    "advertiser": "White Label"
+  },
+  {
+    "name": "Piscine",
+    "advertiser": "White Label"
+  },
+  {
+    "name": "Telepass end to end CPL",
+    "advertiser": "Energia 3c"
+  },
+  {
+    "name": "Eni Plenitude",
+    "advertiser": "Eni Plenitude"
+  },
+  {
+    "name": "piu finestre",
+    "advertiser": "White Label"
+  },
+  {
+    "name": "Accounting Software",
+    "advertiser": "White Label"
+  },
+  {
+    "name": "Tracking // GÃ©olocalisation",
+    "advertiser": "White Label"
+  },
+  {
+    "name": "cear",
+    "advertiser": "Cear"
+  },
+  {
+    "name": "Divina Pastora Salud",
+    "advertiser": "Divina Pastora"
+  },
+  {
+    "name": "Linea directa CPM",
+    "advertiser": "Linea directa"
+  },
+  {
+    "name": "Optica 2000",
+    "advertiser": "Optica 2000"
+  },
+  {
+    "name": "renault trafic",
+    "advertiser": "renault trafic"
+  },
+  {
+    "name": "DKV Integral",
+    "advertiser": "DKV"
+  },
+  {
+    "name": "FuneCap",
+    "advertiser": "FuneCap"
+  },
+  {
+    "name": "Occhiali24",
+    "advertiser": "Occhiali24"
+  },
+  {
+    "name": "leapmotor",
+    "advertiser": "leapmotor"
+  },
+  {
+    "name": "Europcar",
+    "advertiser": "Europcar"
+  },
+  {
+    "name": "Goldcar",
+    "advertiser": "Goldcar"
+  },
+  {
+    "name": "Gafas Steiner",
+    "advertiser": "Gafas Steiner"
+  },
+  {
+    "name": "clubmed",
+    "advertiser": "clubmed"
+  },
+  {
+    "name": "Genci",
+    "advertiser": "Genci"
+  },
+  {
+    "name": "landrover",
+    "advertiser": "landrover"
+  },
+  {
+    "name": "decathlon",
+    "advertiser": "decathlon"
+  },
+  {
+    "name": "FundaciÃ³n Caixa",
+    "advertiser": "FundaciÃ³n Caixa"
+  },
+  {
+    "name": "Climatisation",
+    "advertiser": "White Label"
+  },
+  {
+    "name": "Depiltech",
+    "advertiser": "Depiltech"
+  },
+  {
+    "name": "metlife",
+    "advertiser": "metlife"
+  },
+  {
+    "name": "rachatcredit",
+    "advertiser": "White Label"
+  },
+  {
+    "name": "BNL",
+    "advertiser": "White Label"
+  },
+  {
+    "name": "Energia Guida Gratuita",
+    "advertiser": "White Label"
+  },
+  {
+    "name": "Sicor",
+    "advertiser": "White Label"
+  },
+  {
+    "name": "Weekend desk",
+    "advertiser": "Weekend desk"
+  },
+  {
+    "name": "OCASO",
+    "advertiser": "OCASO"
+  },
+  {
+    "name": "DS AUTO",
+    "advertiser": "DS AUTO"
+  },
+  {
+    "name": "IDA",
+    "advertiser": "IDA"
+  },
+  {
+    "name": "Epargne",
+    "advertiser": "Ã‰pargne&Retraite"
+  },
+  {
+    "name": "mutuelle integrale",
+    "advertiser": "White Label"
+  },
+  {
+    "name": "assurance animaux",
+    "advertiser": "White Label"
+  },
+  {
+    "name": "Buoni Pasto Restaurant",
+    "advertiser": "Edenred"
+  },
+  {
+    "name": "Business alarm",
+    "advertiser": "White Label"
+  },
+  {
+    "name": "carte restaurant",
+    "advertiser": "White Label"
+  },
+  {
+    "name": "Diesel Emissions Claims",
+    "advertiser": "Diesel Claim"
+  },
+  {
+    "name": "EdenRed",
+    "advertiser": "Edenred"
+  },
+  {
+    "name": "Energy Supplier",
+    "advertiser": "White Label"
+  },
+  {
+    "name": "EPOS - FR",
+    "advertiser": "White Label"
+  },
+  {
+    "name": "Fraking Machine",
+    "advertiser": "White Label"
+  },
+  {
+    "name": "Magnet Kitchen",
+    "advertiser": "Magnet"
+  },
+  {
+    "name": "Sell my car",
+    "advertiser": "Car wow"
+  },
+  {
+    "name": "TimVision",
+    "advertiser": "Tim"
+  },
+  {
+    "name": "Alarma Segura",
+    "advertiser": "White Label"
+  },
+  {
+    "name": "Aseguramos decesos",
+    "advertiser": "Aseguramos online"
+  },
+  {
+    "name": "B100 CPM",
+    "advertiser": "B100"
+  },
+  {
+    "name": "Masterclass CPM",
+    "advertiser": "Digital Group"
+  },
+  {
+    "name": "AutoSecure",
+    "advertiser": "White Label"
+  },
+  {
+    "name": "British Gas",
+    "advertiser": "British Gas"
+  },
+  {
+    "name": "Car Finance Claim",
+    "advertiser": "White Label"
+  },
+  {
+    "name": "Knight knox",
+    "advertiser": "Knight knox"
+  },
+  {
+    "name": "North Fox Property Axiom",
+    "advertiser": "North Fox Property"
+  },
+  {
+    "name": "PiperDrive",
+    "advertiser": "PiperDrive"
+  },
+  {
+    "name": "Shutterly",
+    "advertiser": "Shutterly"
+  },
+  {
+    "name": "Hello Fresh",
+    "advertiser": "Hello Fresh"
+  },
+  {
+    "name": "Caser General",
+    "advertiser": "Caser Seguros"
+  },
+  {
+    "name": "Kpark",
+    "advertiser": "Kpark"
+  },
+  {
+    "name": "InterFlora",
+    "advertiser": "InterFlora"
+  },
+  {
+    "name": "Toyota",
+    "advertiser": "Toyota"
+  },
+  {
+    "name": "Opera San Francisco",
+    "advertiser": "Opera San Francesco"
+  },
+  {
+    "name": "Claudie Pierlot",
+    "advertiser": "Claudie Pierlot"
+  },
+  {
+    "name": "Aliexpress",
+    "advertiser": "Aliexpress"
+  },
+  {
+    "name": "Douche senior",
+    "advertiser": "White Label"
+  },
+  {
+    "name": "Expert assur Mutuelle",
+    "advertiser": "White Label"
+  },
+  {
+    "name": "Car wow",
+    "advertiser": "Car wow"
+  },
+  {
+    "name": "Grohe",
+    "advertiser": "Grohe"
+  },
+  {
+    "name": "iCompario B2B",
+    "advertiser": "White Label"
+  },
+  {
+    "name": "MG Auto",
+    "advertiser": "MG Auto"
+  },
+  {
+    "name": "windows recycling",
+    "advertiser": "White Label"
+  },
+  {
+    "name": "Save energy",
+    "advertiser": "White Label"
+  },
+  {
+    "name": "MÃ¡sMovil",
+    "advertiser": "MÃ¡sMovil"
+  },
+  {
+    "name": "Movistar+ CPC",
+    "advertiser": "Movistar"
+  },
+  {
+    "name": "Ariel Clima",
+    "advertiser": "White Label"
+  },
+  {
+    "name": "HomePanda",
+    "advertiser": "HomePanda"
+  },
+  {
+    "name": "Birchmore Axiom",
+    "advertiser": "White Label"
+  },
+  {
+    "name": "Hillarys",
+    "advertiser": "Hillarys"
+  },
+  {
+    "name": "Medical Negligence Experts",
+    "advertiser": "White Label"
+  },
+  {
+    "name": "Wickes Kitchen",
+    "advertiser": "White Label"
+  },
+  {
+    "name": "leclerc energies",
+    "advertiser": "leclerc energies"
+  },
+  {
+    "name": "Sabadell",
+    "advertiser": "Sabadell"
+  },
+  {
+    "name": "Diblafe",
+    "advertiser": "Diblafe"
+  },
+  {
+    "name": "Vodafone",
+    "advertiser": "Vodafone"
+  },
+  {
+    "name": "LaFuma",
+    "advertiser": "LaFuma"
+  },
+  {
+    "name": "Bmw IX",
+    "advertiser": "Bmw"
+  },
+  {
+    "name": "NovaLuz",
+    "advertiser": "NovaLuz"
+  },
+  {
+    "name": "Apicil",
+    "advertiser": "Apicil"
+  },
+  {
+    "name": "ENGIE my power",
+    "advertiser": "ENGIE my power"
+  },
+  {
+    "name": "people & baby",
+    "advertiser": "people & baby"
+  },
+  {
+    "name": "Volvo",
+    "advertiser": "Volvo"
+  },
+  {
+    "name": "Photovoltaique",
+    "advertiser": "White Label"
+  },
+  {
+    "name": "Car Insurance Quote",
+    "advertiser": "White Label"
+  },
+  {
+    "name": "Deakin's Yard",
+    "advertiser": "Deakin's Yard"
+  },
+  {
+    "name": "deal direct remortage",
+    "advertiser": "White Label"
+  },
+  {
+    "name": "Free Boiler",
+    "advertiser": "White Label"
+  },
+  {
+    "name": "Police Claims",
+    "advertiser": "White Label"
+  },
+  {
+    "name": "Radius Vehicle Tracking",
+    "advertiser": "White Label"
+  },
+  {
+    "name": "Serious injury consultants",
+    "advertiser": "White Label"
+  },
+  {
+    "name": "Unimercatorum",
+    "advertiser": "Unimercatorum"
+  },
+  {
+    "name": "Verisure - UK",
+    "advertiser": "Verisure"
+  },
+  {
+    "name": "Doddle Health",
+    "advertiser": "Doddle Health"
+  },
+  {
+    "name": "Fuel Card - UK",
+    "advertiser": "White Label"
+  },
+  {
+    "name": "National Disrepair Claims",
+    "advertiser": "White Label"
+  },
+  {
+    "name": "Nify fifty",
+    "advertiser": "Nify fifty"
+  },
+  {
+    "name": "Amazon Code",
+    "advertiser": "White Label"
+  },
+  {
+    "name": "Cruz Roja",
+    "advertiser": "Cruz Roja"
+  },
+  {
+    "name": "Birchmor",
+    "advertiser": "White Label"
+  },
+  {
+    "name": "ONG",
+    "advertiser": "White Label"
+  },
+  {
+    "name": "Tim Fibra",
+    "advertiser": "Tim"
+  },
+  {
+    "name": "Defensores Legales",
+    "advertiser": "White Label"
+  },
+  {
+    "name": "AirZone",
+    "advertiser": "White Label"
+  },
+  {
+    "name": "Lissac",
+    "advertiser": "Lissac"
+  },
+  {
+    "name": "Sarenza",
+    "advertiser": "Sarenza"
+  },
+  {
+    "name": "Vente a la propriete CPC",
+    "advertiser": "White Label"
+  },
+  {
+    "name": "Volotea",
+    "advertiser": "Volotea"
+  }
+]
+
+===== C:\Users\Usuario\Documents\GitHub\mi-app-monet\data\catalogs\databases.json =====
+[
+  {
+    "id": "gestioncorp",
+    "name": "GestionCorp",
+    "geo": "ES",
+    "dbType": "B2B"
+  },
+  {
+    "id": "gestao-negocios",
+    "name": "GestÃ£o NegÃ³cios",
+    "geo": "PT",
+    "dbType": "B2B"
+  },
+  {
+    "id": "idee-del-giorno",
+    "name": "Idee Del Giorno",
+    "geo": "IT",
+    "dbType": "B2C"
+  },
+  {
+    "id": "coin-affaires",
+    "name": "Coin Affaires",
+    "geo": "FR",
+    "dbType": "B2B"
+  },
+  {
+    "id": "smart-deals",
+    "name": "Smart Deals",
+    "geo": "ES",
+    "dbType": "Mixed"
+  },
+  {
+    "id": "conso-autokoo",
+    "name": "Conso-Autokoo",
+    "geo": "FR",
+    "dbType": "B2C"
+  },
+  {
+    "id": "tuopinion-sms",
+    "name": "TuOpinion SMS",
+    "geo": "ES",
+    "dbType": "B2C"
+  },
+  {
+    "id": "gestione-impresa",
+    "name": "Gestione Impresa",
+    "geo": "IT",
+    "dbType": "B2B"
+  },
+  {
+    "id": "tuopinion",
+    "name": "TuOpinion",
+    "geo": "ES",
+    "dbType": "B2C"
+  },
+  {
+    "id": "canada",
+    "name": "Canada",
+    "geo": "CA",
+    "dbType": "B2B"
+  },
+  {
+    "id": "promomex",
+    "name": "PromoMex",
+    "geo": "MX",
+    "dbType": "B2C"
+  },
+  {
+    "id": "biz-data-hub",
+    "name": "Biz Data Hub",
+    "geo": "UK",
+    "dbType": "B2B"
+  },
+  {
+    "id": "argentina",
+    "name": "Argentina",
+    "geo": "AR",
+    "dbType": "B2B"
+  },
+  {
+    "id": "chile",
+    "name": "Chile",
+    "geo": "CL",
+    "dbType": "B2B"
+  },
+  {
+    "id": "world-scope-deals",
+    "name": "World Scope Deals",
+    "geo": "MULTI",
+    "dbType": "Mixed"
+  },
+  {
+    "id": "conso-enquete",
+    "name": "Conso EnquÃªte",
+    "geo": "FR",
+    "dbType": "B2C"
+  },
+  {
+    "id": "autokoo",
+    "name": "Autokoo",
+    "geo": "FR",
+    "dbType": "B2C"
+  },
+  {
+    "id": "markt-fusion",
+    "name": "Markt Fusion",
+    "geo": "BE",
+    "dbType": "B2B"
+  },
+  {
+    "id": "nexo-profesional",
+    "name": "Nexo Profesional",
+    "geo": "ES",
+    "dbType": "B2B"
+  },
+  {
+    "id": "brit-consumer-net",
+    "name": "Brit Consumer Net",
+    "geo": "UK",
+    "dbType": "B2C"
+  },
+  {
+    "id": "vida-conexao",
+    "name": "Vida ConexÃ£o",
+    "geo": "PT",
+    "dbType": "B2C"
+  },
+  {
+    "id": "datavision",
+    "name": "Datavision",
+    "geo": "FR",
+    "dbType": "B2C"
+  },
+  {
+    "id": "connessione-clienti",
+    "name": "Connessione Clienti",
+    "geo": "IT",
+    "dbType": "B2C"
+  },
+  {
+    "id": "rete-aziendale",
+    "name": "Rete Aziendale",
+    "geo": "IT",
+    "dbType": "B2B"
+  },
+  {
+    "id": "sconti-subito",
+    "name": "Sconti Subito",
+    "geo": "IT",
+    "dbType": "B2C"
+  },
+  {
+    "id": "solucoes-pro",
+    "name": "SoluÃ§Ãµes pro",
+    "geo": "PT",
+    "dbType": "B2B"
+  },
+  {
+    "id": "netherlands",
+    "name": "Netherlands",
+    "geo": "NL",
+    "dbType": "B2B"
+  },
+  {
+    "id": "ireland",
+    "name": "Ireland",
+    "geo": "IE",
+    "dbType": "B2B"
+  },
+  {
+    "id": "poland",
+    "name": "Poland",
+    "geo": "PL",
+    "dbType": "B2B"
+  },
+  {
+    "id": "autcon",
+    "name": "Autcon",
+    "geo": "FR",
+    "dbType": "B2C"
+  },
+  {
+    "id": "belgian-bazaar",
+    "name": "Belgian Bazaar",
+    "geo": "BE",
+    "dbType": "B2C"
+  },
+  {
+    "id": "piazza-digitale",
+    "name": "Piazza Digitale",
+    "geo": "IT",
+    "dbType": "B2C"
+  },
+  {
+    "id": "impresa-connect",
+    "name": "Impresa Connect",
+    "geo": "IT",
+    "dbType": "B2B"
+  },
+  {
+    "id": "greengo",
+    "name": "Greengo",
+    "geo": "IT",
+    "dbType": "B2C"
+  },
+  {
+    "id": "gestao-negocios-b2b-pt",
+    "name": "GestÃ£o NegÃ³cios B2B PT",
+    "geo": "PT",
+    "dbType": "B2B"
+  },
+  {
+    "id": "solucoes-pro-2",
+    "name": "SoluÃ§Ãµes Pro",
+    "geo": "PT",
+    "dbType": "B2B"
+  },
+  {
+    "id": "redcom",
+    "name": "RedCom",
+    "geo": "ES",
+    "dbType": "B2B"
+  },
+  {
+    "id": "the-coupon-party",
+    "name": "The coupon party",
+    "geo": "FR",
+    "dbType": "B2C"
+  },
+  {
+    "id": "synercom",
+    "name": "SynerCom",
+    "geo": "FR",
+    "dbType": "B2B"
+  }
+]
+
+===== C:\Users\Usuario\Documents\GitHub\mi-app-monet\data\catalogs\invoice_rules.json =====
+[
+  { "geo": "FR", "partner": "Oceads", "office": "CAR" },
+  { "partner": "Feebbo", "office": "DAT" },
+  { "geo": "UK", "office": "CAR" }
+]
+
+===== C:\Users\Usuario\Documents\GitHub\mi-app-monet\data\catalogs\partners.json =====
+[
+  {
+    "name": "Adkomo",
+    "invoiceOffice": "CAR"
+  },
+  {
+    "name": "ADS Enterprise",
+    "invoiceOffice": "CAR"
+  },
+  {
+    "name": "Companeo",
+    "invoiceOffice": "CAR"
+  },
+  {
+    "name": "Dataventure (Cardata)",
+    "invoiceOffice": "Internal"
+  },
+  {
+    "name": "nova digital",
+    "invoiceOffice": "CAR"
+  },
+  {
+    "name": "Oceads",
+    "invoiceOffice": "CAR"
+  },
+  {
+    "name": "Swarmiz",
+    "invoiceOffice": "CAR"
+  },
+  {
+    "name": "TimeOne Performance",
+    "invoiceOffice": "CAR"
+  },
+  {
+    "name": "Weedoit",
+    "invoiceOffice": "CAR"
+  },
+  {
+    "name": "Across",
+    "invoiceOffice": "DAT"
+  },
+  {
+    "name": "Adpepper",
+    "invoiceOffice": "DAT"
+  },
+  {
+    "name": "Dataventure (Adventure Conseil)",
+    "invoiceOffice": "Internal"
+  },
+  {
+    "name": "Dataventure (Datawork Marketing)",
+    "invoiceOffice": "Internal"
+  },
+  {
+    "name": "Feebbo",
+    "invoiceOffice": "DAT"
+  },
+  {
+    "name": "Media Adgo",
+    "invoiceOffice": "DAT"
+  },
+  {
+    "name": "RePublish",
+    "invoiceOffice": "DAT"
+  },
+  {
+    "name": "Startend Marketing",
+    "invoiceOffice": "DAT"
+  },
+  {
+    "name": "Mailxpertise (Routing Costs)",
+    "invoiceOffice": "CAR"
+  },
+  {
+    "name": "Webdataconsulting",
+    "invoiceOffice": "CAR"
+  },
+  {
+    "name": "CleverAd",
+    "invoiceOffice": "DAT"
+  },
+  {
+    "name": "Cognetrix Global",
+    "invoiceOffice": "DAT"
+  },
+  {
+    "name": "Loud Europe",
+    "invoiceOffice": "DAT"
+  },
+  {
+    "name": "Lovvis Advertising SL",
+    "invoiceOffice": "DAT"
+  },
+  {
+    "name": "leadiya",
+    "invoiceOffice": "CAR"
+  },
+  {
+    "name": "digitalmedia",
+    "invoiceOffice": "DAT"
+  },
+  {
+    "name": "LetsRockData",
+    "invoiceOffice": "DAT"
+  },
+  {
+    "name": "Kwanko",
+    "invoiceOffice": "CAR"
+  }
+]
+
+===== C:\Users\Usuario\Documents\GitHub\mi-app-monet\data\catalogs\themes.json =====
+[
+  {
+    "label": "Insurance"
+  },
+  {
+    "label": "Home Improvement & Maintenance"
+  },
+  {
+    "label": "Energy & Utilities"
+  },
+  {
+    "label": "Services"
+  },
+  {
+    "label": "Travel & Tourism"
+  },
+  {
+    "label": "Food & Beverages"
+  },
+  {
+    "label": "Automotive"
+  },
+  {
+    "label": "Beauty & Personal Care"
+  },
+  {
+    "label": "Banking & Finance"
+  },
+  {
+    "label": "Jobs & Education"
+  },
+  {
+    "label": "Investments & Savings"
+  },
+  {
+    "label": "Fashion & Accessories"
+  },
+  {
+    "label": "Health & Wellness"
+  },
+  {
+    "label": "Home & Decoration"
+  },
+  {
+    "label": "Hi-Tech & Gadgets"
+  },
+  {
+    "label": "Community & Social Causes"
+  },
+  {
+    "label": "E-commerce & Shopping"
+  },
+  {
+    "label": "Mutuelle"
+  },
+  {
+    "label": "Emploi & formation"
+  },
+  {
+    "label": "Cars & vehicules"
+  },
+  {
+    "label": "Health"
+  },
+  {
+    "label": "Hi-Tech"
+  },
+  {
+    "label": "Assurance"
+  },
+  {
+    "label": "Unknown"
+  },
+  {
+    "label": "Banking"
+  },
+  {
+    "label": "Beauty"
+  },
+  {
+    "label": "Culture & loisirs"
+  },
+  {
+    "label": "Credits"
+  },
+  {
+    "label": "Travel"
+  },
+  {
+    "label": "Forex"
+  },
+  {
+    "label": "Casino & Games"
+  },
+  {
+    "label": "Travaux & entretien"
+  },
+  {
+    "label": "Community"
+  },
+  {
+    "label": "Defisc & investissement"
+  },
+  {
+    "label": "Welcome Pack"
+  },
+  {
+    "label": "Voyance"
+  }
+]
+
