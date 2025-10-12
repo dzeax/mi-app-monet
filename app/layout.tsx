@@ -1,7 +1,7 @@
 // app/layout.tsx
 import type { Metadata } from 'next';
 import './globals.css';
-import '@/styles/tw.input.css';
+// Extra input styles were moved into globals; omit secondary CSS import to simplify Tailwind build
 import AppProviders from './providers';
 
 export const metadata: Metadata = {
