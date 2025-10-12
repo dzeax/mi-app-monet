@@ -2,12 +2,13 @@
 
 import { useState, useEffect } from 'react';
 import { useRouter, useSearchParams } from 'next/navigation';
-import { supabase } from '@/lib/supabase/client';
+import { supabaseBrowser } from '@/lib/supabase/client';
 
 export default function RegisterPage() {
   const router = useRouter();
   const sp = useSearchParams();
   const redirect = sp.get('redirect') || '/';
+  const supabase = supabaseBrowser();
 
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
