@@ -4,7 +4,7 @@
   "private": true,
   "scripts": {
     "dev": "next dev",
-    "build": "next build",
+    "build": "cross-env TAILWIND_DISABLE_OXIDE=1 TAILWIND_DISABLE_LIGHTNINGCSS=1 next build",
     "start": "next start",
     "lint": "next lint",
     "catalogs:build": "node scripts/build-catalogs.mjs"
@@ -29,6 +29,7 @@
     "@types/react-dom": "^19",
     "autoprefixer": "^10.4.21",
     "concurrently": "^9.2.0",
+    "cross-env": "^10.1.0",
     "eslint": "^9",
     "eslint-config-next": "15.4.6",
     "lightningcss": "^1.30.2",
