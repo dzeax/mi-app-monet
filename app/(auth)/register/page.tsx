@@ -1,39 +1,42 @@
 'use client';
 
-import { useState, useEffect } from 'react';
+import { Suspense, useState, useEffect } from 'react';
 import { useRouter, useSearchParams } from 'next/navigation';
 import { supabaseBrowser } from '@/lib/supabase/client';
 
 export default function RegisterPage() {
+  return (
+    <Suspense fallback={null}>
+      <RegisterForm />
+    </Suspense>
+  );
+}
+
+function RegisterForm() {
   const router = useRouter();
-  const sp = useSearchParams();
-  const redirect = sp.get('redirect') || '/';
   const supabase = supabaseBrowser();
+  const searchParams = useSearchParams();
+  const redirect = searchParams.get('redirect') || '/';
 
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
-
   const [loading, setLoading] = useState(false);
   const [info, setInfo] = useState<string | null>(null);
   const [err, setErr] = useState<string | null>(null);
 
-  // Si ya hay sesión, redirige
   useEffect(() => {
     supabase.auth.getSession().then(({ data }) => {
       if (data.session) router.replace(redirect);
     });
-  }, [router, redirect]);
+  }, [router, redirect, supabase]);
 
-  const onSubmit = async (e: React.FormEvent) => {
+  const onSubmit = async (e: React.FormEvent<HTMLFormElement>) => {
     e.preventDefault();
     setErr(null);
     setInfo(null);
     setLoading(true);
 
-    const { error } = await supabase.auth.signUp({
-      email,
-      password,
-    });
+    const { error } = await supabase.auth.signUp({ email, password });
 
     setLoading(false);
 
@@ -42,10 +45,7 @@ export default function RegisterPage() {
       return;
     }
 
-    // Si en Supabase tienes "Confirm email" activo, verás este aviso:
     setInfo('Revisa tu email para confirmar la cuenta. Luego podrás iniciar sesión.');
-    // Si lo tienes desactivado en dev, puedes redirigir directo:
-    // router.replace('/login?registered=1');
   };
 
   return (
