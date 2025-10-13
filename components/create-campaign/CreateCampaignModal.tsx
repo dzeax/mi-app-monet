@@ -1,4 +1,4 @@
-﻿'use client';
+'use client';
 
 import { createPortal } from 'react-dom';
 import { Children, isValidElement, useEffect, useRef, useState } from 'react';
@@ -169,8 +169,7 @@ export default function CreateCampaignModal({
   const [openAddCampaign, setOpenAddCampaign] = useState(false);
   const [openAddPartner, setOpenAddPartner] = useState(false);
   const [openAddDatabase, setOpenAddDatabase] = useState(false);
-  const [highContrast, setHighContrast] = useState(false);
-  const toggleHighContrast = () => setHighContrast((v) => !v);
+  const highContrast = false;
 
   // ValidaciÃ³n con campaÃ±as dinÃ¡micas
   const allowedCampaigns = new Set(CAMPAIGNS.map((c: any) => String(c?.name || '').toLowerCase()));
@@ -549,7 +548,7 @@ export default function CreateCampaignModal({
       {/* Card */}
       <div
         ref={trapRef}
-        className={`relative card w-full max-w-5xl max-h-[90vh] overflow-hidden border border-[--color-border] shadow-xl ${highContrast ? 'high-contrast-frame' : ''}`}
+        className="relative card w-full max-w-5xl max-h-[90vh] overflow-hidden border border-[--color-border] shadow-xl"
         style={{ background: 'var(--color-surface)' }}
         onMouseDown={(e) => {
           // Evita que el click dentro del card burbujee al backdrop
@@ -563,36 +562,26 @@ export default function CreateCampaignModal({
             <h3 className="text-lg font-semibold">
               {mode === 'edit' ? 'Edit campaign' : 'Create campaign'}
             </h3>
-            <div className="flex items-center gap-2">
-              <button
-                type="button"
-                className="btn-ghost h-9 px-3 text-sm"
-                onClick={toggleHighContrast}
-                aria-pressed={highContrast}
-                title={highContrast ? 'Switch to standard contrast' : 'Switch to high contrast'}
-              >
-                {highContrast ? 'Standard contrast' : 'High contrast'}
-              </button>
-              <button className="btn-ghost" onClick={requestClose} aria-label="Close">âœ•</button>
-            </div>
+            <button className="btn-ghost h-9 w-9 p-0" onClick={requestClose} aria-label="Close modal">
+              <span aria-hidden className="text-xl leading-none">&times;</span>
+            </button>
           </div>
         </div>
 
         {/* Body */}
-        <div className="overflow-y-auto px-5 pt-7 pb-6 relative">
+        <div className="overflow-y-auto px-5 pt-6 pb-5 relative">
           <div className="edge-fade edge-top" aria-hidden />
 
           <form
             ref={formRef}
             id="create-edit-campaign-form"
             onSubmit={handleSubmit(onSubmit, onInvalid)}
-            className="grid gap-5 xl:grid-cols-12 items-start"
-            data-highcontrast={highContrast ? 'true' : undefined}
+            className="grid gap-4 xl:grid-cols-12 items-start"
           >
             <div className="col-span-12 xl:col-span-7 flex flex-col gap-4">
               {/* A) Basics */}
             <Section title="Basics" highContrast={highContrast}>
-              <div className="grid grid-cols-12 gap-x-5 gap-y-5">
+              <div className="grid grid-cols-12 gap-x-4 gap-y-4">
                 <div className="col-span-12 md:col-span-4">
                   <Field label="Date">
                     <>
@@ -772,7 +761,7 @@ export default function CreateCampaignModal({
             <Section title="Commercial" highContrast={highContrast}>
               <div
                 className="grid gap-4"
-                style={{ gridTemplateColumns: 'repeat(auto-fit, minmax(220px, 1fr))' }}
+                style={{ gridTemplateColumns: 'repeat(auto-fit, minmax(200px, 1fr))' }}
               >
                 <div className="min-w-0">
                   <Field label="Type">
@@ -876,8 +865,8 @@ export default function CreateCampaignModal({
 
             {/* C) Data source */}
             <Section title="Data source" highContrast={highContrast}>
-              <div className="flex flex-wrap gap-x-5 gap-y-5">
-                <div className="w-full xl:flex-[1.25] min-w-[220px]">
+              <div className="flex flex-wrap gap-x-5 gap-y-4">
+                <div className="w-full xl:flex-[1.25] min-w-[200px]">
                   <Field label="Database">
                     <FieldWithAddon
                       onAdd={canQuickAdd ? () => setOpenAddDatabase(true) : undefined} // 🆕
@@ -958,10 +947,10 @@ export default function CreateCampaignModal({
             </Section>
             </div>
 
-            <aside className="col-span-12 xl:col-span-5 mt-12 xl:mt-0 xl:pl-4">
+            <aside className="col-span-12 xl:col-span-5 mt-8 xl:mt-4 xl:pl-4">
               <div
-                className="flex flex-col gap-6 xl:sticky"
-                style={{ top: 'calc(var(--content-sticky-top, 5.5rem) + 2.25rem)' }}
+                className="flex flex-col gap-5 xl:sticky"
+                style={{ top: 'calc(var(--content-sticky-top, 5.5rem) + 3rem)' }}
               >
                 {/* KPI BAR */}
                 <KPIBar
@@ -977,7 +966,7 @@ export default function CreateCampaignModal({
 
                 {/* D) Results */}
                 <Section title="Results" highContrast={highContrast}>
-                  <div className="grid grid-cols-12 gap-x-5 gap-y-5">
+                  <div className="grid grid-cols-12 gap-x-4 gap-y-4">
                     <div className="col-span-12">
                       <Field label="Routing costs (€)" badge="CALC" hint={`Formula: ${routingHint}`}>
                         <input
@@ -1268,18 +1257,3 @@ function KPIBar({
     </div>
   );
 }
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
