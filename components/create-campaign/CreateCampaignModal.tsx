@@ -770,8 +770,8 @@ export default function CreateCampaignModal({
 
             {/* B) Commercial */}
             <Section title="Commercial" highContrast={highContrast}>
-              <div className="grid grid-cols-12 gap-x-4 gap-y-2">
-                <div className="col-span-12 sm:col-span-6 md:col-span-6 lg:col-span-3 min-w-0">
+              <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-4 gap-4">
+                <div className="min-w-0">
                   <Field label="Type">
                     <div className="relative">
                       <select
@@ -800,7 +800,7 @@ export default function CreateCampaignModal({
                     <Err id={errId('type')} e={showErr('type') ? errors.type : undefined} />
                   </Field>
                 </div>
-                <div className="col-span-12 sm:col-span-6 md:col-span-6 lg:col-span-3 min-w-0">
+                <div className="min-w-0">
                   <Field label="Price (EUR)">
                     <div className="relative">
                       <input
@@ -823,7 +823,7 @@ export default function CreateCampaignModal({
                     <Err id={errId('price')} e={showErr('price') ? errors.price : undefined} />
                   </Field>
                 </div>
-                <div className="col-span-12 sm:col-span-6 md:col-span-6 lg:col-span-3 min-w-0">
+                <div className="min-w-0">
                   <Field label="QTY">
                     <div className="relative">
                       <input
@@ -846,7 +846,7 @@ export default function CreateCampaignModal({
                     <Err id={errId('qty')} e={showErr('qty') ? errors.qty : undefined} />
                   </Field>
                 </div>
-                <div className="col-span-12 sm:col-span-6 md:col-span-6 lg:col-span-3 min-w-0">
+                <div className="min-w-0">
                   <Field label="V Sent">
                     <div className="relative">
                       <input
@@ -873,8 +873,8 @@ export default function CreateCampaignModal({
 
             {/* C) Data source */}
             <Section title="Data source" highContrast={highContrast}>
-              <div className="grid grid-cols-12 gap-x-4 gap-y-2">
-                <div className="col-span-12 md:col-span-6">
+              <div className="flex flex-wrap gap-4">
+                <div className="w-full xl:flex-[1.25] min-w-[220px]">
                   <Field label="Database">
                     <FieldWithAddon
                       onAdd={canQuickAdd ? () => setOpenAddDatabase(true) : undefined} // 🆕
@@ -882,7 +882,7 @@ export default function CreateCampaignModal({
                     >
                       <select
                         {...register('database')}
-                        className="input h-10"
+                        className="input h-10 rounded-r-none"
                         aria-invalid={showErr('database') || undefined}
                         aria-describedby={showErr('database') ? errId('database') : undefined}
                       >
@@ -900,7 +900,7 @@ export default function CreateCampaignModal({
                     />
                   </Field>
                 </div>
-                <div className="col-span-12 sm:col-span-6 md:col-span-6 lg:col-span-3 min-w-0">
+                <div className="flex-1 min-w-[160px]">
                   <Field label="GEO" badge="AUTO" hint="Auto-filled from database">
                     <div className="relative">
                       <input
@@ -923,7 +923,7 @@ export default function CreateCampaignModal({
                     <Err id={errId('geo')} e={showErr('geo') ? errors.geo : undefined} />
                   </Field>
                 </div>
-                <div className="col-span-12 sm:col-span-6 md:col-span-6 lg:col-span-3 min-w-0">
+                <div className="flex-1 min-w-[160px]">
                   <Field label="DB Type" badge="AUTO" hint="Auto-filled from database">
                     <div className="relative">
                       <input
@@ -1265,6 +1265,7 @@ function KPIBar({
     </div>
   );
 }
+
 
 
 
