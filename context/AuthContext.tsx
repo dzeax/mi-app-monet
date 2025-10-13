@@ -59,9 +59,9 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     let mounted = true;
 
     (async () => {
-      const { data: authData } = await supabase.auth.getUser();
-      const authUser = authData.user;
+      const { data: sessionData } = await supabase.auth.getSession();
       if (!mounted) return;
+      const authUser = sessionData.session?.user ?? null;
 
       if (authUser) {
         const r = await fetchRole(supabase, authUser.id).catch(() => DEFAULT_ROLE);
@@ -86,6 +86,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         setUser(null);
         setRole(null);
       }
+      setLoading(false);
     });
 
     return () => {

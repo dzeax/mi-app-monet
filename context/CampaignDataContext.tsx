@@ -122,6 +122,12 @@ export function CampaignDataProvider({ children }: { children: React.ReactNode }
       .order('created_at', { ascending: false });
 
     if (error) {
+      const status = (error as any)?.status ?? (error as any)?.code ?? null;
+      if (status === 401 || status === '401') {
+        // Sesión aún no restaurada; espera a onAuthStateChange
+        setLoading(false);
+        return;
+      }
       logError('refresh', error);
       setRows([]);
       idxRef.current = 0;
