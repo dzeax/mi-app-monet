@@ -771,7 +771,7 @@ export default function CreateCampaignModal({
             {/* B) Commercial */}
             <Section title="Commercial" highContrast={highContrast}>
               <div className="grid grid-cols-12 gap-2">
-                <div className="col-span-12 sm:col-span-6 md:col-span-3">
+                <div className="col-span-12 sm:col-span-6 md:col-span-6 lg:col-span-3">
                   <Field label="Type">
                     <div className="relative">
                       <select
@@ -800,8 +800,8 @@ export default function CreateCampaignModal({
                     <Err id={errId('type')} e={showErr('type') ? errors.type : undefined} />
                   </Field>
                 </div>
-                <div className="col-span-12 sm:col-span-6 md:col-span-3">
-                  <Field label="Price (€)">
+                <div className="col-span-12 sm:col-span-6 md:col-span-6 lg:col-span-3">
+                  <Field label="Price (EUR)">
                     <div className="relative">
                       <input
                         type="number"
@@ -823,7 +823,7 @@ export default function CreateCampaignModal({
                     <Err id={errId('price')} e={showErr('price') ? errors.price : undefined} />
                   </Field>
                 </div>
-                <div className="col-span-12 sm:col-span-6 md:col-span-3">
+                <div className="col-span-12 sm:col-span-6 md:col-span-6 lg:col-span-3">
                   <Field label="QTY">
                     <div className="relative">
                       <input
@@ -846,7 +846,7 @@ export default function CreateCampaignModal({
                     <Err id={errId('qty')} e={showErr('qty') ? errors.qty : undefined} />
                   </Field>
                 </div>
-                <div className="col-span-12 sm:col-span-6 md:col-span-3">
+                <div className="col-span-12 sm:col-span-6 md:col-span-6 lg:col-span-3">
                   <Field label="V Sent">
                     <div className="relative">
                       <input
@@ -900,7 +900,7 @@ export default function CreateCampaignModal({
                     />
                   </Field>
                 </div>
-                <div className="col-span-12 sm:col-span-6 md:col-span-3">
+                <div className="col-span-12 sm:col-span-6 md:col-span-6 lg:col-span-3">
                   <Field label="GEO" badge="AUTO" hint="Auto-filled from database">
                     <div className="relative">
                       <input
@@ -923,7 +923,7 @@ export default function CreateCampaignModal({
                     <Err id={errId('geo')} e={showErr('geo') ? errors.geo : undefined} />
                   </Field>
                 </div>
-                <div className="col-span-12 sm:col-span-6 md:col-span-3">
+                <div className="col-span-12 sm:col-span-6 md:col-span-6 lg:col-span-3">
                   <Field label="DB Type" badge="AUTO" hint="Auto-filled from database">
                     <div className="relative">
                       <input
@@ -955,8 +955,8 @@ export default function CreateCampaignModal({
             </Section>
             </div>
 
-            <aside className="col-span-12 xl:col-span-5">
-              <div className="flex flex-col gap-3 xl:sticky xl:top-0">
+            <aside className="col-span-12 xl:col-span-5 mt-4 xl:mt-0">
+              <div className="flex flex-col gap-3 xl:sticky xl:top-4">
                 {/* KPI BAR */}
                 <KPIBar
                   turnover={watchTurnover || 0}
@@ -1262,6 +1262,8 @@ function KPIBar({
     </div>
   );
 }
+
+
 
 
 
