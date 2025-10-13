@@ -579,20 +579,20 @@ export default function CreateCampaignModal({
         </div>
 
         {/* Body */}
-        <div className="overflow-y-auto px-5 pt-6 pb-5 relative">
+        <div className="overflow-y-auto px-5 pt-7 pb-6 relative">
           <div className="edge-fade edge-top" aria-hidden />
 
           <form
             ref={formRef}
             id="create-edit-campaign-form"
             onSubmit={handleSubmit(onSubmit, onInvalid)}
-            className="grid gap-4 xl:grid-cols-12 items-start"
+            className="grid gap-5 xl:grid-cols-12 items-start"
             data-highcontrast={highContrast ? 'true' : undefined}
           >
             <div className="col-span-12 xl:col-span-7 flex flex-col gap-4">
               {/* A) Basics */}
             <Section title="Basics" highContrast={highContrast}>
-              <div className="grid grid-cols-12 gap-x-5 gap-y-4">
+              <div className="grid grid-cols-12 gap-x-5 gap-y-5">
                 <div className="col-span-12 md:col-span-4">
                   <Field label="Date">
                     <>
@@ -772,7 +772,7 @@ export default function CreateCampaignModal({
             <Section title="Commercial" highContrast={highContrast}>
               <div
                 className="grid gap-4"
-                style={{ gridTemplateColumns: 'repeat(auto-fit, minmax(160px, 1fr))' }}
+                style={{ gridTemplateColumns: 'repeat(auto-fit, minmax(220px, 1fr))' }}
               >
                 <div className="min-w-0">
                   <Field label="Type">
@@ -876,7 +876,7 @@ export default function CreateCampaignModal({
 
             {/* C) Data source */}
             <Section title="Data source" highContrast={highContrast}>
-              <div className="flex flex-wrap gap-x-5 gap-y-4">
+              <div className="flex flex-wrap gap-x-5 gap-y-5">
                 <div className="w-full xl:flex-[1.25] min-w-[220px]">
                   <Field label="Database">
                     <FieldWithAddon
@@ -958,10 +958,10 @@ export default function CreateCampaignModal({
             </Section>
             </div>
 
-            <aside className="col-span-12 xl:col-span-5 mt-10 xl:mt-0 xl:pl-4">
+            <aside className="col-span-12 xl:col-span-5 mt-12 xl:mt-0 xl:pl-4">
               <div
-                className="flex flex-col gap-5 xl:sticky"
-                style={{ top: 'calc(var(--content-sticky-top, 5.5rem) + 2rem)' }}
+                className="flex flex-col gap-6 xl:sticky"
+                style={{ top: 'calc(var(--content-sticky-top, 5.5rem) + 2.25rem)' }}
               >
                 {/* KPI BAR */}
                 <KPIBar
@@ -977,7 +977,7 @@ export default function CreateCampaignModal({
 
                 {/* D) Results */}
                 <Section title="Results" highContrast={highContrast}>
-                  <div className="grid grid-cols-12 gap-x-4 gap-y-4">
+                  <div className="grid grid-cols-12 gap-x-5 gap-y-5">
                     <div className="col-span-12">
                       <Field label="Routing costs (€)" badge="CALC" hint={`Formula: ${routingHint}`}>
                         <input

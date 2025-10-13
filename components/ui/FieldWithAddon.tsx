@@ -26,7 +26,7 @@ export default function FieldWithAddon({
         'grid',
         'grid-cols-[minmax(0,1fr)_auto]',
         'items-stretch',
-        'gap-2',
+        'gap-1.5',
         className,
       ]
         .filter(Boolean)
