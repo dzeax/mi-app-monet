@@ -113,7 +113,9 @@ export function CampaignDataProvider({ children }: { children: React.ReactNode }
     []
   );
 
-  const refresh = useCallback(async () => {
+  const refreshRetryRef = useRef<number | null>(null);
+
+  const refresh = useCallback(async (attempt = 0) => {
     setLoading(true);
     const { data, error } = await supabase
       .from<CampaignDbRow>('campaigns')
@@ -124,7 +126,12 @@ export function CampaignDataProvider({ children }: { children: React.ReactNode }
     if (error) {
       const status = (error as any)?.status ?? (error as any)?.code ?? null;
       if (status === 401 || status === '401') {
-        // Sesión aún no restaurada; espera a onAuthStateChange
+        if (attempt < 4) {
+          if (refreshRetryRef.current) window.clearTimeout(refreshRetryRef.current);
+          refreshRetryRef.current = window.setTimeout(() => {
+            void refresh(attempt + 1);
+          }, 200 * Math.pow(2, attempt));
+        }
         setLoading(false);
         return;
       }
@@ -179,6 +186,14 @@ export function CampaignDataProvider({ children }: { children: React.ReactNode }
     );
   }, [computeRow, stampRow]);
 
+  useEffect(() => {
+    return () => {
+      if (refreshRetryRef.current) {
+        window.clearTimeout(refreshRetryRef.current);
+        refreshRetryRef.current = null;
+      }
+    };
+  }, []);
   const addCampaign = useCallback(
     async (input: Omit<CampaignRow, 'id'> & { id?: string }) => {
       const id = input.id ?? generateId();
