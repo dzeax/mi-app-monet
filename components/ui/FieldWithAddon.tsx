@@ -20,8 +20,19 @@ export default function FieldWithAddon({
   const disabled = buttonDisabled || !onAdd;
 
   return (
-    <div className={`field-addon grid grid-cols-[1fr_auto] items-stretch ${className}`}>
-      {/* Nota: el control hijo debería llevar `rounded-r-none` para unirse visualmente */}
+    <div
+      className={[
+        'field-addon',
+        'grid',
+        'grid-cols-[minmax(0,1fr)_auto]',
+        'items-stretch',
+        'gap-2',
+        className,
+      ]
+        .filter(Boolean)
+        .join(' ')}
+    >
+      {/* Los controles hijos heredan el espacio, no necesitan forzar bordes planos */}
       <div className="contents">{children}</div>
 
       <button
@@ -55,7 +66,3 @@ export default function FieldWithAddon({
     </div>
   );
 }
-
-
-
-

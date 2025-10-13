@@ -525,9 +525,10 @@ input[type="date"]:hover::-webkit-calendar-picker-indicator { opacity: 1; }
   background: color-mix(in oklab, var(--color-surface) 96%, var(--color-surface-2));
   border-radius: 1rem;
   box-shadow: 0 12px 28px rgba(15, 23, 42, 0.05);
-  padding: 1rem;
+  padding: 1.25rem;
   display: grid;
   gap: 1rem;
+  overflow: hidden;
 }
 .form-section__body--hc {
   border-color: color-mix(in oklab, var(--color-text) 30%, var(--color-border));
@@ -550,6 +551,21 @@ input[type="date"]:hover::-webkit-calendar-picker-indicator { opacity: 1; }
 .form-field__control {
   display: grid;
   gap: .4rem;
+}
+.form-field,
+.form-field__control {
+  min-width: 0;
+  width: 100%;
+}
+.form-field__control > * {
+  min-width: 0;
+}
+.form-field__hint {
+  display: block;
+  margin-top: .35rem;
+  font-size: .75rem;
+  line-height: 1.35;
+  color: color-mix(in oklab, var(--color-text) 65%, transparent);
 }
  param($m) $m.Value -replace '\}', '  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;\n  }' 
 
@@ -600,7 +616,8 @@ input[type="date"]:hover::-webkit-calendar-picker-indicator { opacity: 1; }
 
 .field-addon {
   display: grid;
-  grid-template-columns: 1fr auto;
+  grid-template-columns: minmax(0, 1fr) auto;
+  column-gap: .5rem;
   align-items: stretch;
 }
 .field-addon-button {
@@ -610,8 +627,8 @@ input[type="date"]:hover::-webkit-calendar-picker-indicator { opacity: 1; }
   height: 2.5rem;
   min-width: 2.5rem;
   padding: 0 .75rem;
-  margin-left: -1px;
-  border-radius: 0 .75rem .75rem 0;
+  margin-left: 0;
+  border-radius: .75rem;
   border: 1px solid color-mix(in oklab, var(--color-text) 12%, var(--color-border));
   background: color-mix(in oklab, var(--color-surface) 94%, var(--color-surface-2));
   color: color-mix(in oklab, var(--color-text) 72%, transparent);
@@ -777,24 +794,24 @@ form[data-highcontrast='true'] .badge-field {
   position: sticky;
   pointer-events: none;
   z-index: 5;
-  height: 14px;
+  height: 10px;
   /* el body del modal tiene padding horizontal px-5 (1.25rem) */
   margin-left: -1.25rem;
   margin-right: -1.25rem;
 }
 .edge-top{
   top: 0;
-  margin-top: -14px;
+  margin-top: -10px;
   background: linear-gradient(to bottom,
-    color-mix(in oklab, var(--color-text) 20%, transparent),
+    color-mix(in oklab, var(--color-text) 12%, transparent),
     transparent
   );
 }
 .edge-bottom{
   bottom: 0;
-  margin-bottom: -14px;
+  margin-bottom: -10px;
   background: linear-gradient(to top,
-    color-mix(in oklab, var(--color-text) 20%, transparent),
+    color-mix(in oklab, var(--color-text) 12%, transparent),
     transparent
   );
 }
