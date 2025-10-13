@@ -720,7 +720,7 @@ export default function CreateCampaignModal({
                     >
                       <select
                         {...register('partner')}
-                        className=\"input h-10\"
+                        className="input h-10"
                         aria-invalid={showErr('partner') || undefined}
                         aria-describedby={showErr('partner') ? errId('partner') : undefined}
                       >
@@ -882,7 +882,7 @@ export default function CreateCampaignModal({
                     >
                       <select
                         {...register('database')}
-                        className=\"input h-10\"
+                        className="input h-10"
                         aria-invalid={showErr('database') || undefined}
                         aria-describedby={showErr('database') ? errId('database') : undefined}
                       >
@@ -955,7 +955,7 @@ export default function CreateCampaignModal({
             </Section>
             </div>
 
-            <aside className=\"col-span-12 xl:col-span-5 mt-6 xl:mt-0\" style={{ top: "calc(var(--content-sticky-top, 5.5rem) + 0.5rem)" }}>
+            <aside className="col-span-12 xl:col-span-5 mt-6 xl:mt-0" style={{ top: "calc(var(--content-sticky-top, 5.5rem) + 0.5rem)" }}>
               <div className="flex flex-col gap-3 xl:sticky xl:top-4">
                 {/* KPI BAR */}
                 <KPIBar
@@ -1262,6 +1262,7 @@ function KPIBar({
     </div>
   );
 }
+
 
 
 
