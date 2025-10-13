@@ -736,12 +736,12 @@ form[data-highcontrast='true'] .badge-field {
 
 /* separadores sutiles + respeta el radio de la card */
 .modal-header{
-  box-shadow: inset 0 -1px 0 rgba(255,255,255,.05);
+  box-shadow: none;
   border-top-left-radius: 1rem;
   border-top-right-radius: 1rem;
 }
 .modal-footer{
-  box-shadow: inset 0  1px 0 rgba(255,255,255,.05);
+  box-shadow: none;
   border-bottom-left-radius: 1rem;
   border-bottom-right-radius: 1rem;
 }
@@ -772,6 +772,7 @@ form[data-highcontrast='true'] .badge-field {
 
 /* --- Edge fades en el Ã¡rea scroll del modal --- */
 /* (coloca <div class="edge-fade edge-top" /> y <div class="edge-fade edge-bottom" /> dentro del contenedor scroll) */
+/* softened */
 .edge-fade{
   position: sticky;
   pointer-events: none;
@@ -889,6 +890,7 @@ form[data-highcontrast='true'] .badge-field {
 .with-app-footer{
   padding-bottom: calc(var(--footer-h) + max(0px, env(safe-area-inset-bottom)));
 }
+
 
 
 
