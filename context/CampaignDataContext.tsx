@@ -117,33 +117,44 @@ export function CampaignDataProvider({ children }: { children: React.ReactNode }
 
   const refresh = useCallback(async (attempt = 0) => {
     setLoading(true);
-    const { data, error } = await supabase
-      .from<CampaignDbRow>('campaigns')
-      .select('*')
-      .order('date', { ascending: false })
-      .order('created_at', { ascending: false })
-      .range(0, 19999);
+    const pageSize = 1000;
+    const aggregated: CampaignDbRow[] = [];
+    let offset = 0;
 
-    if (error) {
-      const status = (error as any)?.status ?? (error as any)?.code ?? null;
-      if (status === 401 || status === '401') {
-        if (attempt < 5) {
-          if (refreshRetryRef.current) window.clearTimeout(refreshRetryRef.current);
-          refreshRetryRef.current = window.setTimeout(() => {
-            void refresh(attempt + 1);
-          }, 200 * Math.pow(2, attempt));
+    while (true) {
+      const { data, error } = await supabase
+        .from<CampaignDbRow>('campaigns')
+        .select('*')
+        .order('date', { ascending: false })
+        .order('created_at', { ascending: false })
+        .range(offset, offset + pageSize - 1);
+
+      if (error) {
+        const status = (error as any)?.status ?? (error as any)?.code ?? null;
+        if (status === 401 || status === '401') {
+          if (attempt < 5) {
+            if (refreshRetryRef.current) window.clearTimeout(refreshRetryRef.current);
+            refreshRetryRef.current = window.setTimeout(() => {
+              void refresh(attempt + 1);
+            }, 200 * Math.pow(2, attempt));
+          }
+          setLoading(false);
+          return;
         }
+        logError('refresh', error);
+        setRows([]);
+        idxRef.current = 0;
         setLoading(false);
         return;
       }
-      logError('refresh', error);
-      setRows([]);
-      idxRef.current = 0;
-      setLoading(false);
-      return;
+
+      if (!data?.length) break;
+      aggregated.push(...data);
+      if (data.length < pageSize) break;
+      offset += pageSize;
     }
 
-    const mapped = (data ?? []).map(mapFromDb).map(computeRow);
+    const mapped = aggregated.map(mapFromDb).map(computeRow);
     const withIdx = mapped.map((row, index) => stampRow(row, index));
     idxRef.current = withIdx.length;
     setRows(withIdx);
