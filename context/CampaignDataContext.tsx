@@ -121,7 +121,8 @@ export function CampaignDataProvider({ children }: { children: React.ReactNode }
       .from<CampaignDbRow>('campaigns')
       .select('*')
       .order('date', { ascending: false })
-      .order('created_at', { ascending: false });
+      .order('created_at', { ascending: false })
+      .range(0, 19999);
 
     if (error) {
       const status = (error as any)?.status ?? (error as any)?.code ?? null;

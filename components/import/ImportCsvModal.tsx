@@ -22,6 +22,62 @@ const OPTIONAL_HEADERS = ['priceCurrency'] as const;
 
 const fmtEUR = new Intl.NumberFormat('es-ES', { style: 'currency', currency: 'EUR' });
 
+type ToastVariant = 'success' | 'error';
+
+function showToast(message: string, opts?: { variant?: ToastVariant; duration?: number }) {
+  if (typeof document === 'undefined') return;
+  const hostId = 'monet-toasts-host';
+  let host = document.getElementById(hostId);
+  if (!host) {
+    host = document.createElement('div');
+    host.id = hostId;
+    host.style.position = 'fixed';
+    host.style.right = '16px';
+    host.style.bottom = '16px';
+    host.style.zIndex = '9999';
+    host.style.display = 'grid';
+    host.style.gap = '8px';
+    host.style.pointerEvents = 'none';
+    document.body.appendChild(host);
+  }
+
+  const toast = document.createElement('div');
+  toast.className = 'pointer-events-auto select-none rounded-lg border px-3 py-2 shadow-xl text-sm';
+  toast.style.borderColor = 'var(--color-border)';
+  toast.style.background = 'var(--color-surface)';
+  toast.style.color = 'var(--color-text)';
+  toast.style.transition = 'transform 180ms ease, opacity 180ms ease';
+  toast.style.transform = 'translateY(8px)';
+  toast.style.opacity = '0';
+  toast.style.maxWidth = '360px';
+  toast.textContent = message;
+
+  if (opts?.variant === 'error') {
+    toast.style.outline = '1px solid #ff6b6b55';
+    toast.style.boxShadow = '0 10px 30px rgba(239,68,68,0.12)';
+  } else if (opts?.variant === 'success') {
+    toast.style.outline = '1px solid rgba(16,185,129,.25)';
+    toast.style.boxShadow = '0 10px 30px rgba(16,185,129,.12)';
+  }
+
+  host.appendChild(toast);
+
+  requestAnimationFrame(() => {
+    toast.style.transform = 'translateY(0px)';
+    toast.style.opacity = '1';
+  });
+
+  const duration = opts?.duration ?? 3200;
+  window.setTimeout(() => {
+    toast.style.transform = 'translateY(8px)';
+    toast.style.opacity = '0';
+    window.setTimeout(() => {
+      toast.remove();
+      if (host && host.children.length === 0) host.remove();
+    }, 200);
+  }, duration);
+}
+
 /* =======================
    Utils
    ======================= */
@@ -346,20 +402,20 @@ export default function ImportCsvModal({ onClose }: { onClose: () => void }) {
 
       if (!response.ok) {
         const message = payload?.error || 'Import failed.';
-        alert(message);
+        showToast(message, { variant: 'error' });
         return;
       }
 
-      alert(
-        `Import done:
-Processed: ${payload.total ?? drafts.length}
-Duplicates skipped: ${payload.duplicates ?? 0}`
-      );
+      const processed = payload.total ?? drafts.length;
+      const duplicates = payload.duplicates ?? 0;
+      showToast(`Import done · Processed: ${processed} · Duplicates skipped: ${duplicates}`, {
+        variant: 'success',
+      });
       await refresh();
       onClose();
     } catch (e) {
       console.error(e);
-      alert('Import failed. See console for details.');
+      showToast('Import failed. See console for details.', { variant: 'error' });
     } finally {
       setImporting(false);
     }
