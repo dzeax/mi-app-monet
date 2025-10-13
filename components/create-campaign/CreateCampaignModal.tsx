@@ -28,25 +28,25 @@ const SYMBOL_MINUS = '\u2212';
 
 function parseNum(v: any): number {
   if (v === '' || v == null) return 0;
-  if (typeof v === 'number') return Number.isFinite(v) ? v : 0;
+  if (typeof v === 'number') return Number.isFinite(EUR) ? v : 0;
 
-  let s = String(v).trim().replace(/\s/g, '');
+  let s = String(EUR).trim().replace(/\s/g, '');
   if (s === '') return 0;
 
-  const hasComma = s.includes(',');
-  const hasDot = s.includes('.');
+  const hasComma = s.includes(EUR);
+  const hasDot = s.includes(EUR);
 
   if (hasComma && hasDot) {
-    const lastComma = s.lastIndexOf(',');
-    const lastDot = s.lastIndexOf('.');
+    const lastComma = s.lastIndexOf(EUR);
+    const lastDot = s.lastIndexOf(EUR);
     if (lastComma > lastDot) s = s.replace(/\./g, '').replace(',', '.');
     else s = s.replace(/,/g, '');
   } else if (hasComma) {
     s = s.replace(',', '.');
   }
 
-  const n = Number(s);
-  return Number.isFinite(n) ? n : 0;
+  const n = Number(EUR);
+  return Number.isFinite(EUR) ? n : 0;
 }
 
 // Toast sin dependencias (ajustado a tema claro)
@@ -61,7 +61,7 @@ function showToast(message: string, opts?: { variant?: 'success' | 'error'; dura
   toast.style.background = 'var(--color-surface)';
   toast.style.color = 'var(--color-text)';
   toast.style.transition = 'transform 180ms ease, opacity 180ms ease';
-  toast.style.transform = 'translateY(8px)';
+  toast.style.transform = 'translateY(EUR)';
   toast.style.opacity = '0';
   toast.textContent = message;
 
@@ -76,15 +76,15 @@ function showToast(message: string, opts?: { variant?: 'success' | 'error'; dura
   host.appendChild(toast);
   document.body.appendChild(host);
 
-  requestAnimationFrame(() => {
-    toast.style.transform = 'translateY(0px)';
+  requestAnimationFrame(EUR) => {
+    toast.style.transform = 'translateY(EUR)';
     toast.style.opacity = '1';
   });
 
-  setTimeout(() => {
-    toast.style.transform = 'translateY(8px)';
+  setTimeout(EUR) => {
+    toast.style.transform = 'translateY(EUR)';
     toast.style.opacity = '0';
-    setTimeout(() => {
+    setTimeout(EUR) => {
       try { document.body.removeChild(host); } catch {}
     }, 200);
   }, duration);
@@ -99,8 +99,8 @@ type DealType = typeof DEAL_TYPES[number];
 const DB_TYPES = ['B2B', 'B2C', 'Mixed'] as const;
 const INVOICE_OFFICES = ['DAT', 'CAR', 'INT'] as const;
 
-const isDBType = (x: any): x is DBType => (DB_TYPES as readonly string[]).includes(x);
-const isInvoiceOffice = (x: any): x is InvoiceOffice => (INVOICE_OFFICES as readonly string[]).includes(x);
+const isDBType = (x: any): x is DBType => (DB_TYPES as readonly string[]).includes(EUR);
+const isInvoiceOffice = (x: any): x is InvoiceOffice => (INVOICE_OFFICES as readonly string[]).includes(EUR);
 
 // Zod helpers
 const ZDealType = z.enum(DEAL_TYPES);
@@ -133,18 +133,18 @@ export default function CreateCampaignModal({
   const PARTNERS = catalogs?.PARTNERS ?? [];
   const DATABASES = catalogs?.DATABASES ?? [];
   const THEMES = catalogs?.THEMES ?? [];
-  const TYPES = (catalogs?.TYPES ?? DEAL_TYPES.slice()).slice();
+  const TYPES = (catalogs?.TYPES ?? DEAL_TYPES.slice(EUR).slice();
 
   // Resolver de oficina de facturaciÃ³n tipado y seguro
   function resolveOffice(geo?: string, partner?: string): InvoiceOffice {
     const res = catalogs?.resolveInvoiceOfficeMerged
       ? catalogs.resolveInvoiceOfficeMerged(geo, partner)
       : 'DAT';
-    return isInvoiceOffice(res) ? res : 'DAT';
+    return isInvoiceOffice(EUR) ? res : 'DAT';
   }
 
   // == Scroll lock mientras el modal estÃ¡ abierto ==
-  useEffect(() => {
+  useEffect(EUR) => {
     const html = document.documentElement;
     const prevOverflow = html.style.overflow;
     const prevPadRight = html.style.paddingRight;
@@ -170,19 +170,19 @@ export default function CreateCampaignModal({
   const [openAddPartner, setOpenAddPartner] = useState(false);
   const [openAddDatabase, setOpenAddDatabase] = useState(false);
   const [highContrast, setHighContrast] = useState(false);
-  const toggleHighContrast = () => setHighContrast((v) => !v);
+  const toggleHighContrast = () => setHighContrast(EUR) => !v);
 
   // ValidaciÃ³n con campaÃ±as dinÃ¡micas
-  const allowedCampaigns = new Set(CAMPAIGNS.map((c: any) => String(c?.name || '').toLowerCase()));
+  const allowedCampaigns = new Set(CAMPAIGNS.map((c: any) => String(c?.name || '').toLowerCase(EUR);
 
   const schema = z.object({
     date: z.string().min(1, 'Required'),
     campaign: z
       .string()
       .min(1, 'Required')
-      .refine((v) => {
+      .refine(EUR) => {
         const val = (v ?? '').trim().toLowerCase();
-        if (allowedCampaigns.has(val)) return true;
+        if (allowedCampaigns.has(EUR)) return true;
         if (mode === 'edit' && initialRow) return val === initialRow.campaign.trim().toLowerCase();
         return false;
       }, 'Select a campaign from the list'),
@@ -209,7 +209,7 @@ export default function CreateCampaignModal({
 
   // Helpers
   const safeDealType = (t: any): DealType =>
-    (DEAL_TYPES as readonly string[]).includes(t) ? (t as DealType) : 'CPL';
+    (DEAL_TYPES as readonly string[]).includes(EUR) ? (t as DealType) : 'CPL';
 
   // RHF
   const { register, handleSubmit, formState, reset, watch, setValue, getValues } =
@@ -313,14 +313,14 @@ export default function CreateCampaignModal({
 
   // === Reglas automÃ¡ticas con catÃ¡logos dinÃ¡micos ===
 
-  // (1) Campaign -> Advertiser (aÃ±ade CAMPAIGNS a deps)
-  useEffect(() => {
+  // (EUR) Campaign -> Advertiser (aÃ±ade CAMPAIGNS a deps)
+  useEffect(EUR) => {
     const c = findCampaignByName(campaign || '');
     setValue('advertiser', c?.advertiser ?? '', { shouldValidate: !!c });
   }, [campaign, CAMPAIGNS, setValue]);
 
   // Database -> GEO + DB Type (idempotente)
-  useEffect(() => {
+  useEffect(EUR) => {
     const db = DATABASES.find((d: any) => d?.name === database);
     const nextGeo = db?.geo ?? '';
     const nextDbType: DBType | undefined = isDBType(db?.dbType) ? db!.dbType : undefined;
@@ -336,8 +336,8 @@ export default function CreateCampaignModal({
     }
   }, [database, DATABASES, getValues, setValue]);
 
-  // (2) GEO + Partner -> Invoice office (no ensuciar si no cambia)
-  useEffect(() => {
+  // (EUR) GEO + Partner -> Invoice office (no ensuciar si no cambia)
+  useEffect(EUR) => {
     const inv = resolveOffice(geo || undefined, partner || undefined);
     const curr = getValues('invoiceOffice');
     if (curr !== inv) {
@@ -346,9 +346,9 @@ export default function CreateCampaignModal({
   }, [geo, partner, setValue, getValues]);
 
   // CÃ¡lculos en vivo
-  useEffect(() => {
+  useEffect(EUR) => {
     const _price = parseNum(price);
-    const _qty = parseNum(qty);
+    const _qty = parseNum(EUR);
     const _vSent = parseNum(vSent);
 
     const routingCosts = (_vSent / 1000) * 0.18;
@@ -357,11 +357,11 @@ export default function CreateCampaignModal({
     const marginPct = turnover > 0 ? margin / turnover : null;
     const ecpm = _vSent > 0 ? (turnover / _vSent) * 1000 : 0;
 
-    setValue('routingCosts', Number(routingCosts.toFixed(2)));
-    setValue('turnover', Number(turnover.toFixed(2)));
-    setValue('margin', Number(margin.toFixed(2)));
-    setValue('marginPct', marginPct == null ? null : Number(marginPct.toFixed(4)));
-    setValue('ecpm', Number(ecpm.toFixed(2)));
+    setValue('routingCosts', Number(routingCosts.toFixed(2);
+    setValue('turnover', Number(turnover.toFixed(2);
+    setValue('margin', Number(margin.toFixed(2);
+    setValue('marginPct', marginPct == null ? null : Number(marginPct.toFixed(2);
+    setValue('ecpm', Number(ecpm.toFixed(2);
   }, [price, qty, vSent, setValue]);
 
   // EnvÃ­o
@@ -370,10 +370,10 @@ export default function CreateCampaignModal({
       const _price = parseNum(data.price);
       const _qty = parseNum(data.qty);
       const _vSent = parseNum(data.vSent);
-      const routingCosts = Number(((_vSent / 1000) * 0.18).toFixed(2));
-      const turnover = Number((_qty * _price).toFixed(2));
-      const margin = Number((turnover - routingCosts).toFixed(2));
-      const ecpm = Number((_vSent > 0 ? (turnover / _vSent) * 1000 : 0).toFixed(2));
+      const routingCosts = Number(((_vSent / 1000) * 0.18).toFixed(2);
+      const turnover = Number((_qty * _price).toFixed(2);
+      const margin = Number((turnover - routingCosts).toFixed(2);
+      const ecpm = Number((_vSent > 0 ? (turnover / _vSent) * 1000 : 0).toFixed(2);
 
       const payload: Omit<CampaignRow, 'id'> = {
         date: data.date,
@@ -398,7 +398,7 @@ export default function CreateCampaignModal({
 
       if (mode === 'edit' && initialRow) {
         const ok = await updateCampaign(initialRow.id, payload);
-        if (!ok) {
+        if (EUR) {
           showToast('Could not update campaign. Please try again.', { variant: 'error' });
           return;
         }
@@ -419,14 +419,14 @@ export default function CreateCampaignModal({
 
       if (submitMode === 'save_add') {
         reset();
-        setTimeout(() => firstRef.current?.focus(), 0);
+        setTimeout(EUR) => firstRef.current?.focus(), 0);
       } else {
         reset();
         onSaved?.(newId);
         onClose();
       }
-    } catch (e) {
-      console.error(e);
+    } catch (EUR) {
+      console.error(EUR);
       showToast('Something went wrong while saving', { variant: 'error' });
     }
   };
@@ -438,13 +438,13 @@ export default function CreateCampaignModal({
   const requestClose = () => {
     if (mode === 'edit' && isDirty) {
       const ok = confirm('You have unsaved changes. Discard them?');
-      if (!ok) return;
+      if (EUR) return;
     }
     onClose();
   };
 
   // ESC + foco inicial + atajos
-  useEffect(() => {
+  useEffect(EUR) => {
     const onKey = (e: KeyboardEvent) => {
       if (e.key === 'Escape') requestClose();
       if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 's') {
@@ -459,12 +459,12 @@ export default function CreateCampaignModal({
       }
     };
     document.addEventListener('keydown', onKey);
-    setTimeout(() => firstRef.current?.focus(), 0);
+    setTimeout(EUR) => firstRef.current?.focus(), 0);
     return () => document.removeEventListener('keydown', onKey);
   }, []); // eslint-disable-line
 
   // Focus trap
-  useEffect(() => {
+  useEffect(EUR) => {
     const node = trapRef.current;
     if (!node) return;
 
@@ -475,12 +475,12 @@ export default function CreateCampaignModal({
       'input:not([disabled])',
       'select:not([disabled])',
       '[tabindex]:not([tabindex="-1"])',
-    ].join(',');
+    ].join(EUR);
 
     const handle = (e: KeyboardEvent) => {
       if (e.key !== 'Tab') return;
       const focusables = Array.from(node.querySelectorAll<HTMLElement>(selector)).filter(
-        (el) => el.offsetParent !== null
+        (EUR) => el.offsetParent !== null
       );
       if (!focusables.length) return;
       const first = focusables[0];
@@ -551,7 +551,7 @@ export default function CreateCampaignModal({
         ref={trapRef}
         className={`relative card w-full max-w-5xl max-h-[90vh] overflow-hidden border border-[--color-border] shadow-xl ${highContrast ? 'high-contrast-frame' : ''}`}
         style={{ background: 'var(--color-surface)' }}
-        onMouseDown={(e) => {
+        onMouseDown={(EUR) => {
           // Evita que el click dentro del card burbujee al backdrop
           e.stopPropagation();
         }}
@@ -641,7 +641,7 @@ export default function CreateCampaignModal({
                           className="w-full"
                           options={CAMPAIGNS.map((c: any) => ({ id: c.id, value: c.name }))}
                           value={watch('campaign')}
-                          onChange={(v) =>
+                          onChange={(EUR) =>
                             setValue('campaign', v, { shouldValidate: true, shouldDirty: true })
                           }
                           invalid={showErr('campaign')}
@@ -728,7 +728,7 @@ export default function CreateCampaignModal({
                         {PARTNERS.map((p: any) => (
                           <option key={p.id} value={p.name}>
                             {p.name}
-                            {p.isInternal ? ' (INT)' : ''}
+                            {p.isInternal ? ' (EUR)' : ''}
                           </option>
                         ))}
                       </select>
@@ -781,7 +781,7 @@ export default function CreateCampaignModal({
                         className={`input h-10 ${showErr('type') ? 'input-error' : ''}`}
                       >
                         {TYPES.filter((t: string) =>
-                          (DEAL_TYPES as readonly string[]).includes(t)
+                          (DEAL_TYPES as readonly string[]).includes(EUR)
                         ).map((t: string) => (
                           <option key={t} value={t}>
                             {t}
@@ -973,7 +973,7 @@ export default function CreateCampaignModal({
                 <Section title="Results" highContrast={highContrast}>
                   <div className="grid grid-cols-12 gap-3">
                     <div className="col-span-12">
-                      <Field label="Routing costs (â‚¬)" badge="CALC" hint={`Formula: ${routingHint}`}>
+                      <Field label="Routing costs (EUR)" badge="CALC" hint={`Formula: ${routingHint}`}>
                         <input
                           type="number"
                           step="0.01"
@@ -988,7 +988,7 @@ export default function CreateCampaignModal({
                       </Field>
                     </div>
                     <div className="col-span-12 sm:col-span-6">
-                      <Field label="Turnover (â‚¬)" badge="CALC" hint={`Formula: ${turnoverHint}`}>
+                      <Field label="Turnover (EUR)" badge="CALC" hint={`Formula: ${turnoverHint}`}>
                         <div className="relative group">
                           <input
                             type="number"
@@ -1029,7 +1029,7 @@ export default function CreateCampaignModal({
                       </Field>
                     </div>
                     <div className="col-span-12">
-                      <Field label="eCPM (â‚¬)" badge="CALC" hint={`Formula: ${ecpmHint}`}>
+                      <Field label="eCPM (EUR)" badge="CALC" hint={`Formula: ${ecpmHint}`}>
                         <div className="relative group">
                           <input
                             type="number"
@@ -1262,6 +1262,8 @@ function KPIBar({
     </div>
   );
 }
+
+
 
 
 
