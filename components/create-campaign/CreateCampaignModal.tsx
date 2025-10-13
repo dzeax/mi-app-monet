@@ -586,10 +586,11 @@ export default function CreateCampaignModal({
             ref={formRef}
             id="create-edit-campaign-form"
             onSubmit={handleSubmit(onSubmit, onInvalid)}
-            className="grid grid-cols-12 gap-3"
+            className="grid gap-4 xl:grid-cols-12 items-start"
             data-highcontrast={highContrast ? 'true' : undefined}
           >
-            {/* A) Basics */}
+            <div className="col-span-12 xl:col-span-7 flex flex-col gap-3">
+              {/* A) Basics */}
             <Section title="Basics" highContrast={highContrast}>
               <div className="grid grid-cols-12 gap-2">
                 <div className="col-span-12 md:col-span-4">
@@ -952,99 +953,101 @@ export default function CreateCampaignModal({
                 </div>
               </div>
             </Section>
-
-            {/* KPI BAR */}
-            <div className="col-span-12">
-              <KPIBar
-                turnover={watchTurnover || 0}
-                margin={watchMargin || 0}
-                marginPct={watchMarginPct}
-                ecpm={watchEcpm || 0}
-                fmtEUR={fmtEUR}
-                fmtPct={fmtPct}
-                positiveClass="text-[--color-primary]"
-                negativeClass="text-[--color-accent]"
-              />
             </div>
 
-            {/* D) Results */}
-            <Section title="Results" highContrast={highContrast}>
-              <div className="grid grid-cols-12 gap-2">
-                <div className="col-span-12 sm:col-span-6 md:col-span-3">
-                  <Field label="Routing costs (â‚¬)" badge="CALC" hint={`Formula: ${routingHint}`}>
-                    <input
-                      type="number"
-                      step="0.01"
-                      {...register('routingCosts')}
-                      className={roInput}
-                      readOnly
-                    />
-                    <Err
-                      id={errId('routingCosts')}
-                      e={showErr('routingCosts') ? errors.routingCosts : undefined}
-                    />
-                  </Field>
-                </div>
-                <div className="col-span-12 sm:col-span-6 md:col-span-3">
-                  <Field label="Turnover (â‚¬)" badge="CALC" hint={`Formula: ${turnoverHint}`}>
-                    <div className="relative group">
-                      <input
-                        type="number"
-                        step="0.01"
-                        {...register('turnover')}
-                        className={`${roInput} pr-16`}
-                        readOnly
-                      />
-                      <span className="absolute inset-y-0 right-2 flex items-center text-xs opacity-0 group-hover:opacity-70 group-focus-within:opacity-70 transition-opacity">
-                        {fmtEUR.format(watchTurnover || 0)}
-                      </span>
+            <aside className="col-span-12 xl:col-span-5">
+              <div className="flex flex-col gap-3 xl:sticky xl:top-0">
+                {/* KPI BAR */}
+                <KPIBar
+                  turnover={watchTurnover || 0}
+                  margin={watchMargin || 0}
+                  marginPct={watchMarginPct}
+                  ecpm={watchEcpm || 0}
+                  fmtEUR={fmtEUR}
+                  fmtPct={fmtPct}
+                  positiveClass="text-[--color-primary]"
+                  negativeClass="text-[--color-accent]"
+                />
+                {/* D) Results */}
+                <Section title="Results" highContrast={highContrast}>
+                  <div className="grid grid-cols-12 gap-3">
+                    <div className="col-span-12">
+                      <Field label="Routing costs (€)" badge="CALC" hint={`Formula: ${routingHint}`}>
+                        <input
+                          type="number"
+                          step="0.01"
+                          {...register('routingCosts')}
+                          className={roInput}
+                          readOnly
+                        />
+                        <Err
+                          id={errId('routingCosts')}
+                          e={showErr('routingCosts') ? errors.routingCosts : undefined}
+                        />
+                      </Field>
                     </div>
-                    <Err
-                      id={errId('turnover')}
-                      e={showErr('turnover') ? errors.turnover : undefined}
-                    />
-                  </Field>
-                </div>
-                <div className="col-span-12 sm:col-span-6 md:col-span-3">
-                  <Field label="Margin" badge="CALC" hint={`Formula: ${marginHint}`}>
-                    <div className="relative group">
-                      <input
-                        type="number"
-                        step="0.01"
-                        {...register('margin')}
-                        className={`${roInput} pr-24 ${marginTextClass}`}
-                        readOnly
-                        aria-live="polite"
-                      />
-                      <span
-                        className={`absolute inset-y-0 right-2 flex items-center text-xs opacity-0 group-hover:opacity-90 group-focus-within:opacity-90 transition-opacity ${marginTextClass}`}
-                      >
-                        {fmtEUR.format(watchMargin || 0)}
-                        {watchMarginPct == null ? '' : ` (${fmtPct.format(watchMarginPct)})`}
-                      </span>
+                    <div className="col-span-12 sm:col-span-6">
+                      <Field label="Turnover (€)" badge="CALC" hint={`Formula: ${turnoverHint}`}>
+                        <div className="relative group">
+                          <input
+                            type="number"
+                            step="0.01"
+                            {...register('turnover')}
+                            className={`${roInput} pr-16`}
+                            readOnly
+                          />
+                          <span className="absolute inset-y-0 right-2 flex items-center text-xs opacity-0 group-hover:opacity-70 group-focus-within:opacity-70 transition-opacity">
+                            {fmtEUR.format(watchTurnover || 0)}
+                          </span>
+                        </div>
+                        <Err
+                          id={errId('turnover')}
+                          e={showErr('turnover') ? errors.turnover : undefined}
+                        />
+                      </Field>
                     </div>
-                    <Err id={errId('margin')} e={showErr('margin') ? errors.margin : undefined} />
-                  </Field>
-                </div>
-                <div className="col-span-12 sm:col-span-6 md:col-span-3">
-                  <Field label="eCPM (â‚¬)" badge="CALC" hint={`Formula: ${ecpmHint}`}>
-                    <div className="relative group">
-                      <input
-                        type="number"
-                        step="0.01"
-                        {...register('ecpm')}
-                        className={`${roInput} pr-16`}
-                        readOnly
-                      />
-                      <span className="absolute inset-y-0 right-2 flex items-center text-xs opacity-0 group-hover:opacity-70 group-focus-within:opacity-70 transition-opacity">
-                        {fmtEUR.format(watchEcpm || 0)}
-                      </span>
+                    <div className="col-span-12 sm:col-span-6">
+                      <Field label="Margin" badge="CALC" hint={`Formula: ${marginHint}`}>
+                        <div className="relative group">
+                          <input
+                            type="number"
+                            step="0.01"
+                            {...register('margin')}
+                            className={`${roInput} pr-24 ${marginTextClass}`}
+                            readOnly
+                            aria-live="polite"
+                          />
+                          <span
+                            className={`absolute inset-y-0 right-2 flex items-center text-xs opacity-0 group-hover:opacity-90 group-focus-within:opacity-90 transition-opacity ${marginTextClass}`}
+                          >
+                            {fmtEUR.format(watchMargin || 0)}
+                            {watchMarginPct == null ? '' : ` (${fmtPct.format(watchMarginPct)})`}
+                          </span>
+                        </div>
+                        <Err id={errId('margin')} e={showErr('margin') ? errors.margin : undefined} />
+                      </Field>
                     </div>
-                    <Err id={errId('ecpm')} e={showErr('ecpm') ? errors.ecpm : undefined} />
-                  </Field>
-                </div>
+                    <div className="col-span-12">
+                      <Field label="eCPM (€)" badge="CALC" hint={`Formula: ${ecpmHint}`}>
+                        <div className="relative group">
+                          <input
+                            type="number"
+                            step="0.01"
+                            {...register('ecpm')}
+                            className={`${roInput} pr-16`}
+                            readOnly
+                          />
+                          <span className="absolute inset-y-0 right-2 flex items-center text-xs opacity-0 group-hover:opacity-70 group-focus-within:opacity-70 transition-opacity">
+                            {fmtEUR.format(watchEcpm || 0)}
+                          </span>
+                        </div>
+                        <Err id={errId('ecpm')} e={showErr('ecpm') ? errors.ecpm : undefined} />
+                      </Field>
+                    </div>
+                  </div>
+                </Section>
               </div>
-            </Section>
+            </aside>
           </form>
 
           <div className="edge-fade edge-bottom" aria-hidden />
