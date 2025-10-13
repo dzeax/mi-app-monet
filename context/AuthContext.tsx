@@ -75,7 +75,18 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       setLoading(false);
     })();
 
-    const { data: sub } = supabase.auth.onAuthStateChange(async (_event, session) => {
+    const { data: sub } = supabase.auth.onAuthStateChange(async (event, session) => {
+      try {
+        await fetch('/auth/callback', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          credentials: 'same-origin',
+          body: JSON.stringify({ event, session }),
+        });
+      } catch (error) {
+        console.warn('Failed to sync auth session', error);
+      }
+
       if (!mounted) return;
       const authUser = session?.user ?? null;
       if (authUser) {
