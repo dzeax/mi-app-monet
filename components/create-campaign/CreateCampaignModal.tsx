@@ -592,7 +592,7 @@ export default function CreateCampaignModal({
             <div className="col-span-12 xl:col-span-7 flex flex-col gap-3">
               {/* A) Basics */}
             <Section title="Basics" highContrast={highContrast}>
-              <div className="grid grid-cols-12 gap-2">
+              <div className="grid grid-cols-12 gap-x-3 gap-y-2">
                 <div className="col-span-12 md:col-span-4">
                   <Field label="Date">
                     <>
@@ -770,7 +770,7 @@ export default function CreateCampaignModal({
 
             {/* B) Commercial */}
             <Section title="Commercial" highContrast={highContrast}>
-              <div className="grid grid-cols-12 gap-2">
+              <div className="grid grid-cols-12 gap-x-3 gap-y-2">
                 <div className="col-span-12 sm:col-span-6 md:col-span-6 lg:col-span-3">
                   <Field label="Type">
                     <div className="relative">
@@ -873,7 +873,7 @@ export default function CreateCampaignModal({
 
             {/* C) Data source */}
             <Section title="Data source" highContrast={highContrast}>
-              <div className="grid grid-cols-12 gap-2">
+              <div className="grid grid-cols-12 gap-x-3 gap-y-2">
                 <div className="col-span-12 md:col-span-6">
                   <Field label="Database">
                     <FieldWithAddon
