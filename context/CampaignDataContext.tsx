@@ -86,7 +86,7 @@ function logError(scope: string, error: unknown | PostgrestError) {
 
 export function CampaignDataProvider({ children }: { children: React.ReactNode }) {
   const supabase = useMemo(() => createClientComponentClient(), []);
-  const { user } = useAuth();
+  const { user, loading: authLoading } = useAuth();
   const { resolveRate, settings } = useRoutingSettings();
   const fallbackRate = settings.defaultRate ?? DEFAULT_ROUTING_RATE;
 
@@ -137,8 +137,14 @@ export function CampaignDataProvider({ children }: { children: React.ReactNode }
   }, [computeRow, stampRow, supabase]);
 
   useEffect(() => {
-    refresh();
-  }, [refresh]);
+    if (authLoading) return;
+    if (!user) {
+      setRows([]);
+      setLoading(false);
+      return;
+    }
+    void refresh();
+  }, [authLoading, user, refresh]);
 
   useEffect(() => {
     if (!rowsRef.current.length) return;
