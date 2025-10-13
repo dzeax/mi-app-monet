@@ -147,6 +147,22 @@ export function CampaignDataProvider({ children }: { children: React.ReactNode }
   }, [authLoading, user, refresh]);
 
   useEffect(() => {
+    const { data: listener } = supabase.auth.onAuthStateChange((_event, session) => {
+      const authUser = session?.user ?? null;
+      if (authUser) {
+        void refresh();
+      } else {
+        setRows([]);
+        setLoading(false);
+      }
+    });
+
+    return () => {
+      listener?.subscription.unsubscribe();
+    };
+  }, [refresh, supabase]);
+
+  useEffect(() => {
     if (!rowsRef.current.length) return;
     setRows((prev) =>
       prev.map((row) => {
