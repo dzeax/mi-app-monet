@@ -126,7 +126,7 @@ export function CampaignDataProvider({ children }: { children: React.ReactNode }
     if (error) {
       const status = (error as any)?.status ?? (error as any)?.code ?? null;
       if (status === 401 || status === '401') {
-        if (attempt < 4) {
+        if (attempt < 5) {
           if (refreshRetryRef.current) window.clearTimeout(refreshRetryRef.current);
           refreshRetryRef.current = window.setTimeout(() => {
             void refresh(attempt + 1);
