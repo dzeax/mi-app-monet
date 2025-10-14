@@ -1,18 +1,18 @@
-﻿/* Importa Tailwind (v4) */
+/* Importa Tailwind (v4) */
 @import "tailwindcss";
 
 /* Fuente Inter de Google Fonts */
 @import url("https://fonts.googleapis.com/css2?family=Inter:wght@300;400;600;700&display=swap");
 
 /* -------------------------------------------------
-   THEME TOKENS (Tailwind v4) â€” Default: LIGHT
+   THEME TOKENS (Tailwind v4) — Default: LIGHT
    ------------------------------------------------- */
 @theme {
-  /* TipografÃ­a base */
+  /* Tipografía base */
   --font-sans: "Inter", ui-sans-serif, system-ui, sans-serif, "Apple Color Emoji",
     "Segoe UI Emoji", "Segoe UI Symbol", "Noto Color Emoji";
 
-  /* Colores semÃ¡nticos principales */
+  /* Colores semánticos principales */
   --color-primary: #00bfa5;   /* verde corporativo */
   --color-accent:  #ff5252;   /* para errores/alertas */
 
@@ -21,7 +21,7 @@
   --color-text: #0f172a;      /* compat con text-text */
 
   /* Surfaces (light) */
-  --color-bg-outer: #f5f7fb;  /* fondo de pÃ¡gina */
+  --color-bg-outer: #f5f7fb;  /* fondo de página */
   --color-surface:  #ffffff;  /* tarjetas/paneles */
   --color-surface-2:#f2f4f7;  /* inputs/superficie secundaria */
   --color-border:   #e5e7eb;  /* borde sutil */
@@ -153,7 +153,7 @@ body {
 }
 
 
-/* BotÃ³n primario */
+/* Botón primario */
 .btn-primary {
   @apply inline-flex items-center justify-center rounded-lg px-4 py-2 font-semibold transition-all;
   color: white;
@@ -163,7 +163,7 @@ body {
 .btn-primary:hover { filter: brightness(1.05); }
 .btn-primary:active { transform: translateY(0.5px); }
 
-/* BotÃ³n ghost */
+/* Botón ghost */
 .btn-ghost {
   @apply inline-flex items-center justify-center rounded-lg px-4 py-2 font-medium transition-colors border;
   border-color: var(--color-border);
@@ -188,19 +188,19 @@ body {
   background: var(--color-surface);
   box-shadow: 0 1px 6px rgba(0,0,0,.06);
 
-  /* la tabla por encima de la lÃ¡mina */
+  /* la tabla por encima de la lámina */
   position: relative;
   z-index: 30;
 }
 
-/* ðŸ‘‡ cambia a separate para evitar glitches con sticky */
+/* 👇 cambia a separate para evitar glitches con sticky */
 .table {
   width: 100%;
   border-collapse: separate;
   border-spacing: 0;
 }
 
-/* Cabeceras sticky: un Ãºnico sitio de verdad (sin otro bloque mÃ¡s abajo) */
+/* Cabeceras sticky: un único sitio de verdad (sin otro bloque más abajo) */
 .table thead th {
   position: sticky;
   /* usa el offset calculado; fallback al header fijo si no se define */
@@ -228,7 +228,7 @@ body {
   background: linear-gradient(90deg, color-mix(in oklab, var(--color-primary) 28%, transparent), transparent);
 }
 
-/* Ãšltima columna (acciones): compacta, pero sin forzar nowrap al popover */
+/* Última columna (acciones): compacta, pero sin forzar nowrap al popover */
 .table td:last-child,
 .table th:last-child { width: 1%; }
 .table td:last-child [role="menu"],
@@ -244,13 +244,13 @@ body {
 
 /* Altura de la fila de cabeceras */
 :root {
-  --th-py: 0.625rem; /* 10px â€” sÃºbelo/bÃ¡jalo a gusto (0.5rem, 0.75rem...) */
+  --th-py: 0.625rem; /* 10px — súbelo/bájalo a gusto (0.5rem, 0.75rem...) */
   --th-px: 0.75rem;  /* 12px horizontal */
 }
 
 .table thead th {
   padding: var(--th-py) var(--th-px);
-  font-size: 13px;            /* opcional: un pelÃ­n mÃ¡s legible */
+  font-size: 13px;            /* opcional: un pelín más legible */
   line-height: 1.2;           /* opcional */
 }
 
@@ -345,18 +345,18 @@ input[type="date"]:hover::-webkit-calendar-picker-indicator { opacity: 1; }
   position: sticky; top: 0; z-index: 10;
   background: var(--color-surface-2);
   color: color-mix(in oklab, var(--color-text) 80%, transparent);
-  /* ya tenÃ­as border-bottom; aÃ±adimos sombra suave */
+  /* ya tenías border-bottom; añadimos sombra suave */
   box-shadow: 0 1px 0 0 var(--color-border), 0 6px 16px rgba(0,0,0,.04);
 }
 
-/* Ãšltima columna (acciones): compacta, pero sin forzar nowrap al popover */
+/* Última columna (acciones): compacta, pero sin forzar nowrap al popover */
 .table td:last-child,
 .table th:last-child {
   width: 1%;
   /* quitamos white-space: nowrap; */
 }
 
-/* Salvaguardas: el menÃº interno debe poder apilar sus items */
+/* Salvaguardas: el menú interno debe poder apilar sus items */
 .table td:last-child [role="menu"],
 .table td:last-child [data-menu],
 .table td:last-child .menu,
@@ -401,7 +401,7 @@ input[type="date"]:hover::-webkit-calendar-picker-indicator { opacity: 1; }
 }
 
 /* =======================
-   Brand Bar (Header) â€” fixed size
+   Brand Bar (Header) — fixed size
    ======================= */
 .app-header {
   position: sticky;
@@ -413,13 +413,13 @@ input[type="date"]:hover::-webkit-calendar-picker-indicator { opacity: 1; }
   color: #e5e7eb;
   border-bottom: 1px solid color-mix(in oklab, white 12%, transparent);
 
-  /* TamaÃ±o fijo (unificado) */
+  /* Tamaño fijo (unificado) */
   --header-h: 5.5rem; /* 88px */
   --logo-h: 56px;     /* altura visual del logo */
 }
 
-/* (Opcional) Si prefieres mantener mobile mÃ¡s alto, comenta el bloque superior
-   y usa este media-query. Si lo dejas, recuerda ajustar --content-sticky-top en mÃ³vil.
+/* (Opcional) Si prefieres mantener mobile más alto, comenta el bloque superior
+   y usa este media-query. Si lo dejas, recuerda ajustar --content-sticky-top en móvil.
 @media (min-width: 768px) {
   .app-header { --header-h: 5.5rem; --logo-h: 56px; }
 }
@@ -444,7 +444,7 @@ input[type="date"]:hover::-webkit-calendar-picker-indicator { opacity: 1; }
   transition: none;
 }
 
-/* BotÃ³n ghost en header oscuro */
+/* Botón ghost en header oscuro */
 .app-header .btn-ghost {
   color: #e5e7eb;
   border-color: transparent;
@@ -455,7 +455,7 @@ input[type="date"]:hover::-webkit-calendar-picker-indicator { opacity: 1; }
 /* Glow sutil del logo */
 .app-header .brand-logo {
   filter: drop-shadow(0 0 10px rgba(255,255,255,.08));
-  transition: none; /* sin transiciÃ³n ligada a scroll */
+  transition: none; /* sin transición ligada a scroll */
 }
 
 /* Respeta reduced motion */
@@ -463,7 +463,7 @@ input[type="date"]:hover::-webkit-calendar-picker-indicator { opacity: 1; }
   .app-header .brand-logo { transition: none; }
 }
 
-/* Espaciado vertical consistente para el mÃ³dulo de filtros */
+/* Espaciado vertical consistente para el módulo de filtros */
 :root {
   --filters-row-gap: .75rem;        /* mobile */
 }
@@ -700,13 +700,13 @@ form[data-highcontrast='true'] .badge-field {
   background: color-mix(in oklab, var(--color-surface) 86%, var(--color-surface-2));
 }
 
-/* Uniformar altura mÃ­nima de los inputs (compacto) */
+/* Uniformar altura mínima de los inputs (compacto) */
 .input { min-height: 2.5rem; /* 40px */ }
 
-/* Divider mÃ¡s suave y reutilizable */
+/* Divider más suave y reutilizable */
 .divider-soft { height: 1px; background: color-mix(in oklab, var(--color-border), transparent 20%); }
 
-/* Badges de campo (AUTO / CALC) mÃ¡s visibles pero sutiles */
+/* Badges de campo (AUTO / CALC) más visibles pero sutiles */
 .badge-field {
   display: inline-flex; align-items: center; gap: .25rem;
   padding: 2px 6px; border-radius: .5rem; font-size: 10px; line-height: 1; letter-spacing: .02em;
@@ -716,9 +716,13 @@ form[data-highcontrast='true'] .badge-field {
 }
 
 /* Variante para CALC si quieres un matiz neutro-gris (opcional) */
-.badge-field[data-variant="calc"]{`n  border-color: color-mix(in oklab, #3b82f6 55%, var(--color-border));`n  color: color-mix(in oklab, #1d4ed8 88%, var(--color-text));`n  background: color-mix(in oklab, #3b82f6 16%, var(--color-surface-2));`n}
+.badge-field[data-variant="calc"]{
+  border-color: color-mix(in oklab, #3b82f6 55%, var(--color-border));
+  color: color-mix(in oklab, #1d4ed8 88%, var(--color-text));
+  background: color-mix(in oklab, #3b82f6 16%, var(--color-surface-2));
+}
 
-/* Lista del Combobox mÃ¡s clara y con sombra algo mayor */
+/* Lista del Combobox más clara y con sombra algo mayor */
 .cb-panel {
   background: var(--color-surface);
   border: 1px solid var(--color-border);
@@ -731,7 +735,7 @@ form[data-highcontrast='true'] .badge-field {
   background: color-mix(in oklab, var(--color-surface-2) 80%, transparent);
 }
 
-/* Hover de inputs: 2â€“3% mÃ¡s claro */
+/* Hover de inputs: 2–3% más claro */
 .input:hover {
   background: color-mix(in oklab, var(--color-surface-2) 92%, white);
 }
@@ -771,7 +775,7 @@ form[data-highcontrast='true'] .badge-field {
 .modal-chrome .btn-ghost:hover{ background: var(--modal-chrome-hover); }
 .modal-chrome .btn-primary{ box-shadow: 0 10px 24px rgba(16,185,129,.25); }
 
-/* opcional: fina â€œcintaâ€ de acento arriba del header */
+/* opcional: fina “cinta” de acento arriba del header */
 .modal-chrome .accent-strip{
   position: absolute; inset: 0 auto auto 0; height: 3px; width: 100%;
   background-image: linear-gradient(90deg,
@@ -787,7 +791,7 @@ form[data-highcontrast='true'] .badge-field {
   }
 }
 
-/* --- Edge fades en el Ã¡rea scroll del modal --- */
+/* --- Edge fades en el área scroll del modal --- */
 /* (coloca <div class="edge-fade edge-top" /> y <div class="edge-fade edge-bottom" /> dentro del contenedor scroll) */
 /* softened */
 .edge-fade{
@@ -842,7 +846,7 @@ form[data-highcontrast='true'] .badge-field {
   box-shadow: 0 2px 10px rgba(0,0,0,.08);
 }
 
-/* --- Tiles de estadÃ­stica (coherentes con KPIBar) --- */
+/* --- Tiles de estadística (coherentes con KPIBar) --- */
 .stat-tile {
   border: 1px solid color-mix(in oklab, var(--color-text) 8%, var(--color-border));
   background: color-mix(in oklab, var(--color-surface-2) 92%, var(--color-surface));
@@ -887,7 +891,7 @@ form[data-highcontrast='true'] .badge-field {
 /* contenedor interno centrado */
 .app-footer .inner{
   width: 100%;
-  max-width: 1200px;           /* ajÃºstalo a tu ancho preferido */
+  max-width: 1200px;           /* ajústalo a tu ancho preferido */
   margin: 0 auto;
   padding: 0 .75rem;
   display: flex; align-items: center; justify-content: space-between;
@@ -903,7 +907,7 @@ form[data-highcontrast='true'] .badge-field {
 }
 .app-footer .heart:hover{ transform: scale(1.05); }
 
-/* utilidad: aÃ±ade espacio inferior al contenido para no taparlo */
+/* utilidad: añade espacio inferior al contenido para no taparlo */
 .with-app-footer{
   padding-bottom: calc(var(--footer-h) + max(0px, env(safe-area-inset-bottom)));
 }

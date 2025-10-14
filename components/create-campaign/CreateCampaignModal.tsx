@@ -953,19 +953,21 @@ export default function CreateCampaignModal({
                 style={{ top: 'calc(var(--content-sticky-top, 5.5rem) + 4rem)' }}
               >
                 {/* KPI BAR */}
-                <KPIBar
-                  turnover={watchTurnover || 0}
-                  margin={watchMargin || 0}
-                  marginPct={watchMarginPct}
-                  ecpm={watchEcpm || 0}
-                  fmtEUR={fmtEUR}
-                  fmtPct={fmtPct}
-                  positiveClass="text-[--color-primary]"
-                  negativeClass="text-[--color-accent]"
-                />
+                <Section title="Performance Summary" highContrast={highContrast}>
+                  <KPIBar
+                    turnover={watchTurnover || 0}
+                    margin={watchMargin || 0}
+                    marginPct={watchMarginPct}
+                    ecpm={watchEcpm || 0}
+                    fmtEUR={fmtEUR}
+                    fmtPct={fmtPct}
+                    positiveClass="text-[--color-primary]"
+                    negativeClass="text-[--color-accent]"
+                  />
+                </Section>
 
                 {/* D) Results */}
-                <Section title="Results" highContrast={highContrast}>
+                <Section title="Key Metrics" highContrast={highContrast}>
                   <div className="grid grid-cols-12 gap-x-4 gap-y-4">
                     <div className="col-span-12">
                       <Field label="Routing costs (€)" badge="CALC" hint={`Formula: ${routingHint}`}>
