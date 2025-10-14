@@ -571,19 +571,22 @@ input[type="date"]:hover::-webkit-calendar-picker-indicator { opacity: 1; }
 
 .field-with-suffix {
   position: relative;
-  display: block;
+  display: flex;
+  align-items: stretch;
+  flex-wrap: nowrap;
 }
 .field-with-suffix .input {
-  width: 100%;
-  padding-right: 3rem;
+  flex: 1 1 auto;
+  min-width: 0;
+  padding-right: 1rem;
   border-top-right-radius: 0;
   border-bottom-right-radius: 0;
 }
 .field-suffix-button {
-  position: absolute;
-  top: 0;
-  right: 0;
-  bottom: 0;
+  position: relative;
+  top: auto;
+  right: auto;
+  bottom: auto;
   transform: none;
   display: inline-flex;
   align-items: center;
@@ -591,6 +594,8 @@ input[type="date"]:hover::-webkit-calendar-picker-indicator { opacity: 1; }
   padding: 0 .75rem;
   min-width: 2.75rem;
   min-height: 2.5rem;
+  height: 100%;
+  margin-left: -1px;
   border-radius: 0 .75rem .75rem 0;
   border: 1px solid color-mix(in oklab, var(--color-text) 10%, var(--color-border));
   background: color-mix(in oklab, var(--color-surface) 94%, var(--color-surface-2));
