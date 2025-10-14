@@ -554,7 +554,8 @@ input[type="date"]:hover::-webkit-calendar-picker-indicator { opacity: 1; }
   position: relative;
 }
 .form-section__header {
-  position: static;\n  z-index: auto;
+  position: static;
+  z-index: auto;
   display: flex;
   flex-direction: column;
   gap: .35rem;
@@ -603,6 +604,9 @@ input[type="date"]:hover::-webkit-calendar-picker-indicator { opacity: 1; }
   display: inline-flex;
   align-items: center;
   gap: .4rem;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 .form-field__control {
   display: grid;
@@ -623,7 +627,6 @@ input[type="date"]:hover::-webkit-calendar-picker-indicator { opacity: 1; }
   line-height: 1.35;
   color: color-mix(in oklab, var(--color-text) 65%, transparent);
 }
- param($m) $m.Value -replace '\}', '  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;\n  }' 
 
 .field-with-suffix {
   position: relative;
@@ -718,8 +721,10 @@ form[data-highcontrast='true'] .form-section__accent {
 }
 form[data-highcontrast='true'] .form-field > span:first-child {
   color: color-mix(in oklab, var(--color-text) 92%, transparent);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
-form[data-highcontrast='true']  param($m) $m.Value -replace '\}', '  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;\n  }' 
 form[data-highcontrast='true'] .input {
   border-color: color-mix(in oklab, var(--color-text) 36%, var(--color-border));
   background: color-mix(in oklab, var(--color-surface) 78%, var(--color-surface-2));
