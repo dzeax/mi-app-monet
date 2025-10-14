@@ -954,16 +954,18 @@ export default function CreateCampaignModal({
               >
                 {/* KPI BAR */}
                 <Section title="Performance Summary" highContrast={highContrast}>
-                  <KPIBar
-                    turnover={watchTurnover || 0}
-                    margin={watchMargin || 0}
-                    marginPct={watchMarginPct}
-                    ecpm={watchEcpm || 0}
-                    fmtEUR={fmtEUR}
-                    fmtPct={fmtPct}
-                    positiveClass="text-[--color-primary]"
-                    negativeClass="text-[--color-accent]"
-                  />
+                  <div className="kpi-frame">
+                    <KPIBar
+                      turnover={watchTurnover || 0}
+                      margin={watchMargin || 0}
+                      marginPct={watchMarginPct}
+                      ecpm={watchEcpm || 0}
+                      fmtEUR={fmtEUR}
+                      fmtPct={fmtPct}
+                      positiveClass="text-[--color-primary]"
+                      negativeClass="text-[--color-accent]"
+                    />
+                  </div>
                 </Section>
 
                 {/* D) Results */}
