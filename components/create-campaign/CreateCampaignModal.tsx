@@ -569,7 +569,7 @@ export default function CreateCampaignModal({
         </div>
 
         {/* Body */}
-        <div className="overflow-y-auto px-5 pt-6 pb-5 relative">
+        <div className="modal-body overflow-y-auto px-5 pt-6 pb-5 relative">
           <div className="edge-fade edge-top" aria-hidden />
 
           <form
@@ -1266,6 +1266,7 @@ function KPIBar({
     </div>
   );
 }
+
 
 
 
