@@ -63,9 +63,8 @@ export async function POST(req: Request) {
   const admin = supabaseAdmin();
 
   async function fetchAuthUserId(): Promise<string | null> {
-    const authDb = admin.schema('auth');
-    const { data, error } = await authDb
-      .from('users')
+    const { data, error } = await admin
+      .from('auth.users')
       .select('id')
       .eq('email', email)
       .maybeSingle();
