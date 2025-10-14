@@ -716,11 +716,7 @@ form[data-highcontrast='true'] .badge-field {
 }
 
 /* Variante para CALC si quieres un matiz neutro-gris (opcional) */
-.badge-field[data-variant="calc"]{
-  border-color: color-mix(in oklab, var(--color-text) 18%, var(--color-border));
-  color: color-mix(in oklab, var(--color-text) 80%, transparent);
-  background: color-mix(in oklab, var(--color-surface-2) 96%, var(--color-surface));
-}
+.badge-field[data-variant="calc"]{`n  border-color: color-mix(in oklab, #3b82f6 55%, var(--color-border));`n  color: color-mix(in oklab, #1d4ed8 88%, var(--color-text));`n  background: color-mix(in oklab, #3b82f6 16%, var(--color-surface-2));`n}
 
 /* Lista del Combobox mÃ¡s clara y con sombra algo mayor */
 .cb-panel {
@@ -911,6 +907,8 @@ form[data-highcontrast='true'] .badge-field {
 .with-app-footer{
   padding-bottom: calc(var(--footer-h) + max(0px, env(safe-area-inset-bottom)));
 }
+
+
 
 
 

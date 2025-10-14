@@ -968,7 +968,7 @@ export default function CreateCampaignModal({
                 <Section title="Results" highContrast={highContrast}>
                   <div className="grid grid-cols-12 gap-x-4 gap-y-4">
                     <div className="col-span-12">
-                      <Field label="Routing costs (â‚¬)" badge="CALC" hint={`Formula: ${routingHint}`}>
+                      <Field label="Routing costs (€)" badge="CALC" hint={`Formula: ${routingHint}`}>
                         <input
                           type="number"
                           step="0.01"
@@ -983,7 +983,7 @@ export default function CreateCampaignModal({
                       </Field>
                     </div>
                     <div className="col-span-12 sm:col-span-6">
-                      <Field label="Turnover (â‚¬)" badge="CALC" hint={`Formula: ${turnoverHint}`}>
+                      <Field label="Turnover (€)" badge="CALC" hint={`Formula: ${turnoverHint}`}>
                         <div className="relative group">
                           <input
                             type="number"
@@ -1024,7 +1024,7 @@ export default function CreateCampaignModal({
                       </Field>
                     </div>
                     <div className="col-span-12">
-                      <Field label="eCPM (â‚¬)" badge="CALC" hint={`Formula: ${ecpmHint}`}>
+                      <Field label="eCPM (€)" badge="CALC" hint={`Formula: ${ecpmHint}`}>
                         <div className="relative group">
                           <input
                             type="number"
@@ -1257,4 +1257,5 @@ function KPIBar({
     </div>
   );
 }
+
 
