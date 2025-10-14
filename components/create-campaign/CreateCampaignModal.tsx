@@ -548,7 +548,7 @@ export default function CreateCampaignModal({
       {/* Card */}
       <div
         ref={trapRef}
-        className="relative card w-full max-w-5xl max-h-[90vh] overflow-hidden border border-[--color-border] shadow-xl"
+        className="relative card w-full max-w-[76rem] max-h-[90vh] overflow-hidden border border-[--color-border] shadow-xl"
         style={{ background: 'var(--color-surface)' }}
         onMouseDown={(e) => {
           // Evita que el click dentro del card burbujee al backdrop
@@ -1266,6 +1266,7 @@ function KPIBar({
     </div>
   );
 }
+
 
 
 
