@@ -571,17 +571,22 @@ input[type="date"]:hover::-webkit-calendar-picker-indicator { opacity: 1; }
 
 .field-with-suffix {
   position: relative;
-  display: flex;
-  align-items: center;
-  flex-wrap: nowrap;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) max-content;
+  align-items: stretch;
 }
 .field-with-suffix .input {
-  flex: 1 1 auto;
+  grid-column: 1;
+  grid-row: 1;
+  width: 100%;
   padding-right: 1rem;
   border-top-right-radius: 0;
   border-bottom-right-radius: 0;
 }
 .field-suffix-button {
+  grid-column: 2;
+  grid-row: 1;
+  align-self: stretch;
   position: relative;
   top: auto;
   right: auto;
