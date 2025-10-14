@@ -1,4 +1,4 @@
-'use client';
+﻿'use client';
 
 import { createPortal } from 'react-dom';
 import { Children, isValidElement, useEffect, useRef, useState } from 'react';
@@ -15,7 +15,7 @@ import QuickAddPartnerModal from '@/components/create-campaign/QuickAddPartnerMo
 import QuickAddDatabaseModal from '@/components/create-campaign/QuickAddDatabaseModal';
 import FieldWithAddon from '@/components/ui/FieldWithAddon';
 import type { DBType, InvoiceOffice } from '@/data/reference';
-import { useAuth } from '@/context/AuthContext'; // 🆕 roles para quick-add
+import { useAuth } from '@/context/AuthContext'; // ðŸ†• roles para quick-add
 
 // ======================= Utils =======================
 
@@ -123,11 +123,11 @@ export default function CreateCampaignModal({
 }) {
   const { addCampaign, updateCampaign } = useCampaignData();
 
-  // 🆕 flag de permisos para quick-add
+  // ðŸ†• flag de permisos para quick-add
   const { isAdmin, isEditor } = useAuth();
   const canQuickAdd = isAdmin || isEditor;
 
-  // === CatÃ¡logos dinÃ¡micos ===
+  // === CatÃƒÂ¡logos dinÃƒÂ¡micos ===
   const catalogs = useCatalogOverrides();
   const CAMPAIGNS = catalogs?.CAMPAIGNS ?? [];
   const PARTNERS = catalogs?.PARTNERS ?? [];
@@ -135,7 +135,7 @@ export default function CreateCampaignModal({
   const THEMES = catalogs?.THEMES ?? [];
   const TYPES = (catalogs?.TYPES ?? DEAL_TYPES.slice()).slice();
 
-  // Resolver de oficina de facturaciÃ³n tipado y seguro
+  // Resolver de oficina de facturaciÃƒÂ³n tipado y seguro
   function resolveOffice(geo?: string, partner?: string): InvoiceOffice {
     const res = catalogs?.resolveInvoiceOfficeMerged
       ? catalogs.resolveInvoiceOfficeMerged(geo, partner)
@@ -143,7 +143,7 @@ export default function CreateCampaignModal({
     return isInvoiceOffice(res) ? res : 'DAT';
   }
 
-  // == Scroll lock mientras el modal estÃ¡ abierto ==
+  // == Scroll lock mientras el modal estÃƒÂ¡ abierto ==
   useEffect(() => {
     const html = document.documentElement;
     const prevOverflow = html.style.overflow;
@@ -171,7 +171,7 @@ export default function CreateCampaignModal({
   const [openAddDatabase, setOpenAddDatabase] = useState(false);
   const highContrast = false;
 
-  // ValidaciÃ³n con campaÃ±as dinÃ¡micas
+  // ValidaciÃƒÂ³n con campaÃƒÂ±as dinÃƒÂ¡micas
   const allowedCampaigns = new Set(CAMPAIGNS.map((c: any) => String(c?.name || '').toLowerCase()));
 
   const schema = z.object({
@@ -310,9 +310,9 @@ export default function CreateCampaignModal({
   const watchEcpm = watch('ecpm');
   const watchMarginPct = watch('marginPct');
 
-  // === Reglas automÃ¡ticas con catÃ¡logos dinÃ¡micos ===
+  // === Reglas automÃƒÂ¡ticas con catÃƒÂ¡logos dinÃƒÂ¡micos ===
 
-  // (1) Campaign -> Advertiser (aÃ±ade CAMPAIGNS a deps)
+  // (1) Campaign -> Advertiser (aÃƒÂ±ade CAMPAIGNS a deps)
   useEffect(() => {
     const c = findCampaignByName(campaign || '');
     setValue('advertiser', c?.advertiser ?? '', { shouldValidate: !!c });
@@ -344,7 +344,7 @@ export default function CreateCampaignModal({
     }
   }, [geo, partner, setValue, getValues]);
 
-  // CÃ¡lculos en vivo
+  // CÃƒÂ¡lculos en vivo
   useEffect(() => {
     const _price = parseNum(price);
     const _qty = parseNum(qty);
@@ -363,7 +363,7 @@ export default function CreateCampaignModal({
     setValue('ecpm', Number(ecpm.toFixed(2)));
   }, [price, qty, vSent, setValue]);
 
-  // EnvÃ­o
+  // EnvÃƒÂ­o
   const onSubmit = async (data: FormValues) => {
     try {
       const _price = parseNum(data.price);
@@ -413,7 +413,7 @@ export default function CreateCampaignModal({
         return;
       }
       showToast(
-        submitMode === 'save_add' ? 'Campaign saved. Add another…' : 'Campaign saved successfully'
+        submitMode === 'save_add' ? 'Campaign saved. Add anotherâ€¦' : 'Campaign saved successfully'
       );
 
       if (submitMode === 'save_add') {
@@ -510,7 +510,7 @@ export default function CreateCampaignModal({
       ? 'text-[--color-accent]'
       : 'opacity-70';
 
-  // Inputs de solo lectura — compacto + contraste
+  // Inputs de solo lectura â€” compacto + contraste
   const roInput = 'input h-10 border-dotted bg-[color:var(--color-surface-2)]/70';
   const roErr = (bad?: boolean) => `${roInput} ${bad ? 'input-error' : ''}`;
   const errId = (name: string) => `err-${name}`;
@@ -585,7 +585,7 @@ export default function CreateCampaignModal({
                 <div className="col-span-12 md:col-span-4">
                   <Field label="Date">
                     <>
-                      <div className="field-with-suffix">
+                      <div className="field-with-suffix flex w-full items-stretch">
                         <input
                           ref={firstRef as any}
                           type="date"
@@ -605,7 +605,7 @@ export default function CreateCampaignModal({
                         />
                         <button
                           type="button"
-                          className="field-suffix-button"
+                          className="field-suffix-button shrink-0 h-10 w-[2.75rem]"
                           onClick={() => openDatePicker(firstRef.current)}
                           aria-label="Open date picker"
                         >
@@ -619,7 +619,7 @@ export default function CreateCampaignModal({
                 <div className="col-span-12 md:col-span-8">
                   <Field label="Campaign">
                     <FieldWithAddon
-                      onAdd={canQuickAdd ? () => setOpenAddCampaign(true) : undefined} // 🆕
+                      onAdd={canQuickAdd ? () => setOpenAddCampaign(true) : undefined} // ðŸ†•
                       addAriaLabel="Add campaign"
                       className="w-full"
                     >
@@ -661,7 +661,7 @@ export default function CreateCampaignModal({
                           content={errors.advertiser?.message}
                           className="absolute right-2 inset-y-0 flex items-center"
                         >
-                          <span aria-hidden className="text-[--color-accent] text-sm">⚠</span>
+                          <span aria-hidden className="text-[--color-accent] text-sm">âš </span>
                         </Tooltip>
                       )}
                     </div>
@@ -690,7 +690,7 @@ export default function CreateCampaignModal({
                           content={errors.invoiceOffice?.message}
                           className="absolute right-2 inset-y-0 flex items-center"
                         >
-                          <span aria-hidden className="text-[--color-accent] text-sm">⚠</span>
+                          <span aria-hidden className="text-[--color-accent] text-sm">âš </span>
                         </Tooltip>
                       )}
                     </div>
@@ -704,7 +704,7 @@ export default function CreateCampaignModal({
                 <div className="col-span-12 md:col-span-6">
                   <Field label="Partner">
                     <FieldWithAddon
-                      onAdd={canQuickAdd ? () => setOpenAddPartner(true) : undefined} // 🆕
+                      onAdd={canQuickAdd ? () => setOpenAddPartner(true) : undefined} // ðŸ†•
                       addAriaLabel="Add partner"
                     >
                       <select
@@ -747,7 +747,7 @@ export default function CreateCampaignModal({
                           content={errors.theme?.message}
                           className="absolute right-2 inset-y-0 flex items-center"
                         >
-                          <span aria-hidden className="text-[--color-accent] text-sm">⚠</span>
+                          <span aria-hidden className="text-[--color-accent] text-sm">âš </span>
                         </Tooltip>
                       )}
                     </div>
@@ -785,7 +785,7 @@ export default function CreateCampaignModal({
                           content={errors.type?.message}
                           className="absolute right-2 inset-y-0 flex items-center"
                         >
-                          <span aria-hidden className="text-[--color-accent] text-sm">⚠</span>
+                          <span aria-hidden className="text-[--color-accent] text-sm">âš </span>
                         </Tooltip>
                       )}
                     </div>
@@ -808,7 +808,7 @@ export default function CreateCampaignModal({
                           content={errors.price?.message}
                           className="absolute right-2 inset-y-0 flex items-center"
                         >
-                          <span aria-hidden className="text-[--color-accent] text-sm">⚠</span>
+                          <span aria-hidden className="text-[--color-accent] text-sm">âš </span>
                         </Tooltip>
                       )}
                     </div>
@@ -831,7 +831,7 @@ export default function CreateCampaignModal({
                           content={errors.qty?.message}
                           className="absolute right-2 inset-y-0 flex items-center"
                         >
-                          <span aria-hidden className="text-[--color-accent] text-sm">⚠</span>
+                          <span aria-hidden className="text-[--color-accent] text-sm">âš </span>
                         </Tooltip>
                       )}
                     </div>
@@ -853,7 +853,7 @@ export default function CreateCampaignModal({
                           content={errors.vSent?.message}
                           className="absolute right-2 inset-y-0 flex items-center"
                         >
-                          <span aria-hidden className="text-[--color-accent] text-sm">⚠</span>
+                          <span aria-hidden className="text-[--color-accent] text-sm">âš </span>
                         </Tooltip>
                       )}
                     </div>
@@ -869,7 +869,7 @@ export default function CreateCampaignModal({
                 <div className="w-full xl:flex-[1.25] min-w-[200px]">
                   <Field label="Database">
                     <FieldWithAddon
-                      onAdd={canQuickAdd ? () => setOpenAddDatabase(true) : undefined} // 🆕
+                      onAdd={canQuickAdd ? () => setOpenAddDatabase(true) : undefined} // ðŸ†•
                       addAriaLabel="Add database"
                     >
                       <select
@@ -908,7 +908,7 @@ export default function CreateCampaignModal({
                           content={errors.geo?.message}
                           className="absolute right-2 inset-y-0 flex items-center"
                         >
-                          <span aria-hidden className="text-[--color-accent] text-sm">⚠</span>
+                          <span aria-hidden className="text-[--color-accent] text-sm">âš </span>
                         </Tooltip>
                       )}
                     </div>
@@ -933,7 +933,7 @@ export default function CreateCampaignModal({
                           content={errors.databaseType?.message}
                           className="absolute right-2 inset-y-0 flex items-center"
                         >
-                          <span aria-hidden className="text-[--color-accent] text-sm">⚠</span>
+                          <span aria-hidden className="text-[--color-accent] text-sm">âš </span>
                         </Tooltip>
                       )}
                     </div>
@@ -968,7 +968,7 @@ export default function CreateCampaignModal({
                 <Section title="Results" highContrast={highContrast}>
                   <div className="grid grid-cols-12 gap-x-4 gap-y-4">
                     <div className="col-span-12">
-                      <Field label="Routing costs (€)" badge="CALC" hint={`Formula: ${routingHint}`}>
+                      <Field label="Routing costs (â‚¬)" badge="CALC" hint={`Formula: ${routingHint}`}>
                         <input
                           type="number"
                           step="0.01"
@@ -983,7 +983,7 @@ export default function CreateCampaignModal({
                       </Field>
                     </div>
                     <div className="col-span-12 sm:col-span-6">
-                      <Field label="Turnover (€)" badge="CALC" hint={`Formula: ${turnoverHint}`}>
+                      <Field label="Turnover (â‚¬)" badge="CALC" hint={`Formula: ${turnoverHint}`}>
                         <div className="relative group">
                           <input
                             type="number"
@@ -1024,7 +1024,7 @@ export default function CreateCampaignModal({
                       </Field>
                     </div>
                     <div className="col-span-12">
-                      <Field label="eCPM (€)" badge="CALC" hint={`Formula: ${ecpmHint}`}>
+                      <Field label="eCPM (â‚¬)" badge="CALC" hint={`Formula: ${ecpmHint}`}>
                         <div className="relative group">
                           <input
                             type="number"
@@ -1069,7 +1069,7 @@ export default function CreateCampaignModal({
               className="btn-primary"
               onClick={() => { setSubmitMode('save'); formRef.current?.requestSubmit(); }}
             >
-              {isSubmitting ? 'Saving…' : mode === 'edit' ? 'Save changes' : 'Save'}
+              {isSubmitting ? 'Savingâ€¦' : mode === 'edit' ? 'Save changes' : 'Save'}
             </button>
           </div>
         </div>
@@ -1257,3 +1257,4 @@ function KPIBar({
     </div>
   );
 }
+
