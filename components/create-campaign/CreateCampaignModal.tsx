@@ -1230,36 +1230,45 @@ function KPIBar({
       : margin < 0
       ? (negativeClass || 'text-red-600')
       : 'opacity-80';
+  const tileClass =
+    'min-w-0 rounded-lg bg-[color:var(--color-surface-2)]/70 px-3 py-2.5 sm:px-4 sm:py-3 shadow-[0_12px_28px_rgba(15,23,42,0.08)] transition-shadow';
 
   return (
-    <div className="grid grid-cols-12 gap-3">
-      <div className="col-span-12">
-        <div className="rounded-xl border border-[--color-border] bg-[color:var(--color-surface)]/80 p-3 md:sticky md:top-2">
-          <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
-            <div className="rounded-lg bg-[color:var(--color-surface-2)]/60 p-3">
-              <div className="text-xs uppercase text-[color:var(--color-text)]/65">Turnover</div>
-              <div className="text-xl font-semibold" style={{ fontVariantNumeric: 'tabular-nums' }}>
-                {fmtEUR.format(turnover || 0)}
-              </div>
-            </div>
-            <div className="rounded-lg bg-[color:var(--color-surface-2)]/60 p-3">
-              <div className="text-xs uppercase text-[color:var(--color-text)]/65">Margin</div>
-              <div className={`text-xl font-semibold ${marginClass}`} style={{ fontVariantNumeric: 'tabular-nums' }}>
-                {fmtEUR.format(margin || 0)}
-                {marginPct == null ? '' : ` (${fmtPct.format(marginPct)})`}
-              </div>
-            </div>
-            <div className="rounded-lg bg-[color:var(--color-surface-2)]/60 p-3">
-              <div className="text-xs uppercase text-[color:var(--color-text)]/65">eCPM</div>
-              <div className="text-xl font-semibold" style={{ fontVariantNumeric: 'tabular-nums' }}>
-                {fmtEUR.format(ecpm || 0)}
-              </div>
-            </div>
-          </div>
+    <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+      <div className={tileClass}>
+        <div className="text-[11px] uppercase tracking-[0.16em] text-[color:var(--color-text)]/60">Turnover</div>
+        <div
+          className="mt-1 text-lg sm:text-[1.35rem] font-semibold leading-tight text-[color:var(--color-text)]/90 break-words"
+          style={{ fontVariantNumeric: 'tabular-nums' }}
+        >
+          {fmtEUR.format(turnover || 0)}
+        </div>
+      </div>
+      <div className={tileClass}>
+        <div className="text-[11px] uppercase tracking-[0.16em] text-[color:var(--color-text)]/60">Margin</div>
+        <div
+          className={`mt-1 text-lg sm:text-[1.35rem] font-semibold leading-tight break-words ${marginClass}`}
+          style={{ fontVariantNumeric: 'tabular-nums' }}
+        >
+          {fmtEUR.format(margin || 0)}
+          {marginPct == null ? '' : ` (${fmtPct.format(marginPct)})`}
+        </div>
+      </div>
+      <div className={tileClass}>
+        <div className="text-[11px] uppercase tracking-[0.16em] text-[color:var(--color-text)]/60">eCPM</div>
+        <div
+          className="mt-1 text-lg sm:text-[1.35rem] font-semibold leading-tight text-[color:var(--color-text)]/90 break-words"
+          style={{ fontVariantNumeric: 'tabular-nums' }}
+        >
+          {fmtEUR.format(ecpm || 0)}
         </div>
       </div>
     </div>
   );
 }
+
+
+
+
 
 
