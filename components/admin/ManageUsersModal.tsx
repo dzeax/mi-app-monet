@@ -119,7 +119,7 @@ export default function ManageUsersModal({ onClose }: { onClose: () => void }) {
       const res = await fetch('/api/admin/users/invite', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ email, role: invRole }),
+        body: JSON.stringify({ email, role: invRole, action: 'invite' }),
       });
       const payload = await res.json().catch(() => ({}));
       if (!res.ok || payload?.ok !== true) {
@@ -143,21 +143,37 @@ export default function ManageUsersModal({ onClose }: { onClose: () => void }) {
     fetchUsers();
   };
 
-  const resendInvite = async (email: string) => {
+  const resendInvite = async (row: Row) => {
+    const email = row.email;
+    const shouldSendMagic = !!row.user_id;
+
     try {
-      const { error } = await sb.auth.signInWithOtp({
-        email,
-        options: {
-          emailRedirectTo:
-            typeof window !== 'undefined'
-              ? `${location.origin}/auth/callback`
-              : undefined,
-        },
+      const res = await fetch('/api/admin/users/invite', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          email,
+          role: row.role,
+          action: shouldSendMagic ? 'magic_link' : 'invite',
+        }),
       });
-      if (error) throw error;
-      show('Invitation re-sent', 'ok');
+      const payload = await res.json().catch(() => ({}));
+      if (!res.ok || payload?.ok !== true) {
+        const msg = payload?.error || `Invite failed (${res.status})`;
+        throw new Error(msg);
+      }
+
+      if (!row.user_id && payload?.userId) {
+        setRows((prev) =>
+          prev.map((item) =>
+            item.email === row.email ? { ...item, user_id: payload.userId } : item
+          )
+        );
+      }
+
+      show(shouldSendMagic ? 'Magic link sent' : 'Invitation re-sent', 'ok');
     } catch (e: any) {
-      show(e?.message || 'Could not resend invite', 'err');
+      show(e?.message || 'Could not send link', 'err');
     }
   };
 
@@ -303,16 +319,14 @@ export default function ManageUsersModal({ onClose }: { onClose: () => void }) {
                     </div>
 
                     <div className="justify-self-end flex items-center gap-1">
-                      {!r.user_id && (
-                        <button
-                          className="btn-ghost text-xs border border-[--color-border] px-2 py-1 disabled:opacity-50 disabled:pointer-events-none"
-                          onClick={() => resendInvite(r.email)}
-                          disabled={!isAdmin}
-                          title="Resend invitation"
-                        >
-                          Resend
-                        </button>
-                      )}
+                      <button
+                        className="btn-ghost text-xs border border-[--color-border] px-2 py-1 disabled:opacity-50 disabled:pointer-events-none"
+                        onClick={() => resendInvite(r)}
+                        disabled={!isAdmin}
+                        title={r.user_id ? 'Send magic link' : 'Resend invitation'}
+                      >
+                        {r.user_id ? 'Magic link' : 'Resend'}
+                      </button>
                       <button
                         className="btn-ghost text-[--color-accent] disabled:opacity-50 disabled:pointer-events-none"
                         onClick={()=>removeRow(r.email)}

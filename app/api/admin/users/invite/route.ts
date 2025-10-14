@@ -1,12 +1,14 @@
 import { NextResponse } from 'next/server';
 import { z } from 'zod';
+import type { SupabaseClient } from '@supabase/supabase-js';
 
 import { createServerSupabase } from '@/lib/supabase/server';
 import { supabaseAdmin } from '@/lib/supabase/admin';
 
 const payloadSchema = z.object({
   email: z.string().email(),
-  role: z.enum(['admin', 'editor']),
+  role: z.enum(['admin', 'editor']).optional(),
+  action: z.enum(['invite', 'magic_link']).default('invite'),
 });
 
 type InvitePayload = z.infer<typeof payloadSchema>;
@@ -24,11 +26,35 @@ function formatUnknownError(prefix: string, error: unknown): string {
   return `${prefix}: ${suffix}`;
 }
 
-async function lookupUserIdByEmail(email: string) {
-  const admin = supabaseAdmin();
+function resolveBaseUrl(req: Request): string {
+  const envUrl =
+    process.env.NEXT_PUBLIC_SITE_URL ||
+    process.env.NEXT_PUBLIC_APP_URL ||
+    process.env.APP_BASE_URL ||
+    process.env.SUPABASE_REDIRECT_URL ||
+    '';
 
-  // Try SDK method if available in this version
+  if (envUrl) {
+    try {
+      return new URL(envUrl).origin;
+    } catch {
+      // ignore invalid env url, fall back to request headers
+    }
+  }
+
+  const forwardedProto = req.headers.get('x-forwarded-proto');
+  const forwardedHost = req.headers.get('x-forwarded-host');
+  if (forwardedHost) {
+    return `${forwardedProto ?? 'https'}://${forwardedHost}`;
+  }
+
+  const url = new URL(req.url);
+  return `${url.protocol}//${url.host}`;
+}
+
+async function lookupUserIdByEmail(admin: SupabaseClient, email: string): Promise<string | null> {
   const anyAdmin: any = admin as any;
+
   try {
     const getByEmail = anyAdmin?.auth?.admin?.getUserByEmail;
     if (typeof getByEmail === 'function') {
@@ -36,24 +62,36 @@ async function lookupUserIdByEmail(email: string) {
       if (error) throw error;
       return data?.user?.id ?? null;
     }
-  } catch (_) {
-    // ignore and fall back to listUsers
+  } catch {
+    // Ignore and fall through to listUsers
   }
 
-  // Fallback: paginate listUsers and filter by email
   let page = 1;
   const perPage = 200;
   while (true) {
     const { data, error } = await admin.auth.admin.listUsers({ page, perPage });
     if (error) throw error;
-    const found = (data?.users || []).find((u: any) => (u?.email || '').toLowerCase() === email);
+    const users = data?.users || [];
+    const found = users.find((user: any) => (user?.email || '').toLowerCase() === email);
     if (found?.id) return String(found.id);
     const total = (data as any)?.total || 0;
-    const got = (data?.users || []).length;
-    if (page * perPage >= total || got === 0) break;
+    if (page * perPage >= total || users.length === 0) break;
     page += 1;
   }
+
   return null;
+}
+
+async function sendMagicLink(
+  admin: SupabaseClient,
+  email: string,
+  redirectTo: string
+): Promise<void> {
+  const { error } = await admin.auth.signInWithOtp({
+    email,
+    options: { emailRedirectTo: redirectTo },
+  });
+  if (error) throw error;
 }
 
 export async function POST(req: Request) {
@@ -89,23 +127,62 @@ export async function POST(req: Request) {
   }
 
   const email = parsed.email.trim().toLowerCase();
-  const role = parsed.role;
+  const role = parsed.role ?? 'editor';
+  const action = parsed.action;
 
   const admin = supabaseAdmin();
+  const redirectBase = resolveBaseUrl(req);
+  const redirectTo = new URL('/auth/callback', redirectBase).toString();
+
+  if (action === 'magic_link') {
+    let userId: string | null = null;
+    try {
+      userId = await lookupUserIdByEmail(admin, email);
+    } catch (error) {
+      return NextResponse.json(
+        { error: formatUnknownError('Failed to look up user', error) },
+        { status: 500 }
+      );
+    }
+
+    if (!userId) {
+      return NextResponse.json(
+        { error: 'No Supabase account found for this email. Send an invitation first.' },
+        { status: 400 }
+      );
+    }
+
+    try {
+      await sendMagicLink(admin, email, redirectTo);
+    } catch (error) {
+      return NextResponse.json(
+        { error: formatUnknownError('Could not send magic link', error) },
+        { status: 400 }
+      );
+    }
+
+    return NextResponse.json({
+      ok: true,
+      userId,
+      invitationSent: true,
+      mode: 'magic_link',
+    });
+  }
 
   let authUserId: string | null = null;
   let invitationSent = false;
 
   try {
-    authUserId = await lookupUserIdByEmail(email);
+    authUserId = await lookupUserIdByEmail(admin, email);
   } catch (error) {
     return NextResponse.json({ error: formatUnknownError('Failed to look up user', error) }, { status: 500 });
   }
 
   if (!authUserId) {
-    const { data: inviteData, error: inviteError } = await admin.auth.admin.inviteUserByEmail(email);
+    const { data: inviteData, error: inviteError } = await admin.auth.admin.inviteUserByEmail(email, {
+      redirectTo,
+    });
     if (inviteError) {
-      // If user already exists, fall back to lookup
       const already = /already\s+registered|exists/i.test(inviteError.message || '');
       if (!already) {
         return NextResponse.json({ error: inviteError.message }, { status: 400 });
@@ -117,15 +194,21 @@ export async function POST(req: Request) {
 
     if (!authUserId) {
       try {
-        authUserId = await lookupUserIdByEmail(email);
+        authUserId = await lookupUserIdByEmail(admin, email);
       } catch (error) {
-        return NextResponse.json({ error: formatUnknownError('Invite succeeded but user lookup failed', error) }, { status: 500 });
+        return NextResponse.json(
+          { error: formatUnknownError('Invite succeeded but user lookup failed', error) },
+          { status: 500 }
+        );
       }
     }
   }
 
   if (!authUserId) {
-    return NextResponse.json({ error: 'Could not determine Supabase user id after invitation.' }, { status: 500 });
+    return NextResponse.json(
+      { error: 'Could not determine Supabase user id after invitation.' },
+      { status: 500 }
+    );
   }
 
   const { error: upsertError } = await admin
@@ -144,5 +227,11 @@ export async function POST(req: Request) {
     return NextResponse.json({ error: upsertError.message }, { status: 400 });
   }
 
-  return NextResponse.json({ ok: true, userId: authUserId, invitationSent });
+  return NextResponse.json({
+    ok: true,
+    userId: authUserId,
+    invitationSent,
+    mode: 'invite',
+  });
 }
+
