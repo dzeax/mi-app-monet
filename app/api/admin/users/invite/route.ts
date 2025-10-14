@@ -1,6 +1,6 @@
 import { NextResponse } from 'next/server';
 import { z } from 'zod';
-import type { PostgrestError } from '@supabase/supabase-js';
+import type { AuthError } from '@supabase/supabase-js';
 
 import { createServerSupabase } from '@/lib/supabase/server';
 import { supabaseAdmin } from '@/lib/supabase/admin';
@@ -63,20 +63,13 @@ export async function POST(req: Request) {
   const admin = supabaseAdmin();
 
   async function fetchAuthUserId(): Promise<string | null> {
-    const { data, error } = await admin
-      .from('auth.users')
-      .select('id')
-      .eq('email', email)
-      .maybeSingle();
-
+    const { data, error } = await admin.auth.admin.getUserByEmail(email);
     if (error) {
-      const err = error as PostgrestError;
-      // PGRST116 = no rows found
-      if (err.code === 'PGRST116') return null;
+      const err = error as AuthError;
+      if (err.status === 404) return null;
       throw new Error(err.message);
     }
-
-    return data?.id ?? null;
+    return data?.user?.id ?? null;
   }
 
   let authUserId: string | null = null;
@@ -137,4 +130,3 @@ export async function POST(req: Request) {
     invitationSent,
   });
 }
-
