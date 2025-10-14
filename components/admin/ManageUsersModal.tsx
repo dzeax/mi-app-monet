@@ -115,25 +115,26 @@ export default function ManageUsersModal({ onClose }: { onClose: () => void }) {
     const email = invEmail.trim().toLowerCase();
     if (!email) return;
 
-    const { error: upErr } = await sb
-      .from('app_users')
-      .upsert({ email, role: invRole, is_active: true }, { onConflict: 'email' });
-    if (upErr) return show(friendlyDbError(upErr.message), 'err');
-
     try {
-      const { error: otpErr } = await sb.auth.signInWithOtp({
-        email,
-        options: {
-          emailRedirectTo:
-            typeof window !== 'undefined'
-              ? `${location.origin}/auth/callback`
-              : undefined,
-        },
+      const res = await fetch('/api/admin/users/invite', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ email, role: invRole }),
       });
-      if (otpErr) show(`Upsert ok, invite mail failed: ${otpErr.message}`, 'err');
-      else show('Invitation sent', 'ok');
+      const payload = await res.json().catch(() => ({}));
+      if (!res.ok || payload?.ok !== true) {
+        const msg = payload?.error || `Invite failed (${res.status})`;
+        throw new Error(msg);
+      }
+      show(
+        payload.invitationSent
+          ? 'Invitation sent'
+          : 'User record updated (existing account)',
+        'ok'
+      );
     } catch (e: any) {
       show(`Invite failed: ${e?.message || e}`, 'err');
+      return;
     }
 
     setInvEmail('');
