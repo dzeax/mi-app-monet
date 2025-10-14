@@ -947,10 +947,10 @@ export default function CreateCampaignModal({
             </Section>
             </div>
 
-            <aside className="col-span-12 xl:col-span-5 mt-8 xl:mt-4 xl:pl-4">
+            <aside className="col-span-12 xl:col-span-5 mt-10 xl:mt-6 xl:pl-4">
               <div
                 className="flex flex-col gap-5 xl:sticky"
-                style={{ top: 'calc(var(--content-sticky-top, 5.5rem) + 3rem)' }}
+                style={{ top: 'calc(var(--content-sticky-top, 5.5rem) + 4rem)' }}
               >
                 {/* KPI BAR */}
                 <KPIBar
