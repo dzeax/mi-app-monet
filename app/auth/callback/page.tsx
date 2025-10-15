@@ -60,11 +60,8 @@ function AuthCallbackContent() {
           if (email) payload.email = email;
           const { error } = await supabase.auth.verifyOtp(payload as any);
           if (error) throw error;
-        } else if (accessToken && refreshToken) {
-          const { error } = await supabase.auth.setSession({
-            access_token: accessToken,
-            refresh_token: refreshToken,
-          });
+        } else if (accessToken) {
+          const { error } = await supabase.auth.getSessionFromUrl({ storeSession: true });
           if (error) throw error;
         } else {
           throw new Error('Missing token or code in the callback URL.');
