@@ -1,4 +1,4 @@
-'use client';
+﻿'use client';
 
 import { Suspense, useEffect, useMemo, useState } from 'react';
 import { useRouter, useSearchParams } from 'next/navigation';
@@ -20,7 +20,7 @@ function AuthCallbackContent() {
   const router = useRouter();
 
   const [status, setStatus] = useState<Status>('checking');
-  const [message, setMessage] = useState('Validando enlace...');
+  const [message, setMessage] = useState('Checking link...');
 
   useEffect(() => {
     let cancelled = false;
@@ -55,14 +55,14 @@ function AuthCallbackContent() {
 
         if (cancelled) return;
         setStatus('ok');
-        setMessage('Ingreso completado. Redirigiendo...');
+        setMessage('Signed in. Redirecting...');
         window.setTimeout(() => {
           if (!cancelled) router.replace(redirectTo);
         }, 1200);
       } catch (error: any) {
         if (cancelled) return;
         setStatus('error');
-        setMessage(error?.message || 'No se pudo validar el enlace.');
+        setMessage(error?.message || 'Could not validate the link.');
       }
     };
 
@@ -76,19 +76,19 @@ function AuthCallbackContent() {
     <div className="min-h-screen flex items-center justify-center bg-[--color-surface] text-[--color-text] px-4">
       <div className="max-w-md w-full rounded-lg border border-[--color-border] bg-[--color-surface-2] p-6 text-center space-y-4 shadow-lg">
         <div className="space-y-2">
-          <h1 className="text-xl font-semibold">Procesando acceso…</h1>
+          <h1 className="text-xl font-semibold">Processing sign-inâ€¦</h1>
           <p className="text-sm opacity-70">{message}</p>
         </div>
         {status === 'error' && (
           <div className="space-y-3">
             <p className="text-sm">
-              Puedes solicitar un nuevo enlace desde el panel de administradores o volver al login.
+              You can request a new link from an admin or return to login.
             </p>
             <button
               className="btn-primary px-4 py-2"
               onClick={() => router.replace('/login')}
             >
-              Ir al login
+              Go to login
             </button>
           </div>
         )}
@@ -102,12 +102,15 @@ function CallbackFallback() {
     <div className="min-h-screen flex items-center justify-center bg-[--color-surface] text-[--color-text] px-4">
       <div className="max-w-md w-full rounded-lg border border-[--color-border] bg-[--color-surface-2] p-6 text-center space-y-4 shadow-lg">
         <div className="space-y-2">
-          <h1 className="text-xl font-semibold">Procesando acceso…</h1>
-          <p className="text-sm opacity-70">Preparando enlace…</p>
+          <h1 className="text-xl font-semibold">Processing sign-inâ€¦</h1>
+          <p className="text-sm opacity-70">Preparando enlaceâ€¦</p>
         </div>
       </div>
     </div>
   );
 }
+
+
+
 
 
