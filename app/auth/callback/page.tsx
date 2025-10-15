@@ -38,16 +38,16 @@ function AuthCallbackContent() {
         return;
       }
 
+      const flow = getParam('flow') ?? getParam('type');
       const code = getParam('code');
       const token = getParam('token');
-      const type = getParam('type');
       const email = getParam('email');
       const accessToken = getParam('access_token');
       const refreshToken = getParam('refresh_token');
       const redirectTo = getParam('redirect_to') || '/';
 
       const inviteRedirect =
-        type === 'invite'
+        flow === 'invite'
           ? `/set-password?redirect=${encodeURIComponent(redirectTo)}${email ? `&email=${encodeURIComponent(email)}` : ''}`
           : null;
 
@@ -55,8 +55,8 @@ function AuthCallbackContent() {
         if (code) {
           const { error } = await supabase.auth.exchangeCodeForSession(code);
           if (error) throw error;
-        } else if (token && type) {
-          const payload: Record<string, unknown> = { token, type };
+        } else if (token && flow) {
+          const payload: Record<string, unknown> = { token, type: flow };
           if (email) payload.email = email;
           const { error } = await supabase.auth.verifyOtp(payload as any);
           if (error) throw error;

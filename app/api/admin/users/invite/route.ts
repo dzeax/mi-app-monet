@@ -132,7 +132,10 @@ export async function POST(req: Request) {
 
   const admin = supabaseAdmin();
   const redirectBase = resolveBaseUrl(req);
-  const redirectTo = new URL('/auth/callback', redirectBase).toString();
+  const inviteCallback = new URL('/auth/callback', redirectBase);
+  inviteCallback.searchParams.set('flow', 'invite');
+  const magicCallback = new URL('/auth/callback', redirectBase);
+  magicCallback.searchParams.set('flow', 'magic_link');
 
   if (action === 'magic_link') {
     let userId: string | null = null;
@@ -153,7 +156,7 @@ export async function POST(req: Request) {
     }
 
     try {
-      await sendMagicLink(admin, email, redirectTo);
+      await sendMagicLink(admin, email, magicCallback.toString());
     } catch (error) {
       return NextResponse.json(
         { error: formatUnknownError('Could not send magic link', error) },
@@ -180,7 +183,7 @@ export async function POST(req: Request) {
 
   if (!authUserId) {
     const { data: inviteData, error: inviteError } = await admin.auth.admin.inviteUserByEmail(email, {
-      redirectTo,
+      redirectTo: inviteCallback.toString(),
     });
     if (inviteError) {
       const already = /already\s+registered|exists/i.test(inviteError.message || '');
@@ -234,4 +237,3 @@ export async function POST(req: Request) {
     mode: 'invite',
   });
 }
-
