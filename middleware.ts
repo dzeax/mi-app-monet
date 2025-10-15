@@ -1,4 +1,4 @@
-// middleware.ts
+﻿// middleware.ts
 import { NextResponse } from 'next/server';
 import type { NextRequest } from 'next/server';
 import { createMiddlewareClient } from '@supabase/auth-helpers-nextjs';
@@ -12,12 +12,12 @@ export async function middleware(req: NextRequest) {
 
   const { pathname, searchParams } = req.nextUrl;
 
-  // Rutas públicas
+  // Rutas pÃºblicas
   const isPublic =
     pathname.startsWith('/login') ||
     pathname.startsWith('/register') ||
     pathname.startsWith('/reset') ||
-    pathname.startsWith('/auth') ||
+    pathname.startsWith('/auth') || pathname.startsWith('/set-password') ||
     pathname.startsWith('/_next') ||
     pathname.startsWith('/favicon') ||
     pathname.startsWith('/api/auth') ||
@@ -37,5 +37,6 @@ export async function middleware(req: NextRequest) {
 }
 
 export const config = {
-  matcher: ['/((?!.*\\.).*)'], // todo menos archivos estáticos
+  matcher: ['/((?!.*\\.).*)'], // todo menos archivos estÃ¡ticos
 };
+
