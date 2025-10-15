@@ -26,7 +26,11 @@ function AuthCallbackContent() {
     let cancelled = false;
 
     const process = async () => {
-      const errorDescription = params.get('error_description') ?? params.get('error');
+      const url = typeof window !== 'undefined' ? window.location : null;
+      const hashParams = new URLSearchParams(url && url.hash ? url.hash.replace(/^#/, '') : '');
+      const getParam = (key: string) => params.get(key) ?? hashParams.get(key);
+
+      const errorDescription = getParam('error_description') ?? getParam('error');
       if (errorDescription) {
         if (cancelled) return;
         setStatus('error');
@@ -34,11 +38,18 @@ function AuthCallbackContent() {
         return;
       }
 
-      const code = params.get('code');
-      const token = params.get('token');
-      const type = params.get('type');
-      const email = params.get('email');
-      const redirectTo = params.get('redirect_to') || '/';
+      const code = getParam('code');
+      const token = getParam('token');
+      const type = getParam('type');
+      const email = getParam('email');
+      const accessToken = getParam('access_token');
+      const refreshToken = getParam('refresh_token');
+      const redirectTo = getParam('redirect_to') || '/';
+
+      const inviteRedirect =
+        type === 'invite'
+          ? `/set-password?redirect=${encodeURIComponent(redirectTo)}${email ? `&email=${encodeURIComponent(email)}` : ''}`
+          : null;
 
       try {
         if (code) {
@@ -49,6 +60,12 @@ function AuthCallbackContent() {
           if (email) payload.email = email;
           const { error } = await supabase.auth.verifyOtp(payload as any);
           if (error) throw error;
+        } else if (accessToken && refreshToken) {
+          const { error } = await supabase.auth.setSession({
+            access_token: accessToken,
+            refresh_token: refreshToken,
+          });
+          if (error) throw error;
         } else {
           throw new Error('Missing token or code in the callback URL.');
         }
@@ -57,8 +74,8 @@ function AuthCallbackContent() {
         setStatus('ok');
         setMessage('Signed in. Redirecting...');
         window.setTimeout(() => {
-          if (!cancelled) router.replace(redirectTo);
-        }, 1200);
+          if (!cancelled) router.replace(inviteRedirect ?? redirectTo);
+        }, 1000);
       } catch (error: any) {
         if (cancelled) return;
         setStatus('error');
