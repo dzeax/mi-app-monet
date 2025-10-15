@@ -1,7 +1,7 @@
 ﻿'use client';
 
 import { Suspense, useEffect, useMemo, useState } from 'react';
-import { useRouter, useSearchParams } from 'next/navigation';
+import { useRouter } from 'next/navigation';
 import { createClientComponentClient } from '@supabase/auth-helpers-nextjs';
 
 type Status = 'checking' | 'ok' | 'error';
@@ -16,7 +16,7 @@ export default function AuthCallbackPage() {
 
 function AuthCallbackContent() {
   const supabase = useMemo(() => createClientComponentClient(), []);
-  const params = useSearchParams();
+  
   const router = useRouter();
 
   const [status, setStatus] = useState<Status>('checking');
@@ -26,29 +26,16 @@ function AuthCallbackContent() {
     let cancelled = false;
 
     const process = async () => {
-      const hashParams =
-        typeof window !== 'undefined' && window.location.hash
-          ? new URLSearchParams(window.location.hash.substring(1))
-          : new URLSearchParams();
-
-      const errorDescription = hashParams.get('error_description') ?? params.get('error_description') ?? hashParams.get('error') ?? params.get('error');
-      if (errorDescription) {
-        if (cancelled) return;
-        setStatus('error');
-        setMessage(errorDescription);
-        return;
-      }
-
-      const flow = params.get('flow') ?? params.get('type');
-      const code = params.get('code') ?? hashParams.get('code');
-      const token = params.get('token') ?? hashParams.get('token');
-      const email = params.get('email') ?? hashParams.get('email');
-      const accessToken = hashParams.get('access_token');
-      const refreshToken = hashParams.get('refresh_token');
-      const redirectTo = params.get('redirect_to') || hashParams.get('redirect_to') || '/';
+      const flow = get('flow') ?? get('type');
+      const code = get('code');
+      const token = get('token');
+      const email = get('email');
+      const accessToken = get('access_token');
+      const refreshToken = get('refresh_token');
+      const redirectTo = get('redirect_to') || '/';
 
       const inviteRedirect =
-        (params.get('flow') ?? hashParams.get('flow') ?? params.get('type')) === 'invite'
+        (flow === 'invite')
           ? `/set-password?redirect=${encodeURIComponent(redirectTo)}${email ? `&email=${encodeURIComponent(email)}` : ''}`
           : null;
 
@@ -92,7 +79,7 @@ function AuthCallbackContent() {
     return () => {
       cancelled = true;
     };
-  }, [params, router, supabase]);
+  }, []);
 
   return (
     <div className="min-h-screen flex items-center justify-center bg-[--color-surface] text-[--color-text] px-4">
@@ -131,6 +118,9 @@ function CallbackFallback() {
     </div>
   );
 }
+
+
+
 
 
 
