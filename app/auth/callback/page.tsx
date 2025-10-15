@@ -26,11 +26,12 @@ function AuthCallbackContent() {
     let cancelled = false;
 
     const process = async () => {
-      const url = typeof window !== 'undefined' ? window.location : null;
-      const hashParams = new URLSearchParams(url && url.hash ? url.hash.replace(/^#/, '') : '');
-      const getParam = (key: string) => params.get(key) ?? hashParams.get(key);
+      const hashParams =
+        typeof window !== 'undefined' && window.location.hash
+          ? new URLSearchParams(window.location.hash.substring(1))
+          : new URLSearchParams();
 
-      const errorDescription = getParam('error_description') ?? getParam('error');
+      const errorDescription = hashParams.get('error_description') ?? params.get('error_description') ?? hashParams.get('error') ?? params.get('error');
       if (errorDescription) {
         if (cancelled) return;
         setStatus('error');
@@ -38,16 +39,16 @@ function AuthCallbackContent() {
         return;
       }
 
-      const flow = getParam('flow') ?? getParam('type');
-      const code = getParam('code');
-      const token = getParam('token');
-      const email = getParam('email');
-      const accessToken = getParam('access_token');
-      const refreshToken = getParam('refresh_token');
-      const redirectTo = getParam('redirect_to') || '/';
+      const flow = params.get('flow') ?? params.get('type');
+      const code = params.get('code') ?? hashParams.get('code');
+      const token = params.get('token') ?? hashParams.get('token');
+      const email = params.get('email') ?? hashParams.get('email');
+      const accessToken = hashParams.get('access_token');
+      const refreshToken = hashParams.get('refresh_token');
+      const redirectTo = params.get('redirect_to') || hashParams.get('redirect_to') || '/';
 
       const inviteRedirect =
-        flow === 'invite'
+        (params.get('flow') ?? hashParams.get('flow') ?? params.get('type')) === 'invite'
           ? `/set-password?redirect=${encodeURIComponent(redirectTo)}${email ? `&email=${encodeURIComponent(email)}` : ''}`
           : null;
 
@@ -55,21 +56,17 @@ function AuthCallbackContent() {
         if (code) {
           const { error } = await supabase.auth.exchangeCodeForSession(code);
           if (error) throw error;
+        } else if (accessToken && refreshToken) {
+          const { error } = await supabase.auth.setSession({
+            access_token: accessToken,
+            refresh_token: refreshToken,
+          });
+          if (error) throw error;
         } else if (token && flow) {
           const payload: Record<string, unknown> = { token, type: flow };
           if (email) payload.email = email;
           const { error } = await supabase.auth.verifyOtp(payload as any);
           if (error) throw error;
-        } else if (accessToken && refreshToken) {
-          const {
-            data: { session },
-            error,
-          } = await supabase.auth.setSession({
-            access_token: accessToken,
-            refresh_token: refreshToken,
-          });
-          if (error) throw error;
-          if (!session) throw new Error('Could not establish session from the invite link.');
         } else {
           throw new Error('Missing token or code in the callback URL.');
         }
