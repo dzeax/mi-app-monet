@@ -14,7 +14,7 @@ export default function SetPasswordPage() {
 
 function SetPasswordContent() {
   const router = useRouter();
-  const queryParams = useSearchParams();
+  const urlSearch = useSearchParams();
   const supabase = useMemo(() => createClientComponentClient(), []);
 
   const hashString =
@@ -24,13 +24,15 @@ function SetPasswordContent() {
   const hashParams = useMemo(() => new URLSearchParams(hashString), [hashString]);
 
   const redirectTarget =
-    hashParams.get('redirect') || queryParams.get('redirect') || '/';
-  const userEmail = hashParams.get('email') || queryParams.get('email') || '';
-  const accessToken = hashParams.get('at') || queryParams.get('at');
-  const refreshToken = hashParams.get('rt') || queryParams.get('rt');
+    hashParams.get('redirect') || urlSearch.get('redirect') || '/';
+  const userEmail = hashParams.get('email') || urlSearch.get('email') || '';
+  const accessToken = hashParams.get('at') || urlSearch.get('at');
+  const refreshToken = hashParams.get('rt') || urlSearch.get('rt');
 
   const [password, setPassword] = useState('');
   const [confirm, setConfirm] = useState('');
+  const [showPassword, setShowPassword] = useState(false);
+  const [showConfirm, setShowConfirm] = useState(false);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -45,7 +47,7 @@ function SetPasswordContent() {
         });
       } catch (err: any) {
         if (!mounted) return;
-        setError(err?.message || 'Could not initialize session.');
+        setError(err?.message || 'Unable to initialize your session.');
       }
     };
     ensureSession();
@@ -72,52 +74,88 @@ function SetPasswordContent() {
     try {
       const { error: updateError } = await supabase.auth.updateUser({ password });
       if (updateError) throw updateError;
-      router.replace(redirectTarget);
+      router.replace(redirectTarget || '/');
     } catch (err: any) {
-      setError(err?.message || 'Unable to update password.');
       setBusy(false);
+      setError(err?.message || 'Unable to update password.');
     }
   };
 
   return (
     <div className="min-h-screen flex items-center justify-center bg-[--color-surface] text-[--color-text] px-4">
       <div className="max-w-md w-full rounded-lg border border-[--color-border] bg-[--color-surface-2] p-6 space-y-6 shadow-lg">
-        <header className="space-y-1 text-center">
-          <h1 className="text-xl font-semibold">Set your password</h1>
-          <p className="text-sm opacity-75">
-            {userEmail
-              ? `Finish setting up the account for ${userEmail}.`
-              : 'Finish setting up your account.'}
-          </p>
+        <header className="space-y-4 text-center">
+          <img
+            src="/logo.svg"
+            alt="CampaignMinds"
+            className="h-10 mx-auto"
+            draggable={false}
+          />
+          <div className="space-y-1">
+            <h1 className="text-xl font-semibold">Set your password</h1>
+            <p className="text-sm opacity-75">
+              {userEmail
+                ? `Finish setting up the account for ${userEmail}.`
+                : 'Finish setting up your account.'}
+            </p>
+          </div>
         </header>
 
         <form className="grid gap-4" onSubmit={handleSubmit}>
           <label className="grid gap-1 text-sm">
             <span className="muted">Password</span>
-            <input
-              className="input"
-              type="password"
-              value={password}
-              onChange={(event) => setPassword(event.target.value)}
-              autoComplete="new-password"
-              required
-              minLength={8}
-              placeholder="Enter a new password"
-            />
+            <div className="relative">
+              <input
+                className="input pr-10"
+                type={showPassword ? 'text' : 'password'}
+                value={password}
+                onChange={(event) => setPassword(event.target.value)}
+                onInput={() => setError(null)}
+                onInvalid={(event) =>
+                  event.currentTarget.setCustomValidity('Password must be at least 8 characters long.')
+                }
+                onBlur={(event) => event.currentTarget.setCustomValidity('')}
+                autoComplete="new-password"
+                required
+                minLength={8}
+                placeholder="Enter a new password"
+              />
+              <button
+                type="button"
+                onClick={() => setShowPassword((prev) => !prev)}
+                className="absolute inset-y-0 right-0 px-2 text-xs text-[--color-text]/70 hover:text-[--color-text]"
+              >
+                {showPassword ? 'Hide' : 'Show'}
+              </button>
+            </div>
           </label>
 
           <label className="grid gap-1 text-sm">
             <span className="muted">Confirm password</span>
-            <input
-              className="input"
-              type="password"
-              value={confirm}
-              onChange={(event) => setConfirm(event.target.value)}
-              autoComplete="new-password"
-              required
-              minLength={8}
-              placeholder="Repeat the password"
-            />
+            <div className="relative">
+              <input
+                className="input pr-10"
+                type={showConfirm ? 'text' : 'password'}
+                value={confirm}
+                onChange={(event) => setConfirm(event.target.value)}
+                onInput={() => setError(null)}
+                onInvalid={(event) =>
+                  event.currentTarget.setCustomValidity('Please repeat the password.')
+                }
+                onBlur={(event) => event.currentTarget.setCustomValidity('')}
+                autoComplete="new-password"
+                required
+                minLength={8}
+                placeholder="Repeat the password"
+              />
+              <button
+                type="button"
+                onClick={() => setShowConfirm((prev) => !prev)}
+                className="absolute inset-y-0 right-0 px-2 text-xs text-[--color-text]/70 hover:text-[--color-text]"
+              >
+                {showConfirm ? 'Hide' : 'Show'}
+              </button>
+            </div>
           </label>
 
           {error && (
@@ -131,17 +169,9 @@ function SetPasswordContent() {
             className="btn-primary disabled:opacity-50 disabled:pointer-events-none"
             disabled={busy}
           >
-            {busy ? 'Saving...' : 'Save password'}
+            {busy ? 'Saving…' : 'Save & login'}
           </button>
         </form>
-
-        <button
-          className="btn-ghost w-full"
-          onClick={() => router.replace(redirectTarget)}
-          disabled={busy}
-        >
-          Skip for now
-        </button>
       </div>
     </div>
   );
@@ -151,8 +181,8 @@ function LoadingCard() {
   return (
     <div className="min-h-screen flex items-center justify-center bg-[--color-surface] text-[--color-text] px-4">
       <div className="max-w-md w-full rounded-lg border border-[--color-border] bg-[--color-surface-2] p-6 text-center space-y-4 shadow-lg">
-        <h1 className="text-xl font-semibold">Loading...</h1>
-        <p className="text-sm opacity-70">Preparing password setup...</p>
+        <h1 className="text-xl font-semibold">Loading…</h1>
+        <p className="text-sm opacity-70">Preparing password setup…</p>
       </div>
     </div>
   );
