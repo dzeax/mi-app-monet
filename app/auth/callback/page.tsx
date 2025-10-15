@@ -52,22 +52,26 @@ function AuthCallbackContent() {
           ? `/set-password?redirect=${encodeURIComponent(redirectTo)}${email ? `&email=${encodeURIComponent(email)}` : ''}`
           : null;
 
+
       try {
         if (code) {
+          setMessage('Detected code. Exchanging...');
           const { error } = await supabase.auth.exchangeCodeForSession(code);
           if (error) throw error;
         } else if (accessToken && refreshToken) {
+          setMessage('Detected access+refresh tokens. Setting session...');
           const { error } = await supabase.auth.setSession({
             access_token: accessToken,
             refresh_token: refreshToken,
           });
           if (error) throw error;
         } else if (token && flow) {
+          setMessage('Detected token + type. Verifying...');
           const payload: Record<string, unknown> = { token, type: flow };
           if (email) payload.email = email;
           const { error } = await supabase.auth.verifyOtp(payload as any);
           if (error) throw error;
-        } else {
+                } else {
           throw new Error('Missing token or code in the callback URL.');
         }
 
@@ -127,6 +131,9 @@ function CallbackFallback() {
     </div>
   );
 }
+
+
+
 
 
 
