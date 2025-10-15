@@ -49,14 +49,24 @@ function AuthCallbackContent() {
           setMessage('Detected code. Exchanging...');
           const { error } = await supabase.auth.exchangeCodeForSession(code);
           if (error) throw error;
-        } else if (accessToken && refreshToken) {
+                } else if (accessToken && refreshToken) {
           setMessage('Detected access+refresh tokens. Setting session...');
-          const { error } = await supabase.auth.setSession({
-            access_token: accessToken,
-            refresh_token: refreshToken,
-          });
-          if (error) throw error;
-        } else if (token && flow) {
+          try {
+            await supabase.auth.setSession({
+              access_token: accessToken,
+              refresh_token: refreshToken,
+            });
+          } catch (e) {
+            // swallow, we will verify below with a poll
+          }
+          // poll until session exists (short window)
+          let ok = false;
+          for (let i = 0; i < 12; i++) {
+            const s = await supabase.auth.getSession();
+            if (s?.data?.session) { ok = true; break; }
+            await new Promise(r => setTimeout(r, 250));
+          }
+          if (!ok) throw new Error('Unable to establish session.');} else if (token && flow) {
           setMessage('Detected token + type. Verifying...');
           const payload: Record<string, unknown> = { token, type: flow };
           if (email) payload.email = email;
@@ -122,6 +132,8 @@ function CallbackFallback() {
     </div>
   );
 }
+
+
 
 
 
