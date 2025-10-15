@@ -233,7 +233,7 @@ export default function ManageUsersModal({ onClose }: { onClose: () => void }) {
           <div className="flex items-center justify-between">
             <h3 className="text-lg font-semibold">Manage users</h3>
             <button className="btn-ghost" onClick={onClose} aria-label="Close">
-              <span aria-hidden="true">{String.fromCharCode(215)}</span>
+              <span aria-hidden="true">&times;</span>
             </button>
           </div>
         </div>
@@ -397,18 +397,25 @@ export default function ManageUsersModal({ onClose }: { onClose: () => void }) {
             if (event.target === event.currentTarget) closeDeletePrompt();
           }}
         >
-          <div className="absolute inset-0 bg-black/55 backdrop-blur-sm" />
+          <div className="absolute inset-0 bg-black/35 backdrop-blur-sm" />
           <div
-            className="relative w-full max-w-md rounded-xl border border-[--color-border] bg-[--color-surface] shadow-2xl p-5 space-y-4"
+            className="relative card w-full max-w-md border border-[--color-border] bg-[--color-surface] shadow-xl"
             onMouseDown={(event) => event.stopPropagation()}
           >
-            <div className="space-y-2">
-              <h3 className="text-lg font-semibold">Delete user?</h3>
-              <p className="text-sm opacity-80">
+            <div className="modal-chrome modal-header px-5 py-3">
+              <div className="flex items-center justify-between">
+                <h3 className="text-base font-semibold">Delete user</h3>
+                <button className="btn-ghost" onClick={closeDeletePrompt} aria-label="Close">
+                  <span aria-hidden="true">&times;</span>
+                </button>
+              </div>
+            </div>
+            <div className="px-5 py-4 space-y-4 text-sm">
+              <p>
                 Remove the entry for <strong>{confirm.email}</strong> from app_users.
               </p>
               {confirm.userId && (
-                <label className="flex items-start gap-2 text-sm">
+                <label className="flex items-start gap-2">
                   <input
                     type="checkbox"
                     className="mt-1 accent-[--color-primary]"
@@ -420,7 +427,7 @@ export default function ManageUsersModal({ onClose }: { onClose: () => void }) {
                 </label>
               )}
             </div>
-            <div className="flex justify-end gap-2">
+            <div className="modal-chrome modal-footer flex justify-end gap-2 px-5 py-3">
               <button
                 className="btn-ghost disabled:opacity-50 disabled:pointer-events-none"
                 onClick={closeDeletePrompt}
