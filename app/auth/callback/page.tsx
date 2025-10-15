@@ -60,9 +60,16 @@ function AuthCallbackContent() {
           if (email) payload.email = email;
           const { error } = await supabase.auth.verifyOtp(payload as any);
           if (error) throw error;
-        } else if (accessToken) {
-          const { error } = await supabase.auth.getSessionFromUrl({ storeSession: true });
+        } else if (accessToken && refreshToken) {
+          const {
+            data: { session },
+            error,
+          } = await supabase.auth.setSession({
+            access_token: accessToken,
+            refresh_token: refreshToken,
+          });
           if (error) throw error;
+          if (!session) throw new Error('Could not establish session from the invite link.');
         } else {
           throw new Error('Missing token or code in the callback URL.');
         }
