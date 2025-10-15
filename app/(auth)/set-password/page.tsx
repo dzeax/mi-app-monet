@@ -1,6 +1,6 @@
 'use client';
 
-import { Suspense, useState } from 'react';
+import { Suspense, useEffect, useMemo, useState } from 'react';
 import { useRouter, useSearchParams } from 'next/navigation';
 import { createClientComponentClient } from '@supabase/auth-helpers-nextjs';
 
@@ -14,16 +14,45 @@ export default function SetPasswordPage() {
 
 function SetPasswordContent() {
   const router = useRouter();
-  const params = useSearchParams();
-  const supabase = createClientComponentClient();
+  const queryParams = useSearchParams();
+  const supabase = useMemo(() => createClientComponentClient(), []);
 
-  const redirectTarget = params.get('redirect') || '/';
-  const userEmail = params.get('email') || '';
+  const hashString =
+    typeof window !== 'undefined' && window.location.hash
+      ? window.location.hash.substring(1)
+      : '';
+  const hashParams = useMemo(() => new URLSearchParams(hashString), [hashString]);
+
+  const redirectTarget =
+    hashParams.get('redirect') || queryParams.get('redirect') || '/';
+  const userEmail = hashParams.get('email') || queryParams.get('email') || '';
+  const accessToken = hashParams.get('at') || queryParams.get('at');
+  const refreshToken = hashParams.get('rt') || queryParams.get('rt');
 
   const [password, setPassword] = useState('');
   const [confirm, setConfirm] = useState('');
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
+
+  useEffect(() => {
+    let mounted = true;
+    const ensureSession = async () => {
+      if (!accessToken || !refreshToken) return;
+      try {
+        await supabase.auth.setSession({
+          access_token: accessToken,
+          refresh_token: refreshToken,
+        });
+      } catch (err: any) {
+        if (!mounted) return;
+        setError(err?.message || 'Could not initialize session.');
+      }
+    };
+    ensureSession();
+    return () => {
+      mounted = false;
+    };
+  }, [accessToken, refreshToken, supabase]);
 
   const handleSubmit = async (event: React.FormEvent) => {
     event.preventDefault();
@@ -128,5 +157,4 @@ function LoadingCard() {
     </div>
   );
 }
-
 

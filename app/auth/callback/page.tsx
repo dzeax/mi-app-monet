@@ -1,4 +1,4 @@
-﻿'use client';
+'use client';
 
 import { Suspense, useEffect, useMemo, useState } from 'react';
 import { useRouter } from 'next/navigation';
@@ -16,72 +16,73 @@ export default function AuthCallbackPage() {
 
 function AuthCallbackContent() {
   const supabase = useMemo(() => createClientComponentClient(), []);
-  
   const router = useRouter();
 
   const [status, setStatus] = useState<Status>('checking');
   const [message, setMessage] = useState('Checking link...');
 
   useEffect(() => {
+    if (typeof window === 'undefined') return;
     let cancelled = false;
 
-    const process = async () => {
-      const searchParams = typeof window !== 'undefined' ? new URLSearchParams(window.location.search) : new URLSearchParams();
-      const hashParams = typeof window !== 'undefined' && window.location.hash ? new URLSearchParams(window.location.hash.substring(1)) : new URLSearchParams();
-      const get = (k: string) => hashParams.get(k) ?? searchParams.get(k);
+    const searchParams = new URLSearchParams(window.location.search);
+    const hashString = window.location.hash.startsWith('#')
+      ? window.location.hash.substring(1)
+      : window.location.hash;
+    const hashParams = new URLSearchParams(hashString);
+    const get = (key: string) => hashParams.get(key) ?? searchParams.get(key) ?? undefined;
 
-      const flow = get('flow') ?? get('type');
-      const code = get('code');
-      const token = get('token');
-      const email = get('email');
-      const accessToken = get('access_token');
-      const refreshToken = get('refresh_token');
-      const redirectTo = get('redirect_to') || '/';
+    const flow = get('flow') ?? get('type');
+    const code = get('code');
+    const token = get('token');
+    const email = get('email');
+    const accessToken = get('access_token');
+    const refreshToken = get('refresh_token');
+    const redirectTo = get('redirect_to') ?? '/';
 
-      const inviteRedirect =
-        (flow === 'invite')
-          ? `/set-password?redirect=${encodeURIComponent(redirectTo)}${email ? `&email=${encodeURIComponent(email)}` : ''}`
-          : null;
+    const redirectToSetPassword = () => {
+      const hash = new URLSearchParams();
+      hash.set('redirect', redirectTo || '/');
+      if (email) hash.set('email', email);
+      if (accessToken) hash.set('at', accessToken);
+      if (refreshToken) hash.set('rt', refreshToken);
+      setStatus('ok');
+      setMessage('Redirecting to password setup...');
+      router.replace(`/set-password#${hash.toString()}`);
+    };
 
-
+    const run = async () => {
       try {
+        if (flow === 'invite' && accessToken && refreshToken) {
+          redirectToSetPassword();
+          return;
+        }
+
         if (code) {
           setMessage('Detected code. Exchanging...');
           const { error } = await supabase.auth.exchangeCodeForSession(code);
           if (error) throw error;
-                } else if (accessToken && refreshToken) {
-          setMessage('Detected access+refresh tokens. Setting session...');
-          try {
-            await supabase.auth.setSession({
-              access_token: accessToken,
-              refresh_token: refreshToken,
-            });
-          } catch (e) {
-            // swallow, we will verify below with a poll
-          }
-          // poll until session exists (short window)
-          let ok = false;
-          for (let i = 0; i < 12; i++) {
-            const s = await supabase.auth.getSession();
-            if (s?.data?.session) { ok = true; break; }
-            await new Promise(r => setTimeout(r, 250));
-          }
-          if (!ok) throw new Error('Unable to establish session.');} else if (token && flow) {
+        } else if (token && flow) {
           setMessage('Detected token + type. Verifying...');
           const payload: Record<string, unknown> = { token, type: flow };
           if (email) payload.email = email;
           const { error } = await supabase.auth.verifyOtp(payload as any);
           if (error) throw error;
-                } else {
+        } else if (accessToken && refreshToken) {
+          setMessage('Detected access+refresh tokens. Setting session...');
+          const { error } = await supabase.auth.setSession({
+            access_token: accessToken,
+            refresh_token: refreshToken,
+          });
+          if (error) throw error;
+        } else {
           throw new Error('Missing token or code in the callback URL.');
         }
 
         if (cancelled) return;
         setStatus('ok');
         setMessage('Signed in. Redirecting...');
-        window.setTimeout(() => {
-          if (!cancelled) router.replace(inviteRedirect ?? redirectTo);
-        }, 1000);
+        router.replace(redirectTo || '/');
       } catch (error: any) {
         if (cancelled) return;
         setStatus('error');
@@ -89,11 +90,12 @@ function AuthCallbackContent() {
       }
     };
 
-    process();
+    run();
+
     return () => {
       cancelled = true;
     };
-  }, []);
+  }, [router, supabase]);
 
   return (
     <div className="min-h-screen flex items-center justify-center bg-[--color-surface] text-[--color-text] px-4">
@@ -107,10 +109,7 @@ function AuthCallbackContent() {
             <p className="text-sm">
               You can request a new link from an admin or return to login.
             </p>
-            <button
-              className="btn-primary px-4 py-2"
-              onClick={() => router.replace('/login')}
-            >
+            <button className="btn-primary px-4 py-2" onClick={() => router.replace('/login')}>
               Go to login
             </button>
           </div>
@@ -132,19 +131,4 @@ function CallbackFallback() {
     </div>
   );
 }
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
 
