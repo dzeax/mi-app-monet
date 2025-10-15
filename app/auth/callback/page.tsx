@@ -76,7 +76,7 @@ function AuthCallbackContent() {
     <div className="min-h-screen flex items-center justify-center bg-[--color-surface] text-[--color-text] px-4">
       <div className="max-w-md w-full rounded-lg border border-[--color-border] bg-[--color-surface-2] p-6 text-center space-y-4 shadow-lg">
         <div className="space-y-2">
-          <h1 className="text-xl font-semibold">Processing sign-inâ€¦</h1>
+          <h1 className="text-xl font-semibold">Processing sign-in...</h1>
           <p className="text-sm opacity-70">{message}</p>
         </div>
         {status === 'error' && (
@@ -102,13 +102,14 @@ function CallbackFallback() {
     <div className="min-h-screen flex items-center justify-center bg-[--color-surface] text-[--color-text] px-4">
       <div className="max-w-md w-full rounded-lg border border-[--color-border] bg-[--color-surface-2] p-6 text-center space-y-4 shadow-lg">
         <div className="space-y-2">
-          <h1 className="text-xl font-semibold">Processing sign-inâ€¦</h1>
-          <p className="text-sm opacity-70">Preparando enlaceâ€¦</p>
+          <h1 className="text-xl font-semibold">Processing sign-in...</h1>
+          <p className="text-sm opacity-70">Preparing link...</p>
         </div>
       </div>
     </div>
   );
 }
+
 
 
 
