@@ -1,4 +1,4 @@
-'use client';
+﻿'use client';
 
 import { createPortal } from 'react-dom';
 import { useEffect, useMemo, useState } from 'react';
@@ -31,7 +31,7 @@ export default function ManageUsersModal({ onClose }: { onClose: () => void }) {
     (show as any)._t = window.setTimeout(() => setBanner(null), 3200);
   };
 
-  // ---- helpers: detección de "último admin" y traducción de errores del trigger
+  // ---- helpers: detecciÃ³n de "Ãºltimo admin" y traducciÃ³n de errores del trigger
   const isLastActiveAdmin = (email: string) => {
     const admins = rows.filter(r => r.role === 'admin' && !!r.is_active);
     return admins.length === 1 && admins[0].email.toLowerCase() === email.toLowerCase();
@@ -40,12 +40,12 @@ export default function ManageUsersModal({ onClose }: { onClose: () => void }) {
   const friendlyDbError = (raw?: string) => {
     const msg = String(raw || '');
     if (/Cannot remove the last active admin/i.test(msg)) {
-      return 'No puedes quitar al último administrador activo.';
+      return 'You cannot demote the last active admin.';
     }
     if (/Cannot delete the last active admin/i.test(msg)) {
-      return 'No puedes borrar la fila del último administrador activo.';
+      return 'You cannot delete the row for the last active admin.';
     }
-    return msg || 'Se produjo un error inesperado.';
+    return msg || 'An unexpected error occurred.';
   };
 
   // Buscar usuarios
@@ -74,9 +74,9 @@ export default function ManageUsersModal({ onClose }: { onClose: () => void }) {
 
   // Mutaciones
   const updateRole = async (email: string, role: 'admin'|'editor') => {
-    // Bloqueo local: no permitir degradar al último admin
+    // Guard: prevent demoting the last active adminÃºltimo admin
     if (role !== 'admin' && isLastActiveAdmin(email)) {
-      return show('No puedes quitar al último administrador activo.', 'err');
+      return show('You cannot demote the last active admin.', 'err');
     }
     const { error } = await sb.from('app_users').update({ role }).eq('email', email);
     if (error) return show(friendlyDbError(error.message), 'err');
@@ -85,9 +85,9 @@ export default function ManageUsersModal({ onClose }: { onClose: () => void }) {
   };
 
   const updateActive = async (email: string, is_active: boolean) => {
-    // Bloqueo local: no permitir desactivar al último admin
+    // Guard: prevent deactivating the last active adminÃºltimo admin
     if (!is_active && isLastActiveAdmin(email)) {
-      return show('No puedes desactivar al último administrador activo.', 'err');
+      return show('You cannot deactivate the last active admin.', 'err');
     }
     const { error } = await sb.from('app_users').update({ is_active }).eq('email', email);
     if (error) return show(friendlyDbError(error.message), 'err');
@@ -96,9 +96,9 @@ export default function ManageUsersModal({ onClose }: { onClose: () => void }) {
   };
 
   const removeRow = async (email: string) => {
-    // Bloqueo local: no permitir borrar al último admin
+    // Guard: prevent deleting the last active admin rowÃºltimo admin
     if (isLastActiveAdmin(email)) {
-      return show('No puedes borrar la fila del último administrador activo.', 'err');
+      return show('You cannot delete the row for the last active admin.', 'err');
     }
     if (!confirm(`Delete row for "${email}"? (no borra la cuenta auth)`)) return;
     const { error } = await sb.from('app_users').delete().eq('email', email);
@@ -196,7 +196,7 @@ export default function ManageUsersModal({ onClose }: { onClose: () => void }) {
           <div className="accent-strip" aria-hidden />
           <div className="flex items-center justify-between">
             <h3 className="text-lg font-semibold">Manage users</h3>
-            <button className="btn-ghost" onClick={onClose} aria-label="Close">✕</button>
+            <button className="btn-ghost" onClick={onClose} aria-label="Close">âœ•</button>
           </div>
         </div>
 
@@ -282,7 +282,7 @@ export default function ManageUsersModal({ onClose }: { onClose: () => void }) {
               </table>
               <div className="manage-rows divide-y divide-[--color-border]/60">
                 {loading ? (
-                  <div className="px-3 py-5 text-sm opacity-70">Loading…</div>
+                  <div className="px-3 py-5 text-sm opacity-70">Loadingâ€¦</div>
                 ) : rows.length === 0 ? (
                   <div className="px-3 py-5 text-sm opacity-70">No users.</div>
                 ) : rows.map((r) => (
@@ -315,7 +315,7 @@ export default function ManageUsersModal({ onClose }: { onClose: () => void }) {
                     </div>
 
                     <div className="text-xs opacity-70 truncate">
-                      {r.updated_at || r.created_at || '—'}
+                      {r.updated_at || r.created_at || 'â€”'}
                     </div>
 
                     <div className="justify-self-end flex items-center gap-1">
@@ -333,7 +333,7 @@ export default function ManageUsersModal({ onClose }: { onClose: () => void }) {
                         disabled={!isAdmin}
                         title="Delete row"
                       >
-                        ✕
+                        âœ•
                       </button>
                     </div>
                   </div>
@@ -354,3 +354,5 @@ export default function ManageUsersModal({ onClose }: { onClose: () => void }) {
   if (typeof document === 'undefined') return null;
   return createPortal(body, document.body);
 }
+
+
