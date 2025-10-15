@@ -26,6 +26,10 @@ function AuthCallbackContent() {
     let cancelled = false;
 
     const process = async () => {
+      const searchParams = typeof window !== 'undefined' ? new URLSearchParams(window.location.search) : new URLSearchParams();
+      const hashParams = typeof window !== 'undefined' && window.location.hash ? new URLSearchParams(window.location.hash.substring(1)) : new URLSearchParams();
+      const get = (k: string) => hashParams.get(k) ?? searchParams.get(k);
+
       const flow = get('flow') ?? get('type');
       const code = get('code');
       const token = get('token');
@@ -118,6 +122,8 @@ function CallbackFallback() {
     </div>
   );
 }
+
+
 
 
 
