@@ -44,6 +44,11 @@ function SetPasswordContent() {
       const hasTokens = Boolean(accessToken && refreshToken);
 
       setInitializingSession(hasTokens);
+      console.debug('[set-password] ensureSession()', {
+        hasTokens,
+        accessToken: accessToken ? `${accessToken.slice(0, 6)}…` : null,
+        refreshToken: refreshToken ? `${refreshToken.slice(0, 6)}…` : null,
+      });
 
       if (hasTokens) {
         try {
@@ -54,10 +59,12 @@ function SetPasswordContent() {
           if (sessErr) throw sessErr;
           if (!mounted) return;
           setError(null);
+          console.debug('[set-password] setSession success');
         } catch (err: any) {
           if (!mounted) return;
           const message = err?.message || 'Unable to initialize your session.';
           setError(message);
+          console.error('[set-password] setSession error', err);
         } finally {
           if (mounted) setInitializingSession(false);
         }
@@ -69,12 +76,15 @@ function SetPasswordContent() {
         if (!mounted) return;
         if (data.session) {
           setError(null);
+          console.debug('[set-password] existing session detected');
         } else {
           setError((prev) => prev ?? 'Your session is not initialized. Please request a fresh invitation.');
+          console.warn('[set-password] no active session available');
         }
       } catch (err: any) {
         if (!mounted) return;
         setError(err?.message || 'Unable to initialize your session.');
+        console.error('[set-password] getSession error', err);
       }
     };
     ensureSession();
@@ -110,6 +120,7 @@ function SetPasswordContent() {
       let activeSession = sess.session;
 
       if (!activeSession && accessToken && refreshToken) {
+        console.debug('[set-password] retrying setSession inside submit');
         const { error: sessErr } = await supabase.auth.setSession({
           access_token: accessToken,
           refresh_token: refreshToken,
@@ -129,6 +140,7 @@ function SetPasswordContent() {
         (async () => {
           const { error: updateError } = await supabase.auth.updateUser({ password });
           if (updateError) throw updateError;
+          console.debug('[set-password] updateUser success');
         })(),
         new Promise((_, reject) =>
           setTimeout(() => reject(new Error('Timeout updating password. Please try again.')), timeoutMs)
@@ -139,6 +151,7 @@ function SetPasswordContent() {
       router.replace(redirectTarget || '/');
     } catch (err: any) {
       setError(err?.message || 'Unable to update password.');
+      console.error('[set-password] submit error', err);
     } finally {
       // Ensure the button does not remain in a stuck state if navigation is blocked
       setBusy(false);
