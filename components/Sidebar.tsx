@@ -144,18 +144,18 @@ export default function Sidebar({
           {!collapsed ? (
             <div className="space-y-3">
               {BtnCreate}
-              {BtnImport}
+              {isAdmin && BtnImport}
               {BtnManage}
-              {BtnUsers} {/* 🆕 */}
-              {BtnRouting}
+              {isAdmin && BtnUsers}
+              {isAdmin && BtnRouting}
             </div>
           ) : (
             <>
               {BtnCreate}
-              {BtnImport}
+              {isAdmin && BtnImport}
               {BtnManage}
-              {BtnUsers} {/* 🆕 */}
-              {BtnRouting}
+              {isAdmin && BtnUsers}
+              {isAdmin && BtnRouting}
             </>
           )}
         </div>
@@ -181,7 +181,7 @@ export default function Sidebar({
           }}
         />
       )}
-      {openImport && (
+      {isAdmin && openImport && (
         <ImportCsvModal
           onClose={() => {
             setOpenImport(false);
@@ -197,7 +197,7 @@ export default function Sidebar({
           }}
         />
       )}
-      {openUsers && (
+      {isAdmin && openUsers && (
         <ManageUsersModal
           onClose={() => {
             setOpenUsers(false);
@@ -205,7 +205,7 @@ export default function Sidebar({
           }}
         />
       )}
-      {openRouting && (
+      {isAdmin && openRouting && (
         <RoutingSettingsModal
           onClose={() => {
             setOpenRouting(false);
@@ -216,3 +216,4 @@ export default function Sidebar({
     </div>
   );
 }
+
