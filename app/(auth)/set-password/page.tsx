@@ -174,46 +174,60 @@ function SetPasswordContent() {
     setBusy(true);
     setError(null);
     try {
-      // Ensure we actually have a valid session before attempting the update
-      const { data: sess } = await supabase.auth.getSession();
-      console.log('[set-password] submit:getSession', sess);
-      let activeSession = sess.session;
+      // Try to read current session, but do not hang if the helper is slow
+      console.log('[set-password] submit:getSession:start');
+      const sessionOrTimeout: any = await Promise.race([
+        supabase.auth.getSession(),
+        new Promise((resolve) => setTimeout(() => resolve('timeout'), 1500)),
+      ]);
+      let activeSession =
+        sessionOrTimeout !== 'timeout' ? (sessionOrTimeout as any)?.data?.session ?? null : null;
+      console.log('[set-password] submit:getSession:done', {
+        timedOut: sessionOrTimeout === 'timeout',
+        hasSession: Boolean(activeSession),
+      });
 
+      // If no session, try to establish with tokens; but keep a short timeout as well
       if (!activeSession && accessToken && refreshToken) {
         console.debug('[set-password] retrying setSession inside submit');
-        const { error: sessErr } = await supabase.auth.setSession({
-          access_token: accessToken,
-          refresh_token: refreshToken,
+        const setOrTimeout: any = await Promise.race([
+          supabase.auth.setSession({ access_token: accessToken, refresh_token: refreshToken }),
+          new Promise((resolve) => setTimeout(() => resolve('timeout'), 1500)),
+        ]);
+        if (setOrTimeout !== 'timeout' && (setOrTimeout as any)?.error) {
+          throw (setOrTimeout as any).error;
+        }
+        const refreshedOrTimeout: any = await Promise.race([
+          supabase.auth.getSession(),
+          new Promise((resolve) => setTimeout(() => resolve('timeout'), 1500)),
+        ]);
+        activeSession =
+          refreshedOrTimeout !== 'timeout' ? (refreshedOrTimeout as any)?.data?.session ?? null : null;
+        console.log('[set-password] submit:after retry getSession', {
+          hasSession: Boolean(activeSession),
+          timedOut: refreshedOrTimeout === 'timeout',
         });
-        if (sessErr) throw sessErr;
-        const { data: refreshed } = await supabase.auth.getSession();
-        activeSession = refreshed.session;
-        console.log('[set-password] submit:after retry getSession', refreshed);
       }
 
-      if (!activeSession) {
-        throw new Error('Your session is not initialized. Please request a new invitation link.');
-      }
-
-      // Try update via SDK, fallback to direct REST with bearer token from session/hash
+      // Try update via SDK if we have a Supabase session, otherwise fall back to REST
       const trySdkUpdate = async () => {
         const { error: updateError } = await supabase.auth.updateUser({ password });
         if (updateError) throw updateError;
       };
 
       let updated = false;
-      try {
-        await Promise.race([
-          trySdkUpdate(),
-          new Promise((_, reject) =>
-            setTimeout(() => reject(new Error('sdk_timeout')), 8000)
-          ),
-        ]);
-        updated = true;
-        console.log('[set-password] submit:updateUser success (sdk)');
-      } catch (e: any) {
-        const reason = String(e?.message || e || 'unknown');
-        console.warn('[set-password] sdk update failed, falling back', reason);
+      if (activeSession) {
+        try {
+          await Promise.race([
+            trySdkUpdate(),
+            new Promise((_, reject) => setTimeout(() => reject(new Error('sdk_timeout')), 6000)),
+          ]);
+          updated = true;
+          console.log('[set-password] submit:updateUser success (sdk)');
+        } catch (e: any) {
+          const reason = String(e?.message || e || 'unknown');
+          console.warn('[set-password] sdk update failed, falling back', reason);
+        }
       }
 
       if (!updated) {
