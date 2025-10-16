@@ -35,23 +35,29 @@ function SetPasswordContent() {
   const [showConfirm, setShowConfirm] = useState(false);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const [initializingSession, setInitializingSession] = useState(() => Boolean(accessToken && refreshToken));
+  const [initializingSession, setInitializingSession] = useState(false);
 
   useEffect(() => {
     let mounted = true;
     const ensureSession = async () => {
-      if (accessToken && refreshToken) {
-        if (mounted) setInitializingSession(true);
+      if (!mounted) return;
+      const hasTokens = Boolean(accessToken && refreshToken);
+
+      setInitializingSession(hasTokens);
+
+      if (hasTokens) {
         try {
           const { error: sessErr } = await supabase.auth.setSession({
-            access_token: accessToken,
-            refresh_token: refreshToken,
+            access_token: accessToken!,
+            refresh_token: refreshToken!,
           });
           if (sessErr) throw sessErr;
-          if (mounted) setError(null);
+          if (!mounted) return;
+          setError(null);
         } catch (err: any) {
           if (!mounted) return;
-          setError(err?.message || 'Unable to initialize your session.');
+          const message = err?.message || 'Unable to initialize your session.';
+          setError(message);
         } finally {
           if (mounted) setInitializingSession(false);
         }
@@ -69,8 +75,6 @@ function SetPasswordContent() {
       } catch (err: any) {
         if (!mounted) return;
         setError(err?.message || 'Unable to initialize your session.');
-      } finally {
-        if (mounted) setInitializingSession(false);
       }
     };
     ensureSession();
@@ -78,6 +82,12 @@ function SetPasswordContent() {
       mounted = false;
     };
   }, [accessToken, refreshToken, supabase]);
+
+  useEffect(() => {
+    if (!initializingSession) return;
+    const timer = window.setTimeout(() => setInitializingSession(false), 8000);
+    return () => window.clearTimeout(timer);
+  }, [initializingSession]);
 
   const handleSubmit = async (event: React.FormEvent) => {
     event.preventDefault();
@@ -97,8 +107,20 @@ function SetPasswordContent() {
     try {
       // Ensure we actually have a valid session before attempting the update
       const { data: sess } = await supabase.auth.getSession();
-      if (!sess.session) {
-        throw new Error('Your session is not initialized. Please open the invitation link again.');
+      let activeSession = sess.session;
+
+      if (!activeSession && accessToken && refreshToken) {
+        const { error: sessErr } = await supabase.auth.setSession({
+          access_token: accessToken,
+          refresh_token: refreshToken,
+        });
+        if (sessErr) throw sessErr;
+        const { data: refreshed } = await supabase.auth.getSession();
+        activeSession = refreshed.session;
+      }
+
+      if (!activeSession) {
+        throw new Error('Your session is not initialized. Please request a new invitation link.');
       }
 
       // Add a safety timeout so the UI never gets stuck
