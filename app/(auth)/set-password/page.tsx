@@ -35,19 +35,28 @@ function SetPasswordContent() {
   const [showConfirm, setShowConfirm] = useState(false);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [sessionReady, setSessionReady] = useState(false);
 
   useEffect(() => {
     let mounted = true;
     const ensureSession = async () => {
-      if (!accessToken || !refreshToken) return;
       try {
-        await supabase.auth.setSession({
-          access_token: accessToken,
-          refresh_token: refreshToken,
-        });
+        if (accessToken && refreshToken) {
+          const { error: sessErr } = await supabase.auth.setSession({
+            access_token: accessToken,
+            refresh_token: refreshToken,
+          });
+          if (sessErr) throw sessErr;
+          if (mounted) setSessionReady(true);
+          return;
+        }
+        // Fall back: if a session already exists, mark as ready
+        const { data } = await supabase.auth.getSession();
+        if (mounted) setSessionReady(Boolean(data.session));
       } catch (err: any) {
         if (!mounted) return;
         setError(err?.message || 'Unable to initialize your session.');
+        setSessionReady(false);
       }
     };
     ensureSession();
@@ -72,12 +81,31 @@ function SetPasswordContent() {
     setBusy(true);
     setError(null);
     try {
-      const { error: updateError } = await supabase.auth.updateUser({ password });
-      if (updateError) throw updateError;
+      // Ensure we actually have a valid session before attempting the update
+      const { data: sess } = await supabase.auth.getSession();
+      if (!sess.session) {
+        throw new Error('Your session is not initialized. Please open the invitation link again.');
+      }
+
+      // Add a safety timeout so the UI never gets stuck
+      const timeoutMs = 20000;
+      await Promise.race([
+        (async () => {
+          const { error: updateError } = await supabase.auth.updateUser({ password });
+          if (updateError) throw updateError;
+        })(),
+        new Promise((_, reject) =>
+          setTimeout(() => reject(new Error('Timeout updating password. Please try again.')), timeoutMs)
+        ),
+      ]);
+
+      // On success, navigate away
       router.replace(redirectTarget || '/');
     } catch (err: any) {
-      setBusy(false);
       setError(err?.message || 'Unable to update password.');
+    } finally {
+      // Ensure the button does not remain in a stuck state if navigation is blocked
+      setBusy(false);
     }
   };
 
@@ -167,9 +195,9 @@ function SetPasswordContent() {
           <button
             type="submit"
             className="btn-primary disabled:opacity-50 disabled:pointer-events-none"
-            disabled={busy}
+            disabled={busy || !sessionReady}
           >
-            {busy ? 'Saving…' : 'Save & login'}
+            {busy ? 'Saving...' : 'Save & login'}
           </button>
         </form>
       </div>
