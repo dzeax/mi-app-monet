@@ -195,18 +195,53 @@ function SetPasswordContent() {
         throw new Error('Your session is not initialized. Please request a new invitation link.');
       }
 
-      // Add a safety timeout so the UI never gets stuck
-      const timeoutMs = 20000;
-      await Promise.race([
-        (async () => {
-          const { error: updateError } = await supabase.auth.updateUser({ password });
-          if (updateError) throw updateError;
-          console.log('[set-password] submit:updateUser success');
-        })(),
-        new Promise((_, reject) =>
-          setTimeout(() => reject(new Error('Timeout updating password. Please try again.')), timeoutMs)
-        ),
-      ]);
+      // Try update via SDK, fallback to direct REST with bearer token from session/hash
+      const trySdkUpdate = async () => {
+        const { error: updateError } = await supabase.auth.updateUser({ password });
+        if (updateError) throw updateError;
+      };
+
+      let updated = false;
+      try {
+        await Promise.race([
+          trySdkUpdate(),
+          new Promise((_, reject) =>
+            setTimeout(() => reject(new Error('sdk_timeout')), 8000)
+          ),
+        ]);
+        updated = true;
+        console.log('[set-password] submit:updateUser success (sdk)');
+      } catch (e: any) {
+        const reason = String(e?.message || e || 'unknown');
+        console.warn('[set-password] sdk update failed, falling back', reason);
+      }
+
+      if (!updated) {
+        const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL as string;
+        const anon = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY as string;
+        const bearer = (activeSession as any)?.access_token || accessToken;
+        if (!supabaseUrl || !anon || !bearer) {
+          throw new Error('Missing configuration or bearer token for fallback update.');
+        }
+        const res = await fetch(`${supabaseUrl}/auth/v1/user`, {
+          method: 'PUT',
+          headers: {
+            'Content-Type': 'application/json',
+            apikey: anon,
+            Authorization: `Bearer ${bearer}`,
+          } as any,
+          body: JSON.stringify({ password }),
+        });
+        if (!res.ok) {
+          let msg = `Fallback update failed (${res.status})`;
+          try {
+            const j = await res.json();
+            msg = j?.error_description || j?.error || msg;
+          } catch {}
+          throw new Error(msg);
+        }
+        console.log('[set-password] submit:updateUser success (fallback)');
+      }
 
       // On success, navigate away
       console.log('[set-password] submit:navigate', redirectTarget || '/');
