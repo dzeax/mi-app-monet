@@ -150,8 +150,15 @@ function SetPasswordContent() {
     event.preventDefault();
     if (busy) return;
 
+    console.log('[set-password] submit:start', {
+      tokensReady,
+      initializingSession,
+      hasTokens: Boolean(accessToken && refreshToken),
+    });
+
     if (!tokensReady) {
       setError('Still preparing your invitation. Please try again in a moment.');
+      console.warn('[set-password] submit:abort tokens not ready');
       return;
     }
 
@@ -169,6 +176,7 @@ function SetPasswordContent() {
     try {
       // Ensure we actually have a valid session before attempting the update
       const { data: sess } = await supabase.auth.getSession();
+      console.log('[set-password] submit:getSession', sess);
       let activeSession = sess.session;
 
       if (!activeSession && accessToken && refreshToken) {
@@ -180,6 +188,7 @@ function SetPasswordContent() {
         if (sessErr) throw sessErr;
         const { data: refreshed } = await supabase.auth.getSession();
         activeSession = refreshed.session;
+        console.log('[set-password] submit:after retry getSession', refreshed);
       }
 
       if (!activeSession) {
@@ -192,7 +201,7 @@ function SetPasswordContent() {
         (async () => {
           const { error: updateError } = await supabase.auth.updateUser({ password });
           if (updateError) throw updateError;
-          console.debug('[set-password] updateUser success');
+          console.log('[set-password] submit:updateUser success');
         })(),
         new Promise((_, reject) =>
           setTimeout(() => reject(new Error('Timeout updating password. Please try again.')), timeoutMs)
@@ -200,13 +209,16 @@ function SetPasswordContent() {
       ]);
 
       // On success, navigate away
-      router.replace(redirectTarget || '/');
+      console.log('[set-password] submit:navigate', redirectTarget || '/');
+      await router.replace(redirectTarget || '/');
+      console.log('[set-password] submit:navigate done');
     } catch (err: any) {
       setError(err?.message || 'Unable to update password.');
       console.error('[set-password] submit error', err);
     } finally {
       // Ensure the button does not remain in a stuck state if navigation is blocked
       setBusy(false);
+      console.log('[set-password] submit:finally');
     }
   };
 
