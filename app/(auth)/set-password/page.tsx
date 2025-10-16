@@ -35,28 +35,42 @@ function SetPasswordContent() {
   const [showConfirm, setShowConfirm] = useState(false);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const [sessionReady, setSessionReady] = useState(false);
+  const [initializingSession, setInitializingSession] = useState(() => Boolean(accessToken && refreshToken));
 
   useEffect(() => {
     let mounted = true;
     const ensureSession = async () => {
-      try {
-        if (accessToken && refreshToken) {
+      if (accessToken && refreshToken) {
+        if (mounted) setInitializingSession(true);
+        try {
           const { error: sessErr } = await supabase.auth.setSession({
             access_token: accessToken,
             refresh_token: refreshToken,
           });
           if (sessErr) throw sessErr;
-          if (mounted) setSessionReady(true);
-          return;
+          if (mounted) setError(null);
+        } catch (err: any) {
+          if (!mounted) return;
+          setError(err?.message || 'Unable to initialize your session.');
+        } finally {
+          if (mounted) setInitializingSession(false);
         }
-        // Fall back: if a session already exists, mark as ready
+        return;
+      }
+
+      try {
         const { data } = await supabase.auth.getSession();
-        if (mounted) setSessionReady(Boolean(data.session));
+        if (!mounted) return;
+        if (data.session) {
+          setError(null);
+        } else {
+          setError((prev) => prev ?? 'Your session is not initialized. Please request a fresh invitation.');
+        }
       } catch (err: any) {
         if (!mounted) return;
         setError(err?.message || 'Unable to initialize your session.');
-        setSessionReady(false);
+      } finally {
+        if (mounted) setInitializingSession(false);
       }
     };
     ensureSession();
@@ -195,9 +209,9 @@ function SetPasswordContent() {
           <button
             type="submit"
             className="btn-primary disabled:opacity-50 disabled:pointer-events-none"
-            disabled={busy || !sessionReady}
+            disabled={busy || initializingSession}
           >
-            {busy ? 'Saving...' : 'Save & login'}
+            {initializingSession ? 'Preparing...' : busy ? 'Saving...' : 'Save & login'}
           </button>
         </form>
       </div>
