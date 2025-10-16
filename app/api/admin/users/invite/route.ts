@@ -9,6 +9,18 @@ const payloadSchema = z.object({
   email: z.string().email(),
   role: z.enum(['admin', 'editor']).optional(),
   action: z.enum(['invite', 'magic_link']).default('invite'),
+  displayName: z
+    .string()
+    .trim()
+    .min(1, 'Display name is required')
+    .max(120, 'Display name is too long')
+    .optional(),
+  avatarUrl: z
+    .string()
+    .trim()
+    .url('Avatar URL must be a valid URL')
+    .refine((value) => value.startsWith('https://'), 'Avatar URL must start with http or https')
+    .optional(),
 });
 
 type InvitePayload = z.infer<typeof payloadSchema>;
@@ -129,6 +141,8 @@ export async function POST(req: Request) {
   const email = parsed.email.trim().toLowerCase();
   const role = parsed.role ?? 'editor';
   const action = parsed.action;
+  const displayName = parsed.displayName?.trim() ? parsed.displayName.trim() : null;
+  const avatarUrl = parsed.avatarUrl?.trim() ? parsed.avatarUrl.trim() : null;
 
   const admin = supabaseAdmin();
   const redirectBase = resolveBaseUrl(req);
@@ -214,20 +228,32 @@ export async function POST(req: Request) {
     );
   }
 
-  const { error: upsertError } = await admin
-    .from('app_users')
-    .upsert(
-      {
-        user_id: authUserId,
-        email,
-        role,
-        is_active: true,
-      },
-      { onConflict: 'email' }
-    );
+  const profilePayload: Record<string, any> = {
+    user_id: authUserId,
+    email,
+    role,
+    is_active: true,
+  };
+  if (displayName !== null) profilePayload.display_name = displayName;
+  if (avatarUrl !== null) profilePayload.avatar_url = avatarUrl;
+
+  const { error: upsertError } = await admin.from('app_users').upsert(profilePayload, { onConflict: 'email' });
 
   if (upsertError) {
     return NextResponse.json({ error: upsertError.message }, { status: 400 });
+  }
+
+  if (displayName !== null || avatarUrl !== null) {
+    try {
+      await admin.auth.admin.updateUserById(authUserId, {
+        user_metadata: {
+          ...(displayName !== null ? { name: displayName } : {}),
+          ...(avatarUrl !== null ? { avatar_url: avatarUrl } : {}),
+        },
+      });
+    } catch (error) {
+      console.warn('Failed to update user metadata', error);
+    }
   }
 
   return NextResponse.json({
@@ -237,3 +263,5 @@ export async function POST(req: Request) {
     mode: 'invite',
   });
 }
+
+

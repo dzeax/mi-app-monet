@@ -13,6 +13,8 @@ type UserRow = {
   email: string;
   role: Role;
   is_active: boolean;
+  display_name?: string | null;
+  avatar_url?: string | null;
   created_at: string | null;
   updated_at: string | null;
 };
@@ -39,6 +41,8 @@ export default function ManageUsersModal({ onClose }: { onClose: () => void }) {
 
   const [inviteEmail, setInviteEmail] = useState('');
   const [inviteRole, setInviteRole] = useState<Role>('editor');
+  const [inviteName, setInviteName] = useState('');
+  const [inviteAvatar, setInviteAvatar] = useState('');
 
   const [confirm, setConfirm] = useState<ConfirmState>({ open: false, email: '', userId: null });
   const [deleteAuth, setDeleteAuth] = useState(false);
@@ -68,7 +72,7 @@ export default function ManageUsersModal({ onClose }: { onClose: () => void }) {
     setLoading(true);
     const { data, error } = await supabase
       .from('app_users')
-      .select('user_id,email,role,is_active,created_at,updated_at')
+      .select('user_id,email,role,is_active,display_name,avatar_url,created_at,updated_at')
       .order('email', { ascending: true });
     if (error) {
       showBanner(error.message, 'err');
@@ -118,13 +122,23 @@ export default function ManageUsersModal({ onClose }: { onClose: () => void }) {
 
   const invite = async () => {
     const email = inviteEmail.trim().toLowerCase();
+    const displayName = inviteName.trim();
+    const avatarUrl = inviteAvatar.trim();
     if (!email || !isAdmin) return;
+
+    const payloadBody: Record<string, unknown> = {
+      email,
+      role: inviteRole,
+      action: 'invite',
+    };
+    if (displayName) payloadBody.displayName = displayName;
+    if (avatarUrl) payloadBody.avatarUrl = avatarUrl;
 
     try {
       const response = await fetch('/api/admin/users/invite', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ email, role: inviteRole, action: 'invite' }),
+        body: JSON.stringify(payloadBody),
       });
       const payload = await response.json().catch(() => ({}));
       if (!response.ok || payload?.ok !== true) {
@@ -134,6 +148,8 @@ export default function ManageUsersModal({ onClose }: { onClose: () => void }) {
       showBanner(payload?.invitationSent ? 'Invitation sent' : 'User updated', 'ok');
       setInviteEmail('');
       setInviteRole('editor');
+      setInviteName('');
+      setInviteAvatar('');
       setTab('list');
       fetchUsers();
     } catch (error: any) {
@@ -290,7 +306,25 @@ export default function ManageUsersModal({ onClose }: { onClose: () => void }) {
                   <option value="admin">Admin</option>
                 </select>
               </label>
-              <div className="flex gap-2">
+              <label className="text-sm grid gap-1">
+                <span className="muted">Full name (optional)</span>
+                <input
+                  className="input"
+                  value={inviteName}
+                  onChange={(event) => setInviteName(event.target.value)}
+                  placeholder="Jane Doe"
+                />
+              </label>
+              <label className="text-sm grid gap-1">
+                <span className="muted">Photo URL (optional)</span>
+                <input
+                  className="input"
+                  value={inviteAvatar}
+                  onChange={(event) => setInviteAvatar(event.target.value)}
+                  placeholder="https://..."
+                />
+              </label>
+              <div className="flex gap-2 pt-1">
                 <button
                   className="btn-primary disabled:opacity-50 disabled:pointer-events-none"
                   onClick={invite}
@@ -329,7 +363,10 @@ export default function ManageUsersModal({ onClose }: { onClose: () => void }) {
                       key={row.email}
                       className="grid grid-cols-[1.6fr_0.8fr_0.7fr_1fr_auto] gap-3 px-3 py-2 items-center"
                     >
-                      <div className="truncate">{row.email}</div>
+                      <div className="truncate">
+                        <div className="font-medium">{row.display_name || row.email}</div>
+                        <div className="text-xs opacity-70 truncate">{row.email}</div>
+                      </div>
 
                       <div className="flex items-center gap-2">
                         <select

@@ -30,20 +30,39 @@ type AuthCtx = {
 
 const AuthContext = createContext<AuthCtx | null>(null);
 
-/** Lee el rol desde la tabla app_users (por user_id).
- *  Si no hay fila, si está inactivo o hay error -> DEFAULT_ROLE.
+type ProfileDetails = {
+  role: Role;
+  displayName: string | null;
+  avatarUrl: string | null;
+};
+
+const FALLBACK_PROFILE: ProfileDetails = {
+  role: DEFAULT_ROLE,
+  displayName: null,
+  avatarUrl: null,
+};
+
+/** Lee el perfil desde app_users (por user_id).
+ *  Si no hay fila, si está inactivo o hay error -> valores por defecto.
  */
-async function fetchRole(sb: SupabaseClient, userId: string): Promise<Role> {
+async function fetchProfile(sb: SupabaseClient, userId: string): Promise<ProfileDetails> {
   const { data, error } = await sb
     .from('app_users')
-    .select('role, is_active')
+    .select('role, is_active, display_name, avatar_url')
     .eq('user_id', userId)
-    .single();
+    .maybeSingle();
 
-  if (error || !data?.role || data.is_active === false) return DEFAULT_ROLE;
+  if (error || !data || !data.role || data.is_active === false) {
+    return FALLBACK_PROFILE;
+  }
 
-  const r = String(data.role).toLowerCase();
-  return (r === 'admin' ? 'admin' : 'editor') as Role;
+  const normalizedRole = String(data.role).toLowerCase() === 'admin' ? 'admin' : 'editor';
+
+  return {
+    role: normalizedRole as Role,
+    displayName: data.display_name ? String(data.display_name) : null,
+    avatarUrl: data.avatar_url ? String(data.avatar_url) : null,
+  };
 }
 
 export function AuthProvider({ children }: { children: React.ReactNode }) {
@@ -54,7 +73,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   // Cliente único y estable para todo el provider
   const supabase = useMemo(() => createClientComponentClient(), []);
 
-  // Carga inicial de sesión + rol y suscripción a cambios
+  // Carga inicial de sesión + perfil y suscripción a cambios
   useEffect(() => {
     let mounted = true;
 
@@ -64,10 +83,16 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       const authUser = sessionData.session?.user ?? null;
 
       if (authUser) {
-        const r = await fetchRole(supabase, authUser.id).catch(() => DEFAULT_ROLE);
+        const profile = await fetchProfile(supabase, authUser.id).catch(() => FALLBACK_PROFILE);
         if (!mounted) return;
-        setUser({ id: authUser.id, email: authUser.email, role: r });
-        setRole(r);
+        setUser({
+          id: authUser.id,
+          email: authUser.email,
+          role: profile.role,
+          displayName: profile.displayName,
+          avatarUrl: profile.avatarUrl,
+        });
+        setRole(profile.role);
       } else {
         setUser(null);
         setRole(null);
@@ -90,9 +115,15 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       if (!mounted) return;
       const authUser = session?.user ?? null;
       if (authUser) {
-        const r = await fetchRole(supabase, authUser.id).catch(() => DEFAULT_ROLE);
-        setUser({ id: authUser.id, email: authUser.email, role: r });
-        setRole(r);
+        const profile = await fetchProfile(supabase, authUser.id).catch(() => FALLBACK_PROFILE);
+        setUser({
+          id: authUser.id,
+          email: authUser.email,
+          role: profile.role,
+          displayName: profile.displayName,
+          avatarUrl: profile.avatarUrl,
+        });
+        setRole(profile.role);
       } else {
         setUser(null);
         setRole(null);
