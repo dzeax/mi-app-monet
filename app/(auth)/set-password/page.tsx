@@ -1,8 +1,36 @@
 'use client';
 
 import { Suspense, useEffect, useMemo, useState } from 'react';
-import { useRouter, useSearchParams } from 'next/navigation';
+import { useRouter } from 'next/navigation';
 import { createClientComponentClient } from '@supabase/auth-helpers-nextjs';
+
+type InviteParams = {
+  accessToken: string | null;
+  refreshToken: string | null;
+  redirect: string;
+  email: string;
+};
+
+function readInviteParams(): InviteParams {
+  if (typeof window === 'undefined') {
+    return { accessToken: null, refreshToken: null, redirect: '/', email: '' };
+  }
+
+  const hashString = window.location.hash.startsWith('#')
+    ? window.location.hash.slice(1)
+    : window.location.hash;
+  const hashParams = new URLSearchParams(hashString);
+  const searchParams = new URLSearchParams(window.location.search);
+
+  const fromParams = (key: string) => hashParams.get(key) ?? searchParams.get(key);
+
+  const redirect = fromParams('redirect') || '/';
+  const email = fromParams('email') || '';
+  const accessToken = fromParams('at') ?? fromParams('access_token') ?? null;
+  const refreshToken = fromParams('rt') ?? fromParams('refresh_token') ?? null;
+
+  return { accessToken, refreshToken, redirect, email };
+}
 
 export default function SetPasswordPage() {
   return (
@@ -14,20 +42,34 @@ export default function SetPasswordPage() {
 
 function SetPasswordContent() {
   const router = useRouter();
-  const urlSearch = useSearchParams();
   const supabase = useMemo(() => createClientComponentClient(), []);
+  const [inviteParams, setInviteParams] = useState<InviteParams>(() => readInviteParams());
+  const [tokensReady, setTokensReady] = useState(false);
 
-  const hashString =
-    typeof window !== 'undefined' && window.location.hash
-      ? window.location.hash.substring(1)
-      : '';
-  const hashParams = useMemo(() => new URLSearchParams(hashString), [hashString]);
+  const { accessToken, refreshToken, redirect, email: userEmail } = inviteParams;
+  const redirectTarget = redirect || '/';
 
-  const redirectTarget =
-    hashParams.get('redirect') || urlSearch.get('redirect') || '/';
-  const userEmail = hashParams.get('email') || urlSearch.get('email') || '';
-  const accessToken = hashParams.get('at') || urlSearch.get('at');
-  const refreshToken = hashParams.get('rt') || urlSearch.get('rt');
+  useEffect(() => {
+    const syncTokens = () => {
+      const next = readInviteParams();
+      setInviteParams((prev) => {
+        if (
+          prev.accessToken === next.accessToken &&
+          prev.refreshToken === next.refreshToken &&
+          prev.redirect === next.redirect &&
+          prev.email === next.email
+        ) {
+          return prev;
+        }
+        return next;
+      });
+      setTokensReady(true);
+    };
+
+    syncTokens();
+    window.addEventListener('hashchange', syncTokens);
+    return () => window.removeEventListener('hashchange', syncTokens);
+  }, []);
 
   const [password, setPassword] = useState('');
   const [confirm, setConfirm] = useState('');
@@ -38,6 +80,8 @@ function SetPasswordContent() {
   const [initializingSession, setInitializingSession] = useState(false);
 
   useEffect(() => {
+    if (!tokensReady) return;
+
     let mounted = true;
     const ensureSession = async () => {
       if (!mounted) return;
@@ -45,6 +89,7 @@ function SetPasswordContent() {
 
       setInitializingSession(hasTokens);
       console.debug('[set-password] ensureSession()', {
+        tokensReady,
         hasTokens,
         accessToken: accessToken ? `${accessToken.slice(0, 6)}…` : null,
         refreshToken: refreshToken ? `${refreshToken.slice(0, 6)}…` : null,
@@ -71,6 +116,8 @@ function SetPasswordContent() {
         return;
       }
 
+      if (mounted) setInitializingSession(false);
+
       try {
         const { data } = await supabase.auth.getSession();
         if (!mounted) return;
@@ -91,7 +138,7 @@ function SetPasswordContent() {
     return () => {
       mounted = false;
     };
-  }, [accessToken, refreshToken, supabase]);
+  }, [accessToken, refreshToken, supabase, tokensReady]);
 
   useEffect(() => {
     if (!initializingSession) return;
@@ -102,6 +149,11 @@ function SetPasswordContent() {
   const handleSubmit = async (event: React.FormEvent) => {
     event.preventDefault();
     if (busy) return;
+
+    if (!tokensReady) {
+      setError('Still preparing your invitation. Please try again in a moment.');
+      return;
+    }
 
     if (!password.trim() || password.length < 8) {
       setError('Password must be at least 8 characters long.');
@@ -244,7 +296,7 @@ function SetPasswordContent() {
           <button
             type="submit"
             className="btn-primary disabled:opacity-50 disabled:pointer-events-none"
-            disabled={busy || initializingSession}
+            disabled={busy || initializingSession || !tokensReady}
           >
             {initializingSession ? 'Preparing...' : busy ? 'Saving...' : 'Save & login'}
           </button>
