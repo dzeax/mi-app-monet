@@ -86,9 +86,9 @@ function SetPasswordContent() {
       <div className="max-w-md w-full rounded-lg border border-[--color-border] bg-[--color-surface-2] p-6 space-y-6 shadow-lg">
         <header className="space-y-4 text-center">
           <img
-            src="/logo.svg"
+            src="/dvlogo2.svg"
             alt="CampaignMinds"
-            className="h-10 mx-auto"
+            className="h-12 mx-auto object-contain"
             draggable={false}
           />
           <div className="space-y-1">
@@ -187,4 +187,3 @@ function LoadingCard() {
     </div>
   );
 }
-
