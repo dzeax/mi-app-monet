@@ -159,13 +159,8 @@ export default function LoginClient() {
               {loading ? 'Signing in...' : 'Sign in'}
             </button>
 
-            <div className="flex items-center justify-start text-sm">
-              <Link
-                href="/auth/reset"
-                className="text-indigo-600 hover:text-indigo-700"
-              >
-                Forgot password?
-              </Link>
+            <div className="flex items-center justify-start text-sm text-neutral-500">
+              Forgot password? Contact an admin to reset your credentials.
             </div>
           </form>
         </div>
