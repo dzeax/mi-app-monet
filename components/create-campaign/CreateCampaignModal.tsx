@@ -413,7 +413,7 @@ export default function CreateCampaignModal({
         return;
       }
       showToast(
-        submitMode === 'save_add' ? 'Campaign saved. Add anotherâ€¦' : 'Campaign saved successfully'
+        submitMode === 'save_add' ? 'Campaign saved. Add another...' : 'Campaign saved successfully'
       );
 
       if (submitMode === 'save_add') {
@@ -1073,7 +1073,7 @@ export default function CreateCampaignModal({
               className="btn-primary"
               onClick={() => { setSubmitMode('save'); formRef.current?.requestSubmit(); }}
             >
-              {isSubmitting ? 'Savingâ€¦' : mode === 'edit' ? 'Save changes' : 'Save'}
+              {isSubmitting ? 'Saving...' : mode === 'edit' ? 'Save changes' : 'Save'}
             </button>
           </div>
         </div>

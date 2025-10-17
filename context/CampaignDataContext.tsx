@@ -260,18 +260,24 @@ export function CampaignDataProvider({ children }: { children: React.ReactNode }
       );
 
       try {
-        const { data, error } = await supabase
-          .from('campaigns')
-          .update(mapToDb(merged))
-          .eq('id', id)
-          .select('*')
-          .single();
+        const payload = mapToDb(merged);
+        const response = await fetch('/api/campaigns/update', {
+          method: 'PATCH',
+          headers: { 'Content-Type': 'application/json' },
+          credentials: 'same-origin',
+          body: JSON.stringify({ id, data: payload }),
+        });
+        const result = await response.json().catch(() => null);
 
-        if (error) throw error;
-        if (data) {
-          const persisted = stampRow(computeRow(mapFromDb(data)), _idx);
-          setRows((prev) => prev.map((r) => (r.id === id ? persisted : r)));
+        if (!response.ok || !result?.campaign) {
+          const message =
+            (result && typeof result.error === 'string' && result.error.trim()) ||
+            `Update failed (${response.status})`;
+          throw new Error(message);
         }
+
+        const persisted = stampRow(computeRow(result.campaign as CampaignRow), _idx);
+        setRows((prev) => prev.map((r) => (r.id === id ? persisted : r)));
         return true;
       } catch (err) {
         logError('updateCampaign', err);
@@ -279,7 +285,7 @@ export function CampaignDataProvider({ children }: { children: React.ReactNode }
         return false;
       }
     },
-    [computeRow, refresh, stampRow, supabase]
+    [computeRow, refresh, stampRow]
   );
 
   const removeCampaign = useCallback(
