@@ -44,14 +44,73 @@ export default function ManageUsersModal({ onClose }: { onClose: () => void }) {
   const [inviteName, setInviteName] = useState('');
   const [inviteAvatar, setInviteAvatar] = useState('');
 
-  const [confirm, setConfirm] = useState<ConfirmState>({ open: false, email: '', userId: null });
-  const [deleteAuth, setDeleteAuth] = useState(false);
-  const [confirmBusy, setConfirmBusy] = useState(false);
+const [confirm, setConfirm] = useState<ConfirmState>({ open: false, email: '', userId: null });
+const [deleteAuth, setDeleteAuth] = useState(false);
+const [confirmBusy, setConfirmBusy] = useState(false);
+const [profileBusy, setProfileBusy] = useState(false);
+const [editingEmail, setEditingEmail] = useState<string | null>(null);
+const [profileName, setProfileName] = useState('');
+const [profileAvatar, setProfileAvatar] = useState('');
 
   const showBanner = (text: string, tone: BannerTone = 'info') => {
     setBanner({ text, tone });
     window.clearTimeout((showBanner as any)._timer);
     (showBanner as any)._timer = window.setTimeout(() => setBanner(null), 3200);
+  };
+
+  const startEditProfile = (row: UserRow) => {
+    setProfileBusy(false);
+    setEditingEmail(row.email);
+    setProfileName(row.display_name ?? '');
+    setProfileAvatar(row.avatar_url ?? '');
+  };
+
+  const cancelEditProfile = () => {
+    setEditingEmail(null);
+    setProfileName('');
+    setProfileAvatar('');
+    setProfileBusy(false);
+  };
+
+  const saveProfile = async (email: string) => {
+    if (!isAdmin || profileBusy) return;
+
+    const payload: Record<string, unknown> = {
+      email,
+      displayName: profileName.trim(),
+      avatarUrl: profileAvatar.trim(),
+    };
+
+    setProfileBusy(true);
+    try {
+      const response = await fetch('/api/admin/users/profile', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(payload),
+      });
+      const data = await response.json().catch(() => ({}));
+      if (!response.ok || data?.ok !== true) {
+        const message = data?.error || `Profile update failed (${response.status})`;
+        throw new Error(message);
+      }
+      showBanner('Profile updated', 'ok');
+      setRows((prev) =>
+        prev.map((row) =>
+          row.email === email
+            ? {
+                ...row,
+                display_name: data.displayName ?? null,
+                avatar_url: data.avatarUrl ?? null,
+                updated_at: new Date().toISOString(),
+              }
+            : row
+        )
+      );
+      cancelEditProfile();
+    } catch (error: any) {
+      showBanner(error?.message || 'Unable to update profile', 'err');
+      setProfileBusy(false);
+    }
   };
 
   const isLastActiveAdmin = (email: string) => {
@@ -347,6 +406,7 @@ export default function ManageUsersModal({ onClose }: { onClose: () => void }) {
                     <th className="text-left font-medium px-3 py-2">Email</th>
                     <th className="text-left font-medium px-3 py-2">Role</th>
                     <th className="text-left font-medium px-3 py-2">Active</th>
+                    <th className="text-left font-medium px-3 py-2">Profile</th>
                     <th className="text-left font-medium px-3 py-2">Updated</th>
                     <th className="text-left font-medium px-3 py-2" />
                   </tr>
@@ -361,7 +421,7 @@ export default function ManageUsersModal({ onClose }: { onClose: () => void }) {
                   rows.map((row) => (
                     <div
                       key={row.email}
-                      className="grid grid-cols-[1.6fr_0.8fr_0.7fr_1fr_auto] gap-3 px-3 py-2 items-center"
+                      className="grid grid-cols-[1.6fr_0.8fr_0.7fr_1.3fr_1fr_auto] gap-3 px-3 py-2 items-center"
                     >
                       <div className="truncate">
                         <div className="font-medium">{row.display_name || row.email}</div>
@@ -388,6 +448,74 @@ export default function ManageUsersModal({ onClose }: { onClose: () => void }) {
                           onChange={(event) => updateActive(row.email, event.target.checked)}
                           disabled={!isAdmin}
                         />
+                      </div>
+
+                      <div className="flex flex-col gap-2">
+                        {editingEmail === row.email ? (
+                          <>
+                            <input
+                              className="input"
+                              value={profileName}
+                              onChange={(event) => setProfileName(event.target.value)}
+                              placeholder="Full name"
+                              disabled={profileBusy}
+                            />
+                            <input
+                              className="input"
+                              value={profileAvatar}
+                              onChange={(event) => setProfileAvatar(event.target.value)}
+                              placeholder="https://avatar.url"
+                              disabled={profileBusy}
+                            />
+                            <div className="flex gap-2">
+                              <button
+                                className="btn-primary disabled:opacity-50 disabled:pointer-events-none"
+                                onClick={() => saveProfile(row.email)}
+                                disabled={profileBusy}
+                              >
+                                {profileBusy ? 'Saving...' : 'Save'}
+                              </button>
+                              <button className="btn-ghost" onClick={cancelEditProfile} disabled={profileBusy}>
+                                Cancel
+                              </button>
+                            </div>
+                          </>
+                        ) : (
+                          <div className="flex items-center gap-2">
+                            <div className="flex items-center gap-2">
+                              <div className="h-8 w-8 overflow-hidden rounded-full bg-[--color-surface-3] ring-1 ring-black/5">
+                                {row.avatar_url ? (
+                                  // eslint-disable-next-line @next/next/no-img-element
+                                  <img
+                                    src={row.avatar_url}
+                                    alt={row.display_name || row.email}
+                                    className="h-full w-full object-cover"
+                                    referrerPolicy="no-referrer"
+                                  />
+                                ) : (
+                                  <span className="flex h-full w-full items-center justify-center text-xs font-medium opacity-70">
+                                    {(row.display_name || row.email || 'U')
+                                      .split(' ')
+                                      .filter(Boolean)
+                                      .slice(0, 2)
+                                      .map((word) => word.charAt(0).toUpperCase())
+                                      .join('') || 'U'}
+                                  </span>
+                                )}
+                              </div>
+                              <div className="text-xs opacity-70 truncate max-w-[140px]">
+                                {row.display_name || '—'}
+                              </div>
+                            </div>
+                            <button
+                              className="btn-ghost text-xs border border-[--color-border] px-2 py-1 disabled:opacity-50 disabled:pointer-events-none"
+                              onClick={() => startEditProfile(row)}
+                              disabled={!isAdmin}
+                            >
+                              Edit
+                            </button>
+                          </div>
+                        )}
                       </div>
 
                       <div className="text-xs opacity-70 truncate">
