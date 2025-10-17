@@ -14,7 +14,7 @@ export default function QuickAddPartnerModal({
   onClose: () => void;
   onCreated: (partnerName: string) => void;
 }) {
-  const { PARTNERS, addPartnerRef } = useCatalogOverrides();
+  const { PARTNERS, addPartnerRef, loading } = useCatalogOverrides();
   const [name, setName] = useState('');
   const [office, setOffice] = useState<InvoiceOffice>('DAT');
   const [err, setErr] = useState<string>('');
@@ -31,6 +31,7 @@ export default function QuickAddPartnerModal({
   const submit = () => {
     const n = trimCollapse(name);
     if (!n) { setErr('Name is required'); return; }
+    if (loading) { setErr('Shared catalogs are still loading'); return; }
 
     // 1) Evitar duplicado por NOMBRE (case-insensitive)
     const existsByName = PARTNERS.some(p => norm(p.name) === norm(n));
@@ -79,7 +80,7 @@ export default function QuickAddPartnerModal({
           <button
             className="btn-primary disabled:opacity-50 disabled:pointer-events-none"
             onClick={submit}
-            disabled={!trimCollapse(name)}
+            disabled={loading || !trimCollapse(name)}
           >
             Add
           </button>

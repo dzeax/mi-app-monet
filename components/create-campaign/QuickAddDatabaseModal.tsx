@@ -35,7 +35,7 @@ export default function QuickAddDatabaseModal({
   onClose: () => void;
   onCreated: (dbName: string) => void;
 }) {
-  const { DATABASES, addDatabaseRef } = useCatalogOverrides();
+  const { DATABASES, addDatabaseRef, loading } = useCatalogOverrides();
   const [name, setName] = useState('');
   const [geo, setGeo] = useState('ES');
   const [dbType, setDbType] = useState<DBType>('B2B');
@@ -56,6 +56,7 @@ export default function QuickAddDatabaseModal({
   const submit = () => {
     const n = trimCollapse(name);
     if (!n) { setErr('Name is required'); return; }
+    if (loading) { setErr('Shared catalogs are still loading'); return; }
 
     // GEO estricto
     if (!geoValid) {
@@ -93,7 +94,7 @@ export default function QuickAddDatabaseModal({
           <button
             className="btn-primary disabled:opacity-50 disabled:pointer-events-none"
             onClick={submit}
-            disabled={!trimCollapse(name) || !geoValid}
+            disabled={loading || !trimCollapse(name) || !geoValid}
           >
             Add
           </button>

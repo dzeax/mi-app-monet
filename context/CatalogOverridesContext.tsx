@@ -30,8 +30,6 @@ import type {
 import { createClientComponentClient } from '@supabase/auth-helpers-nextjs';
 import { useAuth } from '@/context/AuthContext';
 
-const STORAGE_KEY = 'monet_catalog_overrides_v1';
-
 /* ============================== Normalización ============================== */
 type CampaignIn = { name: string; advertiser?: string };
 type PartnerIn  = { name: string; invoiceOffice: string };
@@ -321,17 +319,8 @@ export type CatalogsCtx = {
   removeTheme: (t: string) => void;
   removeType:  (t: string) => void;
 
-  // Mantenimiento
-  resetOverrides: () => void;
-  exportOverrides: () => string;
-
-  // Estado
-  hasLocalChanges: boolean;
-
-  // Importación segura
-  importOverrides: (data: string | OverridesShape) => { ok: true } | { ok: false; reason: string };
-
   // Info remota
+  loading: boolean;
   syncing: boolean;
   lastSyncedAt: string | null;
   canWriteShared: boolean;
@@ -365,27 +354,14 @@ export function CatalogOverridesProvider({ children }: { children: React.ReactNo
 
   const supabase = useMemo(() => createClientComponentClient(), []);
 
-  const [overrides, setOverrides] = useState<OverridesShape>(() => {
-    try {
-      const raw = localStorage.getItem(STORAGE_KEY);
-      return raw ? (JSON.parse(raw) as OverridesShape) : {};
-    } catch {
-      return {};
-    }
-  });
-
+  const [overrides, setOverrides] = useState<OverridesShape>({});
   const [syncing, setSyncing] = useState(false);
   const [lastSyncedAt, setLastSyncedAt] = useState<string | null>(null);
+  const [loading, setLoading] = useState(true);
 
   // Para evitar bucles de eco: cuando aplicamos remoto, no disparemos guardado
   const skipNextSaveRef = useRef(false);
-  const hydratedRemoteRef = useRef(false);
   const saveTimerRef = useRef<number | null>(null);
-
-  // Persistir en cache local siempre (mejor UX offline)
-  useEffect(() => {
-    try { localStorage.setItem(STORAGE_KEY, JSON.stringify(overrides)); } catch {}
-  }, [overrides]);
 
   /* -------------------------- Carga inicial remota ------------------------- */
   useEffect(() => {
@@ -403,30 +379,25 @@ export function CatalogOverridesProvider({ children }: { children: React.ReactNo
         if (!active) return;
 
         if (!error && data) {
-          skipNextSaveRef.current = true; // no salvar de vuelta este set
           const remote = normalizeOverrides(data.data);
           if (hasAnyOverrides(remote)) {
+            skipNextSaveRef.current = true;
             setOverrides(remote);
             setLastSyncedAt(data.updated_at ?? new Date().toISOString());
-          } else {
-            const hasLocal = hasAnyOverrides(overrides);
-            if (hasLocal && canWriteShared) {
-              await upsertRemote(overrides);
-            }
-          }
-        } else {
-          const hasLocal = hasAnyOverrides(overrides);
-          if (hasLocal && canWriteShared) {
-            await upsertRemote(overrides);
           }
         }
+      } catch (err) {
+        console.warn('[CatalogOverrides] Failed to fetch shared catalogs:', err);
       } finally {
-        hydratedRemoteRef.current = true;
+        if (!active) return;
+        setLoading(false);
         setSyncing(false);
       }
     })();
 
-    return () => { active = false; };
+    return () => {
+      active = false;
+    };
   }, [supabase]);
 
   /* --------------------------- Suscripción realtime ------------------------ */
@@ -478,7 +449,7 @@ export function CatalogOverridesProvider({ children }: { children: React.ReactNo
 
   // Debounce: cada cambio local (user action) -> upsert remoto (si procede)
   useEffect(() => {
-    if (!hydratedRemoteRef.current) return; // hasta cargar remoto
+    if (loading) return;
     if (skipNextSaveRef.current) {
       skipNextSaveRef.current = false;
       return;
@@ -488,7 +459,7 @@ export function CatalogOverridesProvider({ children }: { children: React.ReactNo
     if (saveTimerRef.current) window.clearTimeout(saveTimerRef.current);
     saveTimerRef.current = window.setTimeout(() => {
       upsertRemote(overrides);
-    }, 500);
+    }, 300);
 
     return () => {
       if (saveTimerRef.current) {
@@ -496,7 +467,7 @@ export function CatalogOverridesProvider({ children }: { children: React.ReactNo
         saveTimerRef.current = null;
       }
     };
-  }, [overrides, canWriteShared, upsertRemote]);
+  }, [overrides, canWriteShared, upsertRemote, loading]);
 
   /* -------------------------- Fusionados (memo) ---------------------------- */
   const CAMPAIGNS = useMemo(
@@ -526,9 +497,13 @@ export function CatalogOverridesProvider({ children }: { children: React.ReactNo
   );
 
   /* ---------------------------- Mutadores (compat) ------------------------- */
-  const setLocal = <T,>(updater: (prev: OverridesShape) => OverridesShape) => {
-    setOverrides(prev => updater(prev));
-  };
+  const setLocal = useCallback(
+    (updater: (prev: OverridesShape) => OverridesShape) => {
+      if (loading) return;
+      setOverrides(prev => updater(prev));
+    },
+    [loading],
+  );
 
   const addCampaignRef = useCallback((c: CampaignIn) => {
     setLocal(prev => {
@@ -545,7 +520,7 @@ export function CatalogOverridesProvider({ children }: { children: React.ReactNo
       }
       return { ...prev, campaigns: list };
     });
-  }, [CAMPAIGNS]);
+  }, [CAMPAIGNS, setLocal]);
 
   const addPartnerRef = useCallback((p: PartnerIn) => {
     setLocal(prev => {
@@ -559,7 +534,7 @@ export function CatalogOverridesProvider({ children }: { children: React.ReactNo
       }
       return { ...prev, partners: list };
     });
-  }, [PARTNERS]);
+  }, [PARTNERS, setLocal]);
 
   const addDatabaseRef = useCallback((d: DatabaseIn) => {
     setLocal(prev => {
@@ -597,7 +572,7 @@ export function CatalogOverridesProvider({ children }: { children: React.ReactNo
       });
       return { ...prev, databases: list };
     });
-  }, [DATABASES]);
+  }, [DATABASES, setLocal]);
 
   const addTheme = useCallback((t: string) => {
     setLocal(prev => {
@@ -611,7 +586,7 @@ export function CatalogOverridesProvider({ children }: { children: React.ReactNo
       if (!exists) (list as any[]).push(label);
       return { ...prev, themes: list as any };
     });
-  }, [THEMES]);
+  }, [THEMES, setLocal]);
 
   const addType = useCallback((t: string) => {
     setLocal(prev => {
@@ -622,7 +597,7 @@ export function CatalogOverridesProvider({ children }: { children: React.ReactNo
       if (!exists) list.push(v);
       return { ...prev, types: list };
     });
-  }, [TYPES]);
+  }, [TYPES, setLocal]);
 
   const updateCampaignRef = useCallback((name: string, patch: Partial<CampaignIn>) => {
     const key = norm(name);
@@ -643,7 +618,7 @@ export function CatalogOverridesProvider({ children }: { children: React.ReactNo
       }
       return { ...prev, campaigns: list };
     });
-  }, []);
+  }, [setLocal]);
 
   const removeCampaignRef = useCallback((name: string) => {
     const key = norm(name);
@@ -651,7 +626,7 @@ export function CatalogOverridesProvider({ children }: { children: React.ReactNo
       ...prev,
       campaigns: (prev.campaigns || []).filter((x) => norm(x.name) !== key),
     }));
-  }, []);
+  }, [setLocal]);
 
   const updatePartnerRef = useCallback((name: string, patch: Partial<PartnerIn>) => {
     const key = norm(name);
@@ -670,7 +645,7 @@ export function CatalogOverridesProvider({ children }: { children: React.ReactNo
       }
       return { ...prev, partners: list };
     });
-  }, []);
+  }, [setLocal]);
 
   const removePartnerRef = useCallback((name: string) => {
     const key = norm(name);
@@ -678,7 +653,7 @@ export function CatalogOverridesProvider({ children }: { children: React.ReactNo
       ...prev,
       partners: (prev.partners || []).filter((x) => norm(x.name) !== key),
     }));
-  }, []);
+  }, [setLocal]);
 
   const updateDatabaseRef = useCallback((name: string, patch: Partial<DatabaseIn>) => {
     const key = norm(name);
@@ -726,7 +701,7 @@ export function CatalogOverridesProvider({ children }: { children: React.ReactNo
       }
       return { ...prev, databases: list };
     });
-  }, [DATABASES]);
+  }, [DATABASES, setLocal]);
 
   const removeDatabaseRef = useCallback((name: string) => {
     const key = norm(name);
@@ -734,7 +709,7 @@ export function CatalogOverridesProvider({ children }: { children: React.ReactNo
       ...prev,
       databases: (prev.databases || []).filter((x) => norm(x.name) !== key),
     }));
-  }, []);
+  }, [setLocal]);
 
   const removeTheme = useCallback((t: string) => {
     const lbl = trimCollapse(t);
@@ -744,7 +719,7 @@ export function CatalogOverridesProvider({ children }: { children: React.ReactNo
         trimCollapse(typeof x === 'string' ? x : x?.label) !== lbl,
       ),
     }));
-  }, []);
+  }, [setLocal]);
 
   const removeType = useCallback((t: string) => {
     const v = trimCollapse(t).toUpperCase();
@@ -752,45 +727,7 @@ export function CatalogOverridesProvider({ children }: { children: React.ReactNo
       ...prev,
       types: (prev.types || []).filter((x) => x !== v),
     }));
-  }, []);
-
-  /* ----------------------------- Mantenimiento ----------------------------- */
-  const resetOverrides = useCallback(() => {
-    setOverrides({});
-  }, []);
-
-  const exportOverrides = useCallback(() => {
-    const data: OverridesShape = {};
-    if (overrides.campaigns?.length)  data.campaigns = overrides.campaigns;
-    if (overrides.partners?.length)   data.partners  = overrides.partners;
-    if (overrides.databases?.length)  data.databases = overrides.databases;
-    if (overrides.themes && (overrides.themes as any[]).length) data.themes = overrides.themes;
-    if (overrides.types?.length)      data.types     = overrides.types;
-    return JSON.stringify(data, null, 2);
-  }, [overrides]);
-
-  const hasLocalChanges = useMemo(() => {
-    const o = overrides;
-    return Boolean(
-      (o.campaigns && o.campaigns.length) ||
-      (o.partners && o.partners.length) ||
-      (o.databases && o.databases.length) ||
-      (o.themes && (o.themes as any[]).length) ||
-      (o.types && o.types.length)
-    );
-  }, [overrides]);
-
-  const importOverrides = useCallback((data: string | OverridesShape) => {
-    try {
-      const src = typeof data === 'string' ? JSON.parse(data) : data;
-      const normd = normalizeOverrides(src);
-      setOverrides(normd);
-      return { ok: true as const };
-    } catch (e) {
-      console.error(e);
-      return { ok: false as const, reason: 'Invalid JSON' };
-    }
-  }, []);
+  }, [setLocal]);
 
   const value: CatalogsCtx = {
     CAMPAIGNS,
@@ -815,12 +752,7 @@ export function CatalogOverridesProvider({ children }: { children: React.ReactNo
     removeTheme,
     removeType,
 
-    resetOverrides,
-    exportOverrides,
-
-    hasLocalChanges,
-    importOverrides,
-
+    loading,
     syncing,
     lastSyncedAt,
     canWriteShared,

@@ -16,8 +16,7 @@ export default function ManageCatalogsModal({ onClose }: { onClose: () => void }
     addPartnerRef, updatePartnerRef, removePartnerRef,
     addDatabaseRef, updateDatabaseRef, removeDatabaseRef,
     addTheme, removeTheme, addType, removeType,
-    exportOverrides, resetOverrides,
-    hasLocalChanges, importOverrides,
+    loading, syncing, lastSyncedAt,
   } = useCatalogs();
 
   // 🆕 auth/roles
@@ -25,20 +24,10 @@ export default function ManageCatalogsModal({ onClose }: { onClose: () => void }
   const role = (auth?.role as 'admin' | 'editor' | 'viewer' | undefined) ?? (auth?.isAdmin ? 'admin' : auth?.isEditor ? 'editor' : 'viewer');
   const isAdmin = role === 'admin' || !!auth?.isAdmin;
   const isEditor = role === 'editor' || !!auth?.isEditor;
-  const canEdit = isAdmin || isEditor;    // puede CRUD unitario
-  const canBulk = isAdmin;                // puede importar/exportar/reset
+  const canEdit = isAdmin || isEditor;
 
   const trapRef = useRef<HTMLDivElement>(null);
-  const fileInputRef = useRef<HTMLInputElement>(null);
   const [tab, setTab] = useState<TabKey>('campaigns');
-
-  // banner simple de feedback
-  const [banner, setBanner] = useState<null | { text: string; variant: 'success' | 'error' | 'info' }>(null);
-  const showBanner = (b: { text: string; variant: 'success' | 'error' | 'info' }) => {
-    setBanner(b);
-    window.clearTimeout((showBanner as any)._t);
-    (showBanner as any)._t = window.setTimeout(() => setBanner(null), 3200);
-  };
 
   // ESC -> cerrar
   useEffect(() => {
@@ -47,52 +36,6 @@ export default function ManageCatalogsModal({ onClose }: { onClose: () => void }
     return () => document.removeEventListener('keydown', onKey);
   }, [onClose]);
 
-  // Export JSON (delta de overrides)
-  const download = () => {
-    if (!canBulk) {
-      showBanner({ text: 'Only admins can export overrides.', variant: 'error' });
-      return;
-    }
-    if (!hasLocalChanges) return;
-    const blob = new Blob([exportOverrides()], { type: 'application/json;charset=utf-8' });
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement('a');
-    a.href = url;
-    a.download = 'catalog_overrides.json';
-    a.click();
-    URL.revokeObjectURL(url);
-  };
-
-  // Import JSON
-  const triggerImport = () => {
-    if (!canBulk) {
-      showBanner({ text: 'Only admins can import overrides.', variant: 'error' });
-      return;
-    }
-    fileInputRef.current?.click();
-  };
-
-  const onFilePicked: React.ChangeEventHandler<HTMLInputElement> = (e) => {
-    const f = e.target.files?.[0];
-    e.currentTarget.value = ''; // permite re-seleccionar el mismo archivo
-    if (!f) return;
-    if (!canBulk) {
-      showBanner({ text: 'Only admins can import overrides.', variant: 'error' });
-      return;
-    }
-    const reader = new FileReader();
-    reader.onload = () => {
-      const text = String(reader.result || '');
-      const res = importOverrides(text);
-      if (res.ok) {
-        showBanner({ text: 'Overrides imported successfully.', variant: 'success' });
-      } else {
-        showBanner({ text: `Import failed: ${res.reason}`, variant: 'error' });
-      }
-    };
-    reader.onerror = () => showBanner({ text: 'Could not read file.', variant: 'error' });
-    reader.readAsText(f);
-  };
 
   const body = (
     <div
@@ -124,31 +67,15 @@ export default function ManageCatalogsModal({ onClose }: { onClose: () => void }
         <div className="overflow-y-auto px-5 py-4 space-y-4 relative">
           <div className="edge-fade edge-top" aria-hidden />
 
-          {/* banner */}
-          {banner && (
-            <div
-              className={`rounded-lg border px-3 py-2 text-sm ${
-                banner.variant === 'success'
-                  ? 'border-emerald-500/40 bg-emerald-500/10 text-emerald-600'
-                  : banner.variant === 'info'
-                    ? 'border-sky-500/40 bg-sky-500/10 text-sky-700'
-                    : 'border-[--color-accent]/50 bg-[--color-accent]/10 text-[--color-accent]'
-              }`}
-              role="status"
-            >
-              {banner.text}
-            </div>
-          )}
-
           {/* Aviso de permisos */}
           {!canEdit && (
             <div className="rounded-lg border px-3 py-2 text-sm border-sky-500/40 bg-sky-500/10 text-sky-700">
               Read-only. Ask an admin for edit access.
             </div>
           )}
-          {canEdit && !canBulk && (
+          {loading && (
             <div className="rounded-lg border px-3 py-2 text-sm border-amber-400/40 bg-amber-400/10 text-amber-700">
-              Editors can edit items but only admins can import/export or reset overrides.
+              Loading shared catalog overrides...
             </div>
           )}
 
@@ -168,119 +95,106 @@ export default function ManageCatalogsModal({ onClose }: { onClose: () => void }
           {tab === 'campaigns' && (
             <CampaignsPanel
               items={CAMPAIGNS}
-              onAdd={(name, advertiser) => canEdit && addCampaignRef({ name, advertiser })}
-              onUpdate={(oldName, patch) => canEdit && updateCampaignRef(oldName, patch)}
-              onRemove={(name) => {
-                if (!canEdit) return;
-                if (confirm(`Remove local override for campaign "${name}"?`)) removeCampaignRef(name);
+              onAdd={(name, advertiser) => {
+                if (!canEdit || loading) return;
+                addCampaignRef({ name, advertiser });
               }}
-              disabled={!canEdit}
+              onUpdate={(oldName, patch) => {
+                if (!canEdit || loading) return;
+                updateCampaignRef(oldName, patch);
+              }}
+              onRemove={(name) => {
+                if (!canEdit || loading) return;
+                if (confirm(`Remove override for campaign "${name}"?`)) removeCampaignRef(name);
+              }}
+              disabled={!canEdit || loading}
             />
           )}
 
           {tab === 'partners' && (
             <PartnersPanel
               items={PARTNERS}
-              onAdd={(name, invoiceOffice) => canEdit && addPartnerRef({ name, invoiceOffice })}
-              onUpdate={(oldName, patch) => canEdit && updatePartnerRef(oldName, patch)}
-              onRemove={(name) => {
-                if (!canEdit) return;
-                if (confirm(`Remove local override for partner "${name}"?`)) removePartnerRef(name);
+              onAdd={(name, invoiceOffice) => {
+                if (!canEdit || loading) return;
+                addPartnerRef({ name, invoiceOffice });
               }}
-              disabled={!canEdit}
+              onUpdate={(oldName, patch) => {
+                if (!canEdit || loading) return;
+                updatePartnerRef(oldName, patch);
+              }}
+              onRemove={(name) => {
+                if (!canEdit || loading) return;
+                if (confirm(`Remove override for partner "${name}"?`)) removePartnerRef(name);
+              }}
+              disabled={!canEdit || loading}
             />
           )}
 
           {tab === 'databases' && (
             <DatabasesPanel
               items={DATABASES}
-              onAdd={(payload) => canEdit && addDatabaseRef(payload)}
-              onUpdate={(oldName, patch) => canEdit && updateDatabaseRef(oldName, patch)}
-              onRemove={(name) => {
-                if (!canEdit) return;
-                if (confirm(`Remove local override for database "${name}"?`)) removeDatabaseRef(name);
+              onAdd={(payload) => {
+                if (!canEdit || loading) return;
+                addDatabaseRef(payload);
               }}
-              disabled={!canEdit}
+              onUpdate={(oldName, patch) => {
+                if (!canEdit || loading) return;
+                updateDatabaseRef(oldName, patch);
+              }}
+              onRemove={(name) => {
+                if (!canEdit || loading) return;
+                if (confirm(`Remove override for database "${name}"?`)) removeDatabaseRef(name);
+              }}
+              disabled={!canEdit || loading}
             />
           )}
 
           {tab === 'themes' && (
             <ThemesPanel
               items={THEMES}
-              onAdd={(t) => canEdit && addTheme(t)}
-              onRemove={(t) => {
-                if (!canEdit) return;
-                if (confirm(`Remove theme "${t}" from local overrides?`)) removeTheme(t);
+              onAdd={(t) => {
+                if (!canEdit || loading) return;
+                addTheme(t);
               }}
-              disabled={!canEdit}
+              onRemove={(t) => {
+                if (!canEdit || loading) return;
+                if (confirm(`Remove theme "${t}"?`)) removeTheme(t);
+              }}
+              disabled={!canEdit || loading}
             />
           )}
 
           {tab === 'types' && (
             <TypesPanel
               items={TYPES}
-              onAdd={(t) => canEdit && addType(t)}
-              onRemove={(t) => {
-                if (!canEdit) return;
-                if (confirm(`Remove type "${t}" from local overrides?`)) removeType(t);
+              onAdd={(t) => {
+                if (!canEdit || loading) return;
+                addType(t);
               }}
-              disabled={!canEdit}
+              onRemove={(t) => {
+                if (!canEdit || loading) return;
+                if (confirm(`Remove type "${t}"?`)) removeType(t);
+              }}
+              disabled={!canEdit || loading}
             />
           )}
 
           <div className="edge-fade edge-bottom" aria-hidden />
         </div>
 
-        {/* Footer (chrome unificado) */}
+        {/* Footer */}
         <div className="sticky bottom-0 z-10 modal-chrome modal-footer px-5 py-3 flex items-center justify-end gap-2">
-          {/* input oculto para importar */}
-          <input
-            ref={fileInputRef}
-            type="file"
-            accept="application/json,.json"
-            className="hidden"
-            onChange={onFilePicked}
-          />
-          {canBulk && (
-            <button type="button" className="btn-ghost" onClick={triggerImport}>
-              Import
-            </button>
-          )}
-          <button
-            type="button"
-            className="btn-ghost disabled:opacity-50 disabled:pointer-events-none"
-            onClick={() => {
-              if (!canBulk) {
-                showBanner({ text: 'Only admins can reset overrides.', variant: 'error' });
-                return;
-              }
-              resetOverrides();
-            }}
-            disabled={!hasLocalChanges || !canBulk}
-            title={
-              !canBulk
-                ? 'Only admins can reset overrides'
-                : hasLocalChanges
-                  ? 'Clear local overrides'
-                  : 'No local changes'
-            }
-          >
-            Reset local changes
-          </button>
-          <button
-            type="button"
-            className="btn-primary disabled:opacity-50 disabled:pointer-events-none"
-            onClick={download}
-            disabled={!hasLocalChanges || !canBulk}
-            title={
-              !canBulk
-                ? 'Only admins can export overrides'
-                : hasLocalChanges
-                  ? 'Export local overrides as JSON'
-                  : 'Nothing to export'
-            }
-          >
-            Export changes
+          <div className="text-sm mr-auto opacity-70">
+            {loading
+              ? 'Loading shared catalogs...'
+              : syncing
+                ? 'Syncing changes...'
+                : lastSyncedAt
+                  ? `Last synced at ${new Date(lastSyncedAt).toLocaleTimeString()}`
+                  : ''}
+          </div>
+          <button type="button" className="btn-ghost" onClick={onClose}>
+            Close
           </button>
         </div>
       </div>
