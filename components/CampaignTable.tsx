@@ -262,20 +262,20 @@ function KpiTile({
       : 'bg-[color-mix(in_oklab,var(--color-text)_14%,transparent)] text-[color-mix(in_oklab,var(--color-text)_90%,black)] border border-[color-mix(in_oklab,var(--color-text)_22%,transparent)]';
 
   return (
-    <div className="rounded-xl border border-[--color-border] bg-[color:var(--color-surface-2)]/60 p-3 md:p-4 min-h-[92px]" title={title}>
-      <div className="text-[11px] md:text-xs uppercase tracking-wide opacity-70">{label}</div>
+    <div className="rounded-lg border border-[--color-border] bg-[color:var(--color-surface-2)]/60 p-2.5 md:p-3 min-h-[68px] flex flex-col justify-between" title={title}>
+      <div className="text-[10px] md:text-[11px] uppercase tracking-wide opacity-70">{label}</div>
       {asBadge ? (
-        <div className="mt-2">
-          <span className={['inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-sm font-bold tabular-nums leading-tight', badgeClass].join(' ')}>
+        <div className="mt-1.5">
+          <span className={['inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs md:text-sm font-semibold tabular-nums leading-tight', badgeClass].join(' ')}>
             {tone === 'neg' ? <DownIcon /> : null}
             {value}
           </span>
-          {subValue ? <div className={['mt-1 text-xs tabular-nums leading-tight', toneText].join(' ')}>{subValue}</div> : null}
+          {subValue ? <div className={['mt-1 text-[11px] md:text-xs tabular-nums leading-tight', toneText].join(' ')}>{subValue}</div> : null}
         </div>
       ) : (
-        <div className={['mt-1 flex items-baseline gap-2', toneText].join(' ')}>
-          <span className="text-lg md:text-xl font-semibold tabular-nums leading-tight">{value}</span>
-          {rightHint ? <span className="text-[11px] md:text-xs opacity-70">{rightHint}</span> : null}
+        <div className={['mt-1 flex items-baseline gap-1.5 flex-wrap', toneText].join(' ')}>
+          <span className="text-base md:text-lg font-semibold tabular-nums leading-tight">{value}</span>
+          {rightHint ? <span className="text-[10px] md:text-xs opacity-70">{rightHint}</span> : null}
         </div>
       )}
     </div>
@@ -596,28 +596,27 @@ export default function CampaignTable() {
           style={{
             position: 'sticky',
             top: `calc(var(--content-sticky-top) + ${sizes.filters}px + var(--band-gap-y))`,
-            zIndex: 50,
+            zIndex: 65,
           }}
         >
           <div
             role="region"
             aria-labelledby="kpi-recap-title"
             aria-live="polite"
-            className="rounded-xl border border-[--color-border] ring-1 ring-white/10 bg-[color:var(--color-surface)]/90 backdrop-blur-md shadow-xl"
+            className="rounded-xl border border-[--color-border] bg-[color:var(--color-surface)]/85 backdrop-blur-md shadow-lg px-3 md:px-4 py-3 md:py-3.5"
           >
             <h2 id="kpi-recap-title" className="sr-only">Resumen de KPIs</h2>
 
-            {/* badge de periodo + acciones */}
-            <div className="px-3 md:px-4 pt-2 flex justify-end">
-              <span className="text-[11px] md:text-xs rounded-full px-2 py-1
-                                bg-[color-mix(in_oklab,var(--color-text)_10%,transparent)]
-                                text-[color-mix(in_oklab,var(--color-text)_85%,black)]">
+            <div className="flex flex-wrap items-center justify-between gap-3 text-[11px] md:text-xs">
+              <span className="rounded-full px-2 py-1 bg-[color-mix(in_oklab,var(--color-text)_10%,transparent)] text-[color-mix(in_oklab,var(--color-text)_85%,black)]">
                 {activePresetLabelFromRange(engine.filters.dateRange ?? null) || 'All data'}
               </span>
+              <span className="tabular-nums text-[color-mix(in_oklab,var(--color-text)_70%,black)]">
+                Routing: <strong>{fmtEUR.format(summary.routingCosts)}</strong> • QTY: <strong>{fmtInt.format(summary.qty)}</strong>
+              </span>
             </div>
-            
-            {/* KPIs */}
-            <div className="p-3 md:p-4 grid grid-cols-2 sm:grid-cols-4 gap-2 md:gap-3">
+
+            <div className="mt-3 grid grid-cols-2 sm:grid-cols-4 gap-2 md:gap-3">
               <KpiTile label="Turnover" value={fmtEUR.format(summary.turnover)} title="Suma de turnover del dataset filtrado" />
               <KpiTile
                 label="Margin (%)"
@@ -632,12 +631,6 @@ export default function CampaignTable() {
               />
               <KpiTile label="V Sent" value={fmtInt.format(summary.vSent)} title="Volumen de envíos en el periodo" />
               <KpiTile label="eCPM" value={fmtEUR.format(summary.weightedEcpm)} rightHint="€/k" title="eCPM ponderado = Σ(ecpm·vSent) / Σ(vSent)" />
-            </div>
-
-            <div className="px-3 md:px-4 pb-3 -mt-1 border-t border-white/10 text-xs opacity-80">
-              <span className="tabular-nums">
-                Routing: <strong>{fmtEUR.format(summary.routingCosts)}</strong> • QTY: <strong>{fmtInt.format(summary.qty)}</strong>
-              </span>
             </div>
           </div>
         </div>
