@@ -16,7 +16,7 @@ export default function ManageCatalogsModal({ onClose }: { onClose: () => void }
     addPartnerRef, updatePartnerRef, removePartnerRef,
     addDatabaseRef, updateDatabaseRef, removeDatabaseRef,
     addTheme, removeTheme, addType, removeType,
-    loading, syncing, lastSyncedAt,
+    loading, syncing, lastSyncedAt, error,
   } = useCatalogs();
 
   // 🆕 auth/roles
@@ -29,6 +29,8 @@ export default function ManageCatalogsModal({ onClose }: { onClose: () => void }
   const trapRef = useRef<HTMLDivElement>(null);
   const [tab, setTab] = useState<TabKey>('campaigns');
 
+  const canModify = canEdit && !loading && !error;
+
   // ESC -> cerrar
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => { if (e.key === 'Escape') onClose(); };
@@ -36,6 +38,16 @@ export default function ManageCatalogsModal({ onClose }: { onClose: () => void }
     return () => document.removeEventListener('keydown', onKey);
   }, [onClose]);
 
+
+  const statusText = error
+    ? 'Sync disabled until shared storage is configured.'
+    : loading
+      ? 'Loading shared catalogs...'
+      : syncing
+        ? 'Syncing changes...'
+        : lastSyncedAt
+          ? `Last synced at ${new Date(lastSyncedAt).toLocaleTimeString()}`
+          : '';
 
   const body = (
     <div
@@ -67,7 +79,7 @@ export default function ManageCatalogsModal({ onClose }: { onClose: () => void }
         <div className="overflow-y-auto px-5 py-4 space-y-4 relative">
           <div className="edge-fade edge-top" aria-hidden />
 
-          {/* Aviso de permisos */}
+          {/* Avisos */}
           {!canEdit && (
             <div className="rounded-lg border px-3 py-2 text-sm border-sky-500/40 bg-sky-500/10 text-sky-700">
               Read-only. Ask an admin for edit access.
@@ -76,6 +88,11 @@ export default function ManageCatalogsModal({ onClose }: { onClose: () => void }
           {loading && (
             <div className="rounded-lg border px-3 py-2 text-sm border-amber-400/40 bg-amber-400/10 text-amber-700">
               Loading shared catalog overrides...
+            </div>
+          )}
+          {error && (
+            <div className="rounded-lg border px-3 py-2 text-sm border-[--color-accent]/50 bg-[--color-accent]/10 text-[--color-accent]">
+              {error}
             </div>
           )}
 
@@ -96,18 +113,18 @@ export default function ManageCatalogsModal({ onClose }: { onClose: () => void }
             <CampaignsPanel
               items={CAMPAIGNS}
               onAdd={(name, advertiser) => {
-                if (!canEdit || loading) return;
+                if (!canModify) return;
                 addCampaignRef({ name, advertiser });
               }}
               onUpdate={(oldName, patch) => {
-                if (!canEdit || loading) return;
+                if (!canModify) return;
                 updateCampaignRef(oldName, patch);
               }}
               onRemove={(name) => {
-                if (!canEdit || loading) return;
+                if (!canModify) return;
                 if (confirm(`Remove override for campaign "${name}"?`)) removeCampaignRef(name);
               }}
-              disabled={!canEdit || loading}
+              disabled={!canModify}
             />
           )}
 
@@ -115,18 +132,18 @@ export default function ManageCatalogsModal({ onClose }: { onClose: () => void }
             <PartnersPanel
               items={PARTNERS}
               onAdd={(name, invoiceOffice) => {
-                if (!canEdit || loading) return;
+                if (!canModify) return;
                 addPartnerRef({ name, invoiceOffice });
               }}
               onUpdate={(oldName, patch) => {
-                if (!canEdit || loading) return;
+                if (!canModify) return;
                 updatePartnerRef(oldName, patch);
               }}
               onRemove={(name) => {
-                if (!canEdit || loading) return;
+                if (!canModify) return;
                 if (confirm(`Remove override for partner "${name}"?`)) removePartnerRef(name);
               }}
-              disabled={!canEdit || loading}
+              disabled={!canModify}
             />
           )}
 
@@ -134,18 +151,18 @@ export default function ManageCatalogsModal({ onClose }: { onClose: () => void }
             <DatabasesPanel
               items={DATABASES}
               onAdd={(payload) => {
-                if (!canEdit || loading) return;
+                if (!canModify) return;
                 addDatabaseRef(payload);
               }}
               onUpdate={(oldName, patch) => {
-                if (!canEdit || loading) return;
+                if (!canModify) return;
                 updateDatabaseRef(oldName, patch);
               }}
               onRemove={(name) => {
-                if (!canEdit || loading) return;
+                if (!canModify) return;
                 if (confirm(`Remove override for database "${name}"?`)) removeDatabaseRef(name);
               }}
-              disabled={!canEdit || loading}
+              disabled={!canModify}
             />
           )}
 
@@ -153,14 +170,14 @@ export default function ManageCatalogsModal({ onClose }: { onClose: () => void }
             <ThemesPanel
               items={THEMES}
               onAdd={(t) => {
-                if (!canEdit || loading) return;
+                if (!canModify) return;
                 addTheme(t);
               }}
               onRemove={(t) => {
-                if (!canEdit || loading) return;
+                if (!canModify) return;
                 if (confirm(`Remove theme "${t}"?`)) removeTheme(t);
               }}
-              disabled={!canEdit || loading}
+              disabled={!canModify}
             />
           )}
 
@@ -168,14 +185,14 @@ export default function ManageCatalogsModal({ onClose }: { onClose: () => void }
             <TypesPanel
               items={TYPES}
               onAdd={(t) => {
-                if (!canEdit || loading) return;
+                if (!canModify) return;
                 addType(t);
               }}
               onRemove={(t) => {
-                if (!canEdit || loading) return;
+                if (!canModify) return;
                 if (confirm(`Remove type "${t}"?`)) removeType(t);
               }}
-              disabled={!canEdit || loading}
+              disabled={!canModify}
             />
           )}
 
@@ -184,15 +201,7 @@ export default function ManageCatalogsModal({ onClose }: { onClose: () => void }
 
         {/* Footer */}
         <div className="sticky bottom-0 z-10 modal-chrome modal-footer px-5 py-3 flex items-center justify-end gap-2">
-          <div className="text-sm mr-auto opacity-70">
-            {loading
-              ? 'Loading shared catalogs...'
-              : syncing
-                ? 'Syncing changes...'
-                : lastSyncedAt
-                  ? `Last synced at ${new Date(lastSyncedAt).toLocaleTimeString()}`
-                  : ''}
-          </div>
+          <div className="text-sm mr-auto opacity-70">{statusText}</div>
           <button type="button" className="btn-ghost" onClick={onClose}>
             Close
           </button>

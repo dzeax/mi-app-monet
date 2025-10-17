@@ -15,7 +15,7 @@ export default function QuickAddCampaignModal({
   onClose: () => void;
   onCreated: (campaignName: string) => void;
 }) {
-  const { CAMPAIGNS, addCampaignRef, loading } = useCatalogOverrides();
+  const { CAMPAIGNS, addCampaignRef, loading, error } = useCatalogOverrides();
   const [name, setName] = useState('');
   const [advertiser, setAdvertiser] = useState('');
   const [err, setErr] = useState<string>('');
@@ -32,6 +32,7 @@ export default function QuickAddCampaignModal({
     const a = trim(advertiser) || 'White Label';
     if (!n) { setErr('Name is required'); return; }
     if (loading) { setErr('Still loading shared catalogs'); return; }
+    if (error) { setErr(error); return; }
 
     const exists = CAMPAIGNS.some(c => norm(c.name) === norm(n));
     if (exists) { setErr('Campaign already exists'); return; }
@@ -61,7 +62,7 @@ export default function QuickAddCampaignModal({
           <button
             className="btn-primary disabled:opacity-50 disabled:pointer-events-none"
             onClick={submit}
-            disabled={loading || !trim(name)}
+            disabled={loading || !!error || !trim(name)}
           >
             Add
           </button>

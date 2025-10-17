@@ -324,6 +324,7 @@ export type CatalogsCtx = {
   syncing: boolean;
   lastSyncedAt: string | null;
   canWriteShared: boolean;
+  error: string | null;
 };
 
 const CatalogOverridesContext = createContext<CatalogsCtx | null>(null);
@@ -347,6 +348,8 @@ const CatalogOverridesContext = createContext<CatalogsCtx | null>(null);
 
 const S_TABLE = 'catalog_overrides';
 const S_KEY   = 'global';
+const SETUP_HINT =
+  'Shared catalog storage is not configured. Run supabase/sql/catalog_overrides.sql on your Supabase project to create the table, then reload.';
 
 export function CatalogOverridesProvider({ children }: { children: React.ReactNode }) {
   const { user, isAdmin, isEditor } = useAuth();
@@ -358,6 +361,7 @@ export function CatalogOverridesProvider({ children }: { children: React.ReactNo
   const [syncing, setSyncing] = useState(false);
   const [lastSyncedAt, setLastSyncedAt] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
 
   // Para evitar bucles de eco: cuando aplicamos remoto, no disparemos guardado
   const skipNextSaveRef = useRef(false);
@@ -385,9 +389,13 @@ export function CatalogOverridesProvider({ children }: { children: React.ReactNo
             setOverrides(remote);
             setLastSyncedAt(data.updated_at ?? new Date().toISOString());
           }
+          setError(null);
+        } else if (!error) {
+          setError(null);
         }
       } catch (err) {
         console.warn('[CatalogOverrides] Failed to fetch shared catalogs:', err);
+        setError(SETUP_HINT);
       } finally {
         if (!active) return;
         setLoading(false);
@@ -416,6 +424,7 @@ export function CatalogOverridesProvider({ children }: { children: React.ReactNo
           skipNextSaveRef.current = true;
           setOverrides(remote);
           setLastSyncedAt(row.updated_at ?? new Date().toISOString());
+          setError(null);
         }
       )
       .subscribe();
@@ -438,10 +447,18 @@ export function CatalogOverridesProvider({ children }: { children: React.ReactNo
         .select()
         .single();
       if (error) throw error as any;
+      setError(null);
       setLastSyncedAt(new Date().toISOString());
     } catch (err) {
       // eslint-disable-next-line no-console
       console.warn('[CatalogOverrides] Failed to sync overrides to remote:', err);
+      const code = (err as any)?.code;
+      const message = String((err as any)?.message ?? err ?? '');
+      if (code === '42P01' || message.includes('catalog_overrides')) {
+        setError(SETUP_HINT);
+      } else {
+        setError('Unable to sync catalog overrides. Check network connectivity or Supabase configuration.');
+      }
     } finally {
       setSyncing(false);
     }
@@ -499,10 +516,10 @@ export function CatalogOverridesProvider({ children }: { children: React.ReactNo
   /* ---------------------------- Mutadores (compat) ------------------------- */
   const setLocal = useCallback(
     (updater: (prev: OverridesShape) => OverridesShape) => {
-      if (loading) return;
+      if (loading || error) return;
       setOverrides(prev => updater(prev));
     },
-    [loading],
+    [loading, error],
   );
 
   const addCampaignRef = useCallback((c: CampaignIn) => {
@@ -756,6 +773,7 @@ export function CatalogOverridesProvider({ children }: { children: React.ReactNo
     syncing,
     lastSyncedAt,
     canWriteShared,
+    error,
   };
 
   return (
