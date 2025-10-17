@@ -1233,34 +1233,54 @@ function KPIBar({
   const tileClass =
     'min-w-0 rounded-lg bg-[color:var(--color-surface-2)]/70 px-3 py-2.5 sm:px-4 sm:py-3 shadow-[0_12px_28px_rgba(15,23,42,0.08)] transition-shadow';
 
+  const renderCurrency = (value: number) => {
+    const parts = fmtEUR.formatToParts(value || 0);
+    const currency = parts.find((part) => part.type === 'currency')?.value ?? '';
+    const numericPortion = parts
+      .filter((part) => part.type !== 'currency' && part.type !== 'literal')
+      .map((part) => part.value)
+      .join('');
+
+    return (
+      <span
+        className="inline-flex items-baseline gap-1 whitespace-nowrap"
+        style={{ fontVariantNumeric: 'tabular-nums' }}
+      >
+        <span>{numericPortion}</span>
+        <span className="text-base sm:text-lg font-semibold">{currency}</span>
+      </span>
+    );
+  };
+
   return (
     <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
       <div className={tileClass}>
         <div className="text-[11px] uppercase tracking-[0.16em] text-[color:var(--color-text)]/60">Turnover</div>
         <div
-          className="mt-1 text-lg sm:text-[1.35rem] font-semibold leading-tight text-[color:var(--color-text)]/90 break-words"
-          style={{ fontVariantNumeric: 'tabular-nums' }}
+          className="mt-1 flex items-baseline text-lg sm:text-[1.35rem] font-semibold leading-tight text-[color:var(--color-text)]/90"
         >
-          {fmtEUR.format(turnover || 0)}
+          {renderCurrency(turnover)}
         </div>
       </div>
       <div className={tileClass}>
         <div className="text-[11px] uppercase tracking-[0.16em] text-[color:var(--color-text)]/60">Margin</div>
         <div
-          className={`mt-1 text-lg sm:text-[1.35rem] font-semibold leading-tight break-words ${marginClass}`}
-          style={{ fontVariantNumeric: 'tabular-nums' }}
+          className={`mt-1 flex flex-wrap items-baseline gap-x-2 gap-y-1 text-lg sm:text-[1.35rem] font-semibold leading-tight ${marginClass}`}
         >
-          {fmtEUR.format(margin || 0)}
-          {marginPct == null ? '' : ` (${fmtPct.format(marginPct)})`}
+          {renderCurrency(margin)}
+          {marginPct == null ? null : (
+            <span className="text-sm sm:text-base font-medium opacity-80 whitespace-nowrap">
+              ({fmtPct.format(marginPct)})
+            </span>
+          )}
         </div>
       </div>
       <div className={tileClass}>
         <div className="text-[11px] uppercase tracking-[0.16em] text-[color:var(--color-text)]/60">eCPM</div>
         <div
-          className="mt-1 text-lg sm:text-[1.35rem] font-semibold leading-tight text-[color:var(--color-text)]/90 break-words"
-          style={{ fontVariantNumeric: 'tabular-nums' }}
+          className="mt-1 flex items-baseline text-lg sm:text-[1.35rem] font-semibold leading-tight text-[color:var(--color-text)]/90"
         >
-          {fmtEUR.format(ecpm || 0)}
+          {renderCurrency(ecpm)}
         </div>
       </div>
     </div>
