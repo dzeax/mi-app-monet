@@ -99,14 +99,6 @@ function SortIcon({ active, dir }: { active: boolean; dir: 'asc' | 'desc' }) {
     </svg>
   );
 }
-function DownIcon() {
-  return (
-    <svg width="12" height="12" viewBox="0 0 24 24" aria-hidden>
-      <path d="M7 10l5 5 5-5" fill="none" stroke="currentColor" strokeWidth="2"/>
-    </svg>
-  );
-}
-
 /* ====== columnas ====== */
 const COLUMN_DEFS: ColumnDef[] = [
   { id: 'date', label: 'DATE', defaultVisible: true, sortable: true, sortKey: 'date',
@@ -239,46 +231,102 @@ function activePresetLabelFromRange(range?: [string|null,string|null] | null) {
   return `${start} → ${end}`;
 }
 
-/* ====== KPI tile ====== */
-function KpiTile({
-  label, value, tone, asBadge = false, subValue, rightHint, title,
-}: {
-  label: string; value: string; tone?: 'pos' | 'warn' | 'neg' | null;
-  asBadge?: boolean; subValue?: string | null; rightHint?: string | null; title?: string;
-}) {
-  const toneText =
-    tone === 'pos'  ? 'text-[color:var(--color-primary)]' :
-    tone === 'neg'  ? 'text-[color:var(--color-accent)]' :
-    tone === 'warn' ? 'text-[color-mix(in_oklab,var(--color-accent)_58%,var(--color-primary)_42%)]'
-                    : 'opacity-90';
+function toneClassFromTier(tier: MarginTier | null) {
+  switch (tier) {
+    case 'green':
+      return 'text-[color:var(--color-primary)]';
+    case 'amber':
+      return 'text-[color-mix(in_oklab,var(--color-accent)_58%,var(--color-primary)_42%)]';
+    case 'red':
+      return 'text-[color:var(--color-accent)]';
+    default:
+      return 'text-[color:var(--color-text)]/90';
+  }
+}
 
-  const badgeClass =
-    tone === 'pos'
-      ? 'text-[color:var(--color-primary)] bg-[color-mix(in_oklab,var(--color-primary)_32%,transparent)] border border-[color-mix(in_oklab,var(--color-primary)_55%,transparent)]'
-      : tone === 'neg'
-      ? 'text-[color:var(--color-accent)] bg-[color-mix(in_oklab,var(--color-accent)_30%,transparent)] border border-[color-mix(in_oklab,var(--color-accent)_55%,transparent)]'
-      : tone === 'warn'
-      ? 'text-[color-mix(in_oklab,var(--color-accent)_58%,var(--color-primary)_42%)] bg-[color-mix(in_oklab,var(--color-accent)_22%,var(--color-primary)_22%)] border border-[color-mix(in_oklab,var(--color-accent)_45%,var(--color-primary)_20%)]'
-      : 'bg-[color-mix(in_oklab,var(--color-text)_14%,transparent)] text-[color-mix(in_oklab,var(--color-text)_90%,black)] border border-[color-mix(in_oklab,var(--color-text)_22%,transparent)]';
+function KpiHighlight({
+  label,
+  value,
+  tier = null,
+  subValue,
+  hint,
+}: {
+  label: string;
+  value: string;
+  tier?: MarginTier | null;
+  subValue?: string;
+  hint?: string;
+}) {
+  const toneClass = toneClassFromTier(tier);
 
   return (
-    <div className="rounded-lg border border-[--color-border] bg-[color:var(--color-surface-2)]/60 p-2.5 md:p-3 min-h-[68px] flex flex-col justify-between" title={title}>
-      <div className="text-[10px] md:text-[11px] uppercase tracking-wide opacity-70">{label}</div>
-      {asBadge ? (
-        <div className="mt-1.5">
-          <span className={['inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs md:text-sm font-semibold tabular-nums leading-tight', badgeClass].join(' ')}>
-            {tone === 'neg' ? <DownIcon /> : null}
-            {value}
-          </span>
-          {subValue ? <div className={['mt-1 text-[11px] md:text-xs tabular-nums leading-tight', toneText].join(' ')}>{subValue}</div> : null}
+    <div className="rounded-xl border border-[color-mix(in_oklab,var(--color-border)_65%,transparent)] bg-[color-mix(in_oklab,var(--color-surface)_92%,var(--color-surface-2))]/92 px-4 py-3 sm:px-5 sm:py-4 shadow-[0_16px_32px_rgba(15,23,42,0.12)]">
+      <span className="text-[11px] uppercase tracking-[0.16em] text-[color:var(--color-text)]/55">{label}</span>
+      <div className={['mt-2 flex items-baseline gap-2', toneClass].join(' ')} style={{ fontVariantNumeric: 'tabular-nums' }}>
+        <span className="text-xl sm:text-2xl font-semibold">{value}</span>
+        {hint ? <span className="text-xs opacity-70">{hint}</span> : null}
+      </div>
+      {subValue ? (
+        <div className={['mt-1 text-xs sm:text-sm tabular-nums', tier ? toneClass : 'text-[color:var(--color-text)]/65'].join(' ')}>
+          {subValue}
         </div>
-      ) : (
-        <div className={['mt-1 flex items-baseline gap-1.5 flex-wrap', toneText].join(' ')}>
-          <span className="text-base md:text-lg font-semibold tabular-nums leading-tight">{value}</span>
-          {rightHint ? <span className="text-[10px] md:text-xs opacity-70">{rightHint}</span> : null}
-        </div>
-      )}
+      ) : null}
     </div>
+  );
+}
+
+function KpiSummaryPanel({
+  periodLabel,
+  turnover,
+  marginPct,
+  marginValue,
+  marginTier,
+  vSent,
+  ecpm,
+  routing,
+  qty,
+}: {
+  periodLabel: string;
+  turnover: string;
+  marginPct: string;
+  marginValue: string;
+  marginTier: MarginTier | null;
+  vSent: string;
+  ecpm: string;
+  routing: string;
+  qty: string;
+}) {
+  return (
+    <aside className="relative h-full">
+      <div className="absolute inset-0 rounded-2xl border border-[color-mix(in_oklab,var(--color-border)_65%,transparent)] shadow-[0_22px_48px_rgba(15,23,42,0.16)] bg-[color-mix(in_oklab,var(--color-surface)_90%,var(--color-primary)_10%)]/96 before:absolute before:inset-0 before:bg-[radial-gradient(circle_at_top_right,rgba(14,165,233,0.22),transparent_58%)] before:opacity-70 before:content-['']" />
+      <div className="relative z-[1] flex h-full flex-col rounded-2xl px-4 py-4 md:px-5 md:py-5 gap-4 overflow-hidden">
+        <header className="flex items-start justify-between gap-3">
+          <div>
+            <span className="text-[11px] uppercase tracking-[0.22em] text-[color:var(--color-text)]/55">Performance Summary</span>
+            <h3 className="text-lg md:text-xl font-semibold text-[color:var(--color-text)]/92 mt-1">Live KPIs</h3>
+          </div>
+          <span className="rounded-full px-3 py-1 text-[11px] font-medium tabular-nums bg-[color-mix(in_oklab,var(--color-surface)_82%,var(--color-primary)_18%)]/80 text-[color:var(--color-text)]/80 shadow-inner">
+            {periodLabel}
+          </span>
+        </header>
+
+        <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 md:gap-4">
+          <KpiHighlight label="Turnover" value={turnover} />
+          <KpiHighlight label="Margin (%)" value={marginPct} subValue={marginValue} tier={marginTier} />
+          <KpiHighlight label="V Sent" value={vSent} />
+          <KpiHighlight label="eCPM" value={ecpm} hint="€/k" />
+        </div>
+
+        <footer className="mt-auto flex flex-wrap items-center justify-between gap-3 text-xs md:text-sm text-[color:var(--color-text)]/70 tabular-nums">
+          <span>
+            Routing <strong className="ml-1 text-[color:var(--color-text)]/85">{routing}</strong>
+          </span>
+          <span>
+            QTY <strong className="ml-1 text-[color:var(--color-text)]/85">{qty}</strong>
+          </span>
+        </footer>
+      </div>
+    </aside>
   );
 }
 
@@ -451,18 +499,7 @@ export default function CampaignTable() {
   const pageRows = sortedAll.slice(start, end);
 
   const periodLabel = activePresetLabelFromRange(engine.filters.dateRange ?? null) || 'All data';
-  const marginTone = (() => {
-    const tier = marginPctTier(summary.marginPct);
-    return tier === 'green' ? 'pos' : tier === 'amber' ? 'warn' : tier === 'red' ? 'neg' : null;
-  })();
-  const marginToneText =
-    marginTone === 'pos'
-      ? 'text-[color:var(--color-primary)]'
-      : marginTone === 'neg'
-      ? 'text-[color:var(--color-accent)]'
-      : marginTone === 'warn'
-      ? 'text-[color-mix(in_oklab,var(--color-accent)_58%,var(--color-primary)_42%)]'
-      : 'opacity-90';
+  const marginTier = marginPctTier(summary.marginPct);
 
   const handleRoutingOverride = ({ scope, mode, rate }: BulkRoutingOverridePayload) => {
     const target = scope === 'all' ? sortedAll : pageRows;
@@ -482,22 +519,17 @@ export default function CampaignTable() {
   }
 
   /* ====== Medición de alturas para la lámina / offset ====== */
-  const refFilters = useRef<HTMLDivElement>(null);
-  const refKpiStrip = useRef<HTMLTableRowElement>(null);
-  const [sizes, setSizes] = useState({ filters: 0, kpiStrip: 0 });
+  const refSticky = useRef<HTMLDivElement>(null);
+  const [stickyHeight, setStickyHeight] = useState(0);
 
   const bandGapPx = 16; // debe casar con --band-gap-y
 
   useEffect(() => {
     const update = () => {
-      setSizes({
-        filters: refFilters.current?.offsetHeight ?? 0,
-        kpiStrip: refKpiStrip.current?.offsetHeight ?? 0,
-      });
+      setStickyHeight(refSticky.current?.offsetHeight ?? 0);
     };
     const ro = new ResizeObserver(update);
-    if (refFilters.current) ro.observe(refFilters.current);
-    if (refKpiStrip.current) ro.observe(refKpiStrip.current);
+    if (refSticky.current) ro.observe(refSticky.current);
     window.addEventListener('resize', update);
     update();
     return () => {
@@ -507,7 +539,7 @@ export default function CampaignTable() {
   }, []);
 
   // Offset donde debe “pegarse” el thead (debajo del stack sticky)
-  const stackedBottom = `calc(var(--content-sticky-top) + ${sizes.filters}px + ${bandGapPx}px + ${sizes.kpiStrip}px)`;
+  const stackedBottom = `calc(var(--content-sticky-top) + ${stickyHeight}px + ${bandGapPx}px)`;
 
   /* === Header de columna sticky — usa la regla CSS global === */
   const Th = ({ col }: { col: ColumnDef }) => {
@@ -551,32 +583,48 @@ export default function CampaignTable() {
 
   return (
     <div className="w-full px-2 md:px-3 lg:px-4">
-      {/* ===== Sticky stack: Filtros + Backplate + KPIs ===== */}
+      {/* ===== Sticky stack: filtros + KPIs ===== */}
       <div
         className="-mx-2 md:-mx-3 lg:-mx-4 px-2 md:px-3 lg:px-4"
         style={{ ['--band-gap-y' as any]: `${bandGapPx}px` }}
       >
-        {/* Filtros (sticky) */}
         <div
-          ref={refFilters}
+          ref={refSticky}
           style={{
             position: 'sticky',
             top: 'var(--content-sticky-top)',
             zIndex: 60,
             marginBottom: 'var(--band-gap-y)',
           }}
+          className="grid grid-cols-1 lg:grid-cols-[minmax(0,1.85fr)_minmax(0,1fr)] gap-4 lg:gap-5 items-stretch"
         >
-          <CampaignFilters
-            filters={engine.filters}
-            updateFilters={engine.updateFilters}
-            resetFilters={engine.resetFilters}
-            options={options}
-            pending={engine.pending}
-            onOpenColumns={() => setPickerOpen(true)}
-            onOpenExport={() => setOpenExport(true)}
-            exportCount={sortedAll.length}
-            onOpenRoutingOverride={isAdmin ? () => setOpenRoutingOverride(true) : undefined}
-            canOverrideRouting={isAdmin}
+          <div className="h-full flex">
+            <div className="flex-1 [&>section]:h-full [&>section]:flex [&>section]:flex-col">
+              <CampaignFilters
+                filters={engine.filters}
+                updateFilters={engine.updateFilters}
+                resetFilters={engine.resetFilters}
+                options={options}
+                pending={engine.pending}
+                onOpenColumns={() => setPickerOpen(true)}
+                onOpenExport={() => setOpenExport(true)}
+                exportCount={sortedAll.length}
+                onOpenRoutingOverride={isAdmin ? () => setOpenRoutingOverride(true) : undefined}
+                canOverrideRouting={isAdmin}
+              />
+            </div>
+          </div>
+
+          <KpiSummaryPanel
+            periodLabel={periodLabel}
+            turnover={fmtEUR.format(summary.turnover)}
+            marginPct={summary.marginPct == null ? '—' : fmtPct.format(summary.marginPct)}
+            marginValue={fmtEUR.format(summary.margin)}
+            marginTier={marginTier}
+            vSent={fmtInt.format(summary.vSent)}
+            ecpm={fmtEUR.format(summary.weightedEcpm)}
+            routing={fmtEUR.format(summary.routingCosts)}
+            qty={fmtInt.format(summary.qty)}
           />
         </div>
 
@@ -586,7 +634,7 @@ export default function CampaignTable() {
           style={{
             position: 'sticky',
             top: 'var(--content-sticky-top)',
-            zIndex: 20,      // por debajo del header KPI (55) y de los filtros (60)
+            zIndex: 20,      // por debajo del stack sticky (60)
             height: 0,
             pointerEvents: 'none',
           }}
@@ -596,7 +644,7 @@ export default function CampaignTable() {
               position: 'absolute',
               left: '-0.5rem',
               right: '-0.5rem',
-              height: `calc(${sizes.filters}px + ${bandGapPx}px + ${sizes.kpiStrip}px)`,
+              height: `calc(${stickyHeight}px + ${bandGapPx}px)`,
               background: 'var(--color-bg-outer)',
               borderBottom: '1px solid var(--color-border)',
               boxShadow: '0 6px 16px rgba(0,0,0,.06)',
@@ -605,40 +653,6 @@ export default function CampaignTable() {
         </div>
 
       </div>
-
-      <section
-        role="region"
-        aria-labelledby="kpi-recap-title"
-        aria-live="polite"
-        className="mt-5"
-      >
-        <div className="rounded-xl border border-[--color-border] bg-[color:var(--color-surface)]/85 backdrop-blur-md shadow-lg px-3 md:px-4 py-3 md:py-3.5">
-          <h2 id="kpi-recap-title" className="sr-only">Resumen de KPIs</h2>
-
-          <div className="flex flex-wrap items-center justify-between gap-3 text-[11px] md:text-xs">
-            <span className="rounded-full px-2 py-1 bg-[color-mix(in_oklab,var(--color-text)_10%,transparent)] text-[color-mix(in_oklab,var(--color-text)_85%,black)]">
-              {periodLabel}
-            </span>
-            <span className="tabular-nums text-[color-mix(in_oklab,var(--color-text)_70%,black)]">
-              Routing: <strong>{fmtEUR.format(summary.routingCosts)}</strong> • QTY: <strong>{fmtInt.format(summary.qty)}</strong>
-            </span>
-          </div>
-
-          <div className="mt-3 grid grid-cols-2 sm:grid-cols-4 gap-2 md:gap-3">
-            <KpiTile label="Turnover" value={fmtEUR.format(summary.turnover)} title="Suma de turnover del dataset filtrado" />
-            <KpiTile
-              label="Margin (%)"
-              value={summary.marginPct == null ? '—' : fmtPct.format(summary.marginPct)}
-              tone={marginTone}
-              asBadge
-              subValue={fmtEUR.format(summary.margin)}
-              title="Margin% = Margin / Turnover"
-            />
-            <KpiTile label="V Sent" value={fmtInt.format(summary.vSent)} title="Volumen de envíos en el periodo" />
-            <KpiTile label="eCPM" value={fmtEUR.format(summary.weightedEcpm)} rightHint="€/k" title="eCPM ponderado = Σ(ecpm·vSent) / Σ(vSent)" />
-          </div>
-        </div>
-      </section>
 
       {/* ColumnPicker */}
       {pickerOpen && (
@@ -661,49 +675,6 @@ export default function CampaignTable() {
       >
         <table className="table min-w-[1280px] tabular-nums">
           <thead>
-            <tr
-              ref={refKpiStrip}
-              style={{
-                position: 'sticky',
-                top: `calc(var(--content-sticky-top) + ${sizes.filters}px + ${bandGapPx}px)`,
-                zIndex: 55,
-              }}
-            >
-              <th colSpan={visibleCols.length + 1} className="p-0">
-                <div className="bg-[color:var(--color-surface)]/94 backdrop-blur-md border-b border-[--color-border] shadow-sm">
-                  <div className="px-3 md:px-4 py-2 flex flex-wrap items-center justify-between gap-3">
-                    <div className="flex flex-wrap items-center gap-x-4 gap-y-1 text-[11px] md:text-xs">
-                      <span className="rounded-full px-2 py-1 bg-[color-mix(in_oklab,var(--color-text)_10%,transparent)] text-[color-mix(in_oklab,var(--color-text)_85%,black)]">
-                        {periodLabel}
-                      </span>
-                      <span className="flex items-baseline gap-1.5 tabular-nums">
-                        <span className="uppercase tracking-wide opacity-60">Turnover</span>
-                        <span className="text-sm sm:text-base font-semibold text-[color:var(--color-text)]/90">{fmtEUR.format(summary.turnover)}</span>
-                      </span>
-                      <span className="flex items-baseline gap-1.5 tabular-nums">
-                        <span className="uppercase tracking-wide opacity-60">Margin</span>
-                        <span className={`text-sm sm:text-base font-semibold ${marginToneText}`}>
-                          {summary.marginPct == null ? '—' : fmtPct.format(summary.marginPct)}
-                        </span>
-                        <span className="text-[10px] md:text-[11px] opacity-60">({fmtEUR.format(summary.margin)})</span>
-                      </span>
-                      <span className="flex items-baseline gap-1.5 tabular-nums">
-                        <span className="uppercase tracking-wide opacity-60">V Sent</span>
-                        <span className="text-sm sm:text-base font-semibold text-[color:var(--color-text)]/90">{fmtInt.format(summary.vSent)}</span>
-                      </span>
-                      <span className="flex items-baseline gap-1.5 tabular-nums">
-                        <span className="uppercase tracking-wide opacity-60">eCPM</span>
-                        <span className="text-sm sm:text-base font-semibold text-[color:var(--color-text)]/90">{fmtEUR.format(summary.weightedEcpm)}</span>
-                        <span className="text-[10px] md:text-[11px] opacity-60">€/k</span>
-                      </span>
-                    </div>
-                    <span className="tabular-nums text-[11px] md:text-xs text-[color-mix(in_oklab,var(--color-text)_70%,black)]">
-                      Routing: <strong>{fmtEUR.format(summary.routingCosts)}</strong> • QTY: <strong>{fmtInt.format(summary.qty)}</strong>
-                    </span>
-                  </div>
-                </div>
-              </th>
-            </tr>
             <tr>
               {visibleCols.map(col => (
                 <Th key={col.id} col={col} />
