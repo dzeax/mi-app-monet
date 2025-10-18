@@ -19,8 +19,6 @@ export default function CampaignFilters({
   exportCount,            // ← NUEVO
   onOpenRoutingOverride,
   canOverrideRouting = false,
-  summaryKpis,
-  onOpenKpiDetails,
 }: {
   filters: Filters;
   updateFilters: (patch: Partial<Filters>) => void;
@@ -38,18 +36,6 @@ export default function CampaignFilters({
   exportCount?: number;        // ← NUEVO
   onOpenRoutingOverride?: () => void;
   canOverrideRouting?: boolean;
-  summaryKpis?: {
-    periodLabel: string;
-    turnover: string;
-    marginPct: string;
-    marginValue: string;
-    marginTone: 'pos' | 'warn' | 'neg' | null;
-    vSent: string;
-    ecpm: string;
-    routing: string;
-    qty: string;
-  };
-  onOpenKpiDetails?: () => void;
 }) {
   const [qDraft, setQDraft] = useState(filters.q ?? '');
   useEffect(() => { setQDraft(filters.q ?? ''); }, [filters.q]);
@@ -302,82 +288,58 @@ export default function CampaignFilters({
             </button>
           </div>
 
-          <div className="flex-1">
-            <div className="flex flex-wrap items-center justify-end gap-3 md:gap-4">
-              {summaryKpis ? (
-                <div className="flex flex-wrap items-center justify-end gap-2 md:gap-2.5 text-[11px] md:text-xs">
-                  <span className="rounded-full px-2 py-1 bg-[color-mix(in_oklab,var(--color-text)_10%,transparent)] text-[color-mix(in_oklab,var(--color-text)_85%,black)]">
-                    {summaryKpis.periodLabel}
-                  </span>
-                  <KpiChip label="Turnover" value={summaryKpis.turnover} />
-                  <KpiChip label="Margin" value={summaryKpis.marginPct} subValue={summaryKpis.marginValue} tone={summaryKpis.marginTone} />
-                  <KpiChip label="V Sent" value={summaryKpis.vSent} />
-                  <KpiChip label="eCPM" value={summaryKpis.ecpm} hint="€/k" />
-                  {onOpenKpiDetails ? (
-                    <button
-                      type="button"
-                      className="text-xs px-3 py-1.5 rounded-md border border-[--color-border] hover:border-[--color-primary] hover:bg-[color-mix(in_oklab,var(--color-primary)_12%,transparent)] transition-colors"
-                      onClick={onOpenKpiDetails}
-                      aria-haspopup="dialog"
-                    >
-                      Details
-                    </button>
-                  ) : null}
-                </div>
-              ) : null}
+          <div className="flex-1" />
 
-              {/* === Acciones: Primario | divisor | Secundario === */}
-              <div className="flex items-center gap-2 md:gap-3">
-                {/* Grupo primario */}
-                <div className="flex items-center gap-2 md:gap-3">
-                  <button onClick={() => updateFilters({ q: qDraft })} className="btn-primary">Apply</button>
-                  <button onClick={() => { setQDraft(''); resetFilters(); }} className="btn-ghost">Reset</button>
-                </div>
+          {/* === Acciones: Primario | divisor | Secundario === */}
+          <div className="flex items-center gap-2 md:gap-3">
+            {/* Grupo primario */}
+            <div className="flex items-center gap-2 md:gap-3">
+              <button onClick={() => updateFilters({ q: qDraft })} className="btn-primary">Apply</button>
+              <button onClick={() => { setQDraft(''); resetFilters(); }} className="btn-ghost">Reset</button>
+            </div>
 
-                {/* Divisor visual */}
-                <div className="h-6 w-px bg-[--color-border] mx-1 md:mx-2" aria-hidden />
+            {/* Divisor visual */}
+            <div className="h-6 w-px bg-[--color-border] mx-1 md:mx-2" aria-hidden />
 
-                {/* Grupo secundario */}
-                <div className="flex items-center gap-2 md:gap-2.5">
-                  <button
-                    type="button"
-                    className="btn-ghost text-sm px-3 py-1.5"
-                    aria-haspopup="dialog"
-                    title="Show/Hide columns"
-                    onClick={() => onOpenColumns?.()}
-                  >
-                    Columns…
-                  </button>
+            {/* Grupo secundario */}
+            <div className="flex items-center gap-2 md:gap-2.5">
+              <button
+                type="button"
+                className="btn-ghost text-sm px-3 py-1.5"
+                aria-haspopup="dialog"
+                title="Show/Hide columns"
+                onClick={() => onOpenColumns?.()}
+              >
+                Columns…
+              </button>
 
-                  {canOverrideRouting && onOpenRoutingOverride && (
-                    <button
-                      type="button"
-                      className="text-sm px-3 py-1.5 rounded-md border border-[--color-border] hover:border-[--color-primary] hover:bg-[color-mix(in_oklab,var(--color-primary)_10%,transparent)] transition-colors inline-flex items-center gap-1.5"
-                      aria-haspopup="dialog"
-                      title="Override routing rate"
-                      onClick={() => onOpenRoutingOverride?.()}
-                    >
-                      <span>Routing rate</span>
-                    </button>
+              {canOverrideRouting && onOpenRoutingOverride && (
+                <button
+                  type="button"
+                  className="text-sm px-3 py-1.5 rounded-md border border-[--color-border] hover:border-[--color-primary] hover:bg-[color-mix(in_oklab,var(--color-primary)_10%,transparent)] transition-colors inline-flex items-center gap-1.5"
+                  aria-haspopup="dialog"
+                  title="Override routing rate"
+                  onClick={() => onOpenRoutingOverride?.()}
+                >
+                  <span>Routing rate</span>
+                </button>
+              )}
+
+              {onOpenExport && (
+                <button
+                  type="button"
+                  className="text-sm px-3 py-1.5 rounded-md border border-[--color-border] hover:border-[--color-primary] hover:bg-[color-mix(in_oklab,var(--color-primary)_12%,transparent)] transition-colors inline-flex items-center gap-1.5"
+                  aria-haspopup="dialog"
+                  title="Export current view"
+                  onClick={() => onOpenExport?.()}
+                >
+                  <DownloadIcon />
+                  <span>Export</span>
+                  {typeof exportCount === 'number' && exportCount > 0 && (
+                    <span className="ml-0.5 text-[10px] opacity-70">({exportCount})</span>
                   )}
-
-                  {onOpenExport && (
-                    <button
-                      type="button"
-                      className="text-sm px-3 py-1.5 rounded-md border border-[--color-border] hover:border-[--color-primary] hover:bg-[color-mix(in_oklab,var(--color-primary)_12%,transparent)] transition-colors inline-flex items-center gap-1.5"
-                      aria-haspopup="dialog"
-                      title="Export current view"
-                      onClick={() => onOpenExport?.()}
-                    >
-                      <DownloadIcon />
-                      <span>Export</span>
-                      {typeof exportCount === 'number' && exportCount > 0 && (
-                        <span className="ml-0.5 text-[10px] opacity-70">({exportCount})</span>
-                      )}
-                    </button>
-                  )}
-                </div>
-              </div>
+                </button>
+              )}
             </div>
           </div>
         </div>
@@ -440,43 +402,6 @@ function DownloadIcon() {
       <path d="M7 10l5 5 5-5"/>
       <path d="M12 15V3"/>
     </svg>
-  );
-}
-
-function toneToTextClass(tone: 'pos' | 'warn' | 'neg' | null | undefined) {
-  if (tone === 'pos') return 'text-[color:var(--color-primary)]';
-  if (tone === 'neg') return 'text-[color:var(--color-accent)]';
-  if (tone === 'warn') return 'text-[color-mix(in_oklab,var(--color-accent)_58%,var(--color-primary)_42%)]';
-  return 'text-[color:var(--color-text)]/85';
-}
-
-function KpiChip({
-  label,
-  value,
-  tone,
-  subValue,
-  hint,
-}: {
-  label: string;
-  value: string;
-  tone?: 'pos' | 'warn' | 'neg' | null;
-  subValue?: string;
-  hint?: string;
-}) {
-  const valueColor = toneToTextClass(tone ?? null);
-  const subColor = tone ? valueColor : 'text-[color:var(--color-text)]/60';
-
-  return (
-    <span className="inline-flex flex-col justify-center rounded-full border border-[--color-border] bg-[color:var(--color-surface-2)]/60 px-2.5 py-1 min-w-[84px]">
-      <span className="uppercase tracking-wide text-[10px] opacity-60">{label}</span>
-      <span className={['text-xs font-semibold tabular-nums leading-tight', valueColor].join(' ')}>
-        {value}
-        {hint ? <span className="ml-1 text-[10px] font-normal opacity-70">{hint}</span> : null}
-      </span>
-      {subValue ? (
-        <span className={['text-[10px] tabular-nums leading-tight', subColor].join(' ')}>{subValue}</span>
-      ) : null}
-    </span>
   );
 }
 
