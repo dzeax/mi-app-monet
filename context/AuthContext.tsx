@@ -77,11 +77,9 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   useEffect(() => {
     let mounted = true;
 
-    (async () => {
-      const { data: sessionData } = await supabase.auth.getSession();
+    const applySession = async (session: Awaited<ReturnType<typeof supabase.auth.getSession>>['data']['session']) => {
       if (!mounted) return;
-      const authUser = sessionData.session?.user ?? null;
-
+      const authUser = session?.user ?? null;
       if (authUser) {
         const profile = await fetchProfile(supabase, authUser.id).catch(() => FALLBACK_PROFILE);
         if (!mounted) return;
@@ -97,6 +95,11 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         setUser(null);
         setRole(null);
       }
+    };
+
+    (async () => {
+      const { data: sessionData } = await supabase.auth.getSession();
+      await applySession(sessionData.session);
       setLoading(false);
     })();
 
@@ -112,28 +115,33 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         console.warn('Failed to sync auth session', error);
       }
 
-      if (!mounted) return;
-      const authUser = session?.user ?? null;
-      if (authUser) {
-        const profile = await fetchProfile(supabase, authUser.id).catch(() => FALLBACK_PROFILE);
-        setUser({
-          id: authUser.id,
-          email: authUser.email,
-          role: profile.role,
-          displayName: profile.displayName,
-          avatarUrl: profile.avatarUrl,
-        });
-        setRole(profile.role);
-      } else {
-        setUser(null);
-        setRole(null);
-      }
+      await applySession(session ?? null);
       setLoading(false);
     });
+
+    const ensureSession = async () => {
+      const { data } = await supabase.auth.getSession();
+      await applySession(data.session);
+      setLoading(false);
+    };
+
+    const onVisibility = () => {
+      if (document.visibilityState === 'visible') {
+        void ensureSession();
+      }
+    };
+    const onFocus = () => {
+      void ensureSession();
+    };
+
+    window.addEventListener('focus', onFocus);
+    document.addEventListener('visibilitychange', onVisibility);
 
     return () => {
       mounted = false;
       sub.subscription.unsubscribe();
+      window.removeEventListener('focus', onFocus);
+      document.removeEventListener('visibilitychange', onVisibility);
     };
   }, [supabase]);
 
