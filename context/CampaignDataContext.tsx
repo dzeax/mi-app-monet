@@ -10,7 +10,7 @@ import {
   useState,
 } from 'react';
 
-import type { PostgrestError } from '@supabase/supabase-js';
+import type { PostgrestError, SupabaseClient } from '@supabase/supabase-js';
 
 import type { CampaignRow } from '@/types/campaign';
 import { useAuth } from '@/context/AuthContext';
@@ -82,6 +82,25 @@ function logError(scope: string, error: unknown | PostgrestError) {
   if (!error) return;
   // eslint-disable-next-line no-console
   console.error(`[CampaignData] ${scope}`, error);
+}
+
+async function ensureSession(client: SupabaseClient) {
+  try {
+    const { data, error } = await client.auth.getSession();
+    if (error) throw error;
+    if (data?.session) return data.session;
+  } catch (err) {
+    logError('ensureSession/getSession', err as PostgrestError);
+  }
+
+  try {
+    const { data, error } = await client.auth.refreshSession();
+    if (error) throw error;
+    if (data?.session) return data.session;
+  } catch (err) {
+    logError('ensureSession/refreshSession', err as PostgrestError);
+  }
+  return null;
 }
 
 export function CampaignDataProvider({ children }: { children: React.ReactNode }) {
@@ -217,6 +236,7 @@ export function CampaignDataProvider({ children }: { children: React.ReactNode }
       setRows((prev) => [optimistic, ...prev]);
 
       try {
+        await ensureSession(supabase);
         const { data, error } = await supabase
           .from<CampaignDbRow>('campaigns')
           .insert(mapToDb(base, user?.id ?? null))
@@ -260,6 +280,7 @@ export function CampaignDataProvider({ children }: { children: React.ReactNode }
       );
 
       try {
+        await ensureSession(supabase);
         const payload = mapToDb(merged);
         const response = await fetch('/api/campaigns/update', {
           method: 'PATCH',
