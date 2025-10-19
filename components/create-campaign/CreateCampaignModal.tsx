@@ -1,7 +1,7 @@
 ﻿'use client';
 
 import { createPortal } from 'react-dom';
-import { Children, isValidElement, useEffect, useRef, useState } from 'react';
+import { Children, isValidElement, useCallback, useEffect, useRef, useState } from 'react';
 import { useForm } from 'react-hook-form';
 import { z } from 'zod';
 import { zodResolver } from '@hookform/resolvers/zod';
@@ -165,7 +165,6 @@ export default function CreateCampaignModal({
       (c: any) => (c?.name || '').trim().toLowerCase() === (name || '').trim().toLowerCase()
     );
 
-  const submitModeRef = useRef<'save' | 'save_add'>('save');
   const [openAddCampaign, setOpenAddCampaign] = useState(false);
   const [openAddPartner, setOpenAddPartner] = useState(false);
   const [openAddDatabase, setOpenAddDatabase] = useState(false);
@@ -272,7 +271,6 @@ export default function CreateCampaignModal({
     (isSubmitted || (touchedFields as any)[name] || (dirtyFields as any)[name]);
 
   const firstRef = useRef<HTMLInputElement>(null);
-  const formRef = useRef<HTMLFormElement>(null);
   const trapRef = useRef<HTMLDivElement>(null);
 
   const openDatePicker = (field?: HTMLInputElement | null) => {
@@ -364,109 +362,115 @@ export default function CreateCampaignModal({
   }, [price, qty, vSent, setValue]);
 
   // EnvÃƒÂ­o
-  const onSubmit = async (data: FormValues) => {
-    try {
-      const modeToApply = submitModeRef.current;
-      const _price = parseNum(data.price);
-      const _qty = parseNum(data.qty);
-      const _vSent = parseNum(data.vSent);
-      const routingCosts = Number(((_vSent / 1000) * 0.18).toFixed(2));
-      const turnover = Number((_qty * _price).toFixed(2));
-      const margin = Number((turnover - routingCosts).toFixed(2));
-      const ecpm = Number((_vSent > 0 ? (turnover / _vSent) * 1000 : 0).toFixed(2));
+  const persistCampaign = useCallback(
+    async (data: FormValues, submitMode: 'save' | 'save_add') => {
+      try {
+        const _price = parseNum(data.price);
+        const _qty = parseNum(data.qty);
+        const _vSent = parseNum(data.vSent);
+        const routingCosts = Number(((_vSent / 1000) * 0.18).toFixed(2));
+        const turnover = Number((_qty * _price).toFixed(2));
+        const margin = Number((turnover - routingCosts).toFixed(2));
+        const ecpm = Number((_vSent > 0 ? (turnover / _vSent) * 1000 : 0).toFixed(2));
 
-      const payload: Omit<CampaignRow, 'id'> = {
-        date: data.date,
-        campaign: data.campaign,
-        advertiser: data.advertiser,
-        invoiceOffice: data.invoiceOffice,
-        partner: data.partner,
-        theme: data.theme,
-        price: _price,
-        priceCurrency: data.priceCurrency || 'EUR',
-        type: data.type,
-        vSent: _vSent,
-        routingCosts,
-        qty: _qty,
-        turnover,
-        margin,
-        ecpm,
-        database: data.database,
-        geo: data.geo,
-        databaseType: data.databaseType,
-      };
+        const payload: Omit<CampaignRow, 'id'> = {
+          date: data.date,
+          campaign: data.campaign,
+          advertiser: data.advertiser,
+          invoiceOffice: data.invoiceOffice,
+          partner: data.partner,
+          theme: data.theme,
+          price: _price,
+          priceCurrency: data.priceCurrency || 'EUR',
+          type: data.type,
+          vSent: _vSent,
+          routingCosts,
+          qty: _qty,
+          turnover,
+          margin,
+          ecpm,
+          database: data.database,
+          geo: data.geo,
+          databaseType: data.databaseType,
+        };
 
-      if (mode === 'edit' && initialRow) {
-        const ok = await updateCampaign(initialRow.id, payload);
-        if (!ok) {
-          showToast('Could not update campaign. Please try again.', { variant: 'error' });
+        if (mode === 'edit' && initialRow) {
+          const ok = await updateCampaign(initialRow.id, payload);
+          if (!ok) {
+            showToast('Could not update campaign. Please try again.', { variant: 'error' });
+            return;
+          }
+          showToast('Campaign updated successfully');
+          onSaved?.(initialRow.id);
+          onClose();
           return;
         }
-        showToast('Campaign updated successfully');
-        onSaved?.(initialRow.id);
-        onClose();
-        return;
-      }
 
-      const newId = await addCampaign(payload);
-      if (!newId) {
-        showToast('Could not save campaign. Please try again.', { variant: 'error' });
-        return;
-      }
-      showToast(
-        modeToApply === 'save_add' ? 'Campaign saved. Add another...' : 'Campaign saved successfully'
-      );
+        const newId = await addCampaign(payload);
+        if (!newId) {
+          showToast('Could not save campaign. Please try again.', { variant: 'error' });
+          return;
+        }
+        showToast(
+          submitMode === 'save_add' ? 'Campaign saved. Add another...' : 'Campaign saved successfully'
+        );
 
-      if (modeToApply === 'save_add') {
-        reset();
-        setTimeout(() => firstRef.current?.focus(), 0);
-      } else {
-        reset();
-        onSaved?.(newId);
-        onClose();
+        if (submitMode === 'save_add') {
+          reset();
+          setTimeout(() => firstRef.current?.focus(), 0);
+        } else {
+          reset();
+          onSaved?.(newId);
+          onClose();
+        }
+      } catch (e) {
+        console.error(e);
+        showToast('Something went wrong while saving', { variant: 'error' });
       }
-      submitModeRef.current = 'save';
-    } catch (e) {
-      console.error(e);
-      showToast('Something went wrong while saving', { variant: 'error' });
-    } finally {
-      if (submitModeRef.current !== 'save') {
-        submitModeRef.current = 'save';
-      }
-    }
-  };
+    },
+    [addCampaign, initialRow, mode, onClose, onSaved, reset, updateCampaign]
+  );
 
-  const onInvalid = () => {
+  const onInvalid = useCallback(() => {
     showToast('Please fix the highlighted fields', { variant: 'error' });
-  };
+  }, []);
 
-  const requestClose = () => {
+  const submitWithMode = useCallback(
+    (submitMode: 'save' | 'save_add') =>
+      handleSubmit((formData) => persistCampaign(formData, submitMode), onInvalid)(),
+    [handleSubmit, onInvalid, persistCampaign]
+  );
+
+  const requestClose = useCallback(() => {
     if (mode === 'edit' && isDirty) {
       const ok = confirm('You have unsaved changes. Discard them?');
       if (!ok) return;
     }
     onClose();
-  };
+  }, [isDirty, mode, onClose]);
 
   // ESC + foco inicial + atajos
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
-      if (e.key === 'Escape') requestClose();
+      if (e.key === 'Escape') {
+        requestClose();
+        return;
+      }
       if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 's') {
         e.preventDefault();
-        submitModeRef.current = 'save';
-        formRef.current?.requestSubmit();
+        void submitWithMode('save');
+        return;
       }
       const target = e.target as HTMLElement | null;
       const role = target?.getAttribute?.('role');
       if (!e.ctrlKey && !e.metaKey && !e.altKey && e.key === 'Enter' && role !== 'combobox') {
-        submitModeRef.current = 'save';
+        void submitWithMode('save');
       }
     };
     document.addEventListener('keydown', onKey);
     setTimeout(() => firstRef.current?.focus(), 0);
     return () => document.removeEventListener('keydown', onKey);
-  }, []); // eslint-disable-line
+  }, [requestClose, submitWithMode]);
 
   // Focus trap
   useEffect(() => {
@@ -579,9 +583,8 @@ export default function CreateCampaignModal({
           <div className="edge-fade edge-top" aria-hidden />
 
           <form
-            ref={formRef}
             id="create-edit-campaign-form"
-            onSubmit={handleSubmit(onSubmit, onInvalid)}
+            onSubmit={handleSubmit((formData) => persistCampaign(formData, 'save'), onInvalid)}
             className="grid gap-4 xl:grid-cols-12 items-start"
           >
             <div className="col-span-12 xl:col-span-7 flex flex-col gap-4">
@@ -1068,16 +1071,15 @@ export default function CreateCampaignModal({
                 type="button"
                 disabled={isSubmitting}
                 className="btn-ghost"
-                onClick={() => { submitModeRef.current = 'save_add'; formRef.current?.requestSubmit(); }}
+                onClick={() => { void submitWithMode('save_add'); }}
               >
                 Save & add another
               </button>
             )}
             <button
-              type="button"
+              type="submit"
               disabled={isSubmitting}
               className="btn-primary"
-              onClick={() => { submitModeRef.current = 'save'; formRef.current?.requestSubmit(); }}
             >
               {isSubmitting ? 'Saving...' : mode === 'edit' ? 'Save changes' : 'Save'}
             </button>
