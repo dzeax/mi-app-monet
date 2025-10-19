@@ -160,18 +160,22 @@ export default function CampaignFilters({
   const geoSelectOptions = useMemo(() => {
     return options.geos.map((geo) => {
       const canonical = canonicalGeo(geo);
-      const readable = canonical ? geoLabel(canonical) : geo;
-      const label = readable ? `${geo} — ${readable}` : geo;
-      return { value: geo, label, geo };
+      const readable = canonical ? geoLabel(canonical) : undefined;
+      const codeNote = canonical && canonical !== geo ? `, ${canonical}` : '';
+      const title = readable ? `${geo} (${readable}${codeNote})` : geo;
+      return { value: geo, label: geo, geo, title };
     });
   }, [options.geos]);
 
   const databaseSelectOptions = useMemo(() => {
-    return options.databases.map((name) => ({
-      value: name,
-      label: name,
-      geo: databaseGeoMap[name],
-    }));
+    return options.databases.map((name) => {
+      const geo = databaseGeoMap[name];
+      const geoCanonical = canonicalGeo(geo);
+      const readable = geoCanonical ? geoLabel(geoCanonical) : undefined;
+      const codeNote = geoCanonical && readable ? ` (${geoCanonical})` : '';
+      const title = readable ? `${name} — ${readable}${codeNote}` : name;
+      return { value: name, label: name, geo, title };
+    });
   }, [options.databases, databaseGeoMap]);
 
   const setTypes = useCallback((value: string) => {
@@ -565,6 +569,7 @@ type FlagSelectOption = {
   value: string;
   label: string;
   geo?: string | null;
+  title?: string;
 };
 
 type FlagSelectProps = {
@@ -638,6 +643,7 @@ function FlagSelect({
         aria-expanded={open}
         aria-controls={open ? listId : undefined}
         disabled={disabled}
+        title={selected?.title ?? allLabel}
       >
         {selected ? (
           <FlagOptionContent option={selected} />
@@ -673,6 +679,7 @@ function FlagSelect({
                 handleSelect(ALL);
               }
             }}
+            title={allLabel}
           >
             <span className="flag-option__label">{allLabel}</span>
           </li>
@@ -690,6 +697,7 @@ function FlagSelect({
                   handleSelect(opt.value);
                 }
               }}
+              title={opt.title ?? opt.label}
             >
               <FlagOptionContent option={opt} />
             </li>
@@ -702,7 +710,7 @@ function FlagSelect({
 
 function FlagOptionContent({ option }: { option: FlagSelectOption }) {
   return (
-    <span className="flag-option">
+    <span className="flag-option" title={option.title ?? option.label}>
       <FlagGlyph geo={option.geo} />
       <span className="flag-option__label">{option.label}</span>
     </span>
@@ -751,5 +759,4 @@ function CalendarIcon() {
     case 'lastMonth': return 'Last month';
   }
 }
-
 

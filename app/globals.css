@@ -1030,6 +1030,7 @@ form[data-highcontrast='true'] .badge-field {
   align-items: center;
   gap: .5rem;
   padding: .6rem .75rem;
+  min-height: 2.4rem;
   border-radius: .6rem;
   font-size: .875rem;
   cursor: pointer;
@@ -1054,13 +1055,17 @@ form[data-highcontrast='true'] .badge-field {
   min-width: 0;
 }
 .flag-option-flag{
-  width: 1.6rem;
-  height: 1.6rem;
+  width: 1.9rem;
+  height: 1.9rem;
+  aspect-ratio: 1 / 1;
   border-radius: 9999px;
+  overflow: hidden;
   box-shadow: 0 0 0 1px color-mix(in oklab, var(--color-text) 18%, transparent);
   background-position: center;
   background-size: cover;
-  display: inline-block;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
   flex-shrink: 0;
 }
 .flag-option-flag.fi::before{
