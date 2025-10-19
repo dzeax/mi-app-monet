@@ -139,6 +139,10 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
 
     return () => {
       mounted = false;
+      if (focusTimeout.current) {
+        window.clearTimeout(focusTimeout.current);
+        focusTimeout.current = null;
+      }
       sub.subscription.unsubscribe();
       window.removeEventListener('focus', onFocus);
       document.removeEventListener('visibilitychange', onVisibility);
@@ -157,6 +161,10 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   );
 
   const signOut = useCallback(async () => {
+    if (focusTimeout.current) {
+      window.clearTimeout(focusTimeout.current);
+      focusTimeout.current = null;
+    }
     await supabase.auth.signOut();
   }, [supabase]);
 
