@@ -298,14 +298,19 @@ function KpiSummaryPanel({
 }) {
   return (
     <aside className="relative h-full">
-      <div className="absolute inset-0 rounded-2xl border border-[color-mix(in_oklab,var(--color-border)_65%,transparent)] shadow-[0_22px_48px_rgba(15,23,42,0.16)] bg-[color-mix(in_oklab,var(--color-surface)_90%,var(--color-primary)_10%)]/96 before:absolute before:inset-0 before:bg-[radial-gradient(circle_at_top_right,rgba(14,165,233,0.22),transparent_58%)] before:opacity-70 before:content-['']" />
+      <div
+        className="absolute inset-0 rounded-2xl border border-[color-mix(in_oklab,var(--color-border)_72%,transparent)] shadow-[0_22px_48px_rgba(15,23,42,0.18)]"
+        style={{
+          background: 'linear-gradient(135deg, rgba(15,23,42,0.58), rgba(15,23,42,0.12))',
+        }}
+      />
       <div className="relative z-[1] flex h-full flex-col rounded-2xl px-4 py-4 md:px-5 md:py-5 gap-4 overflow-hidden">
         <header className="flex items-start justify-between gap-3">
           <div>
-            <span className="text-[11px] uppercase tracking-[0.22em] text-[color:var(--color-text)]/55">Performance Summary</span>
-            <h3 className="text-lg md:text-xl font-semibold text-[color:var(--color-text)]/92 mt-1">Live KPIs</h3>
+            <span className="text-[11px] uppercase tracking-[0.22em] text-white/65">Performance Summary</span>
+            <h3 className="text-lg md:text-xl font-semibold text-white mt-1">Live KPIs</h3>
           </div>
-          <span className="rounded-full px-3 py-1 text-[11px] font-medium tabular-nums bg-[color-mix(in_oklab,var(--color-surface)_82%,var(--color-primary)_18%)]/80 text-[color:var(--color-text)]/80 shadow-inner">
+          <span className="rounded-full px-3 py-1 text-[11px] font-medium tabular-nums bg-white/12 text-white/85 shadow-inner backdrop-blur-sm border border-white/20">
             {periodLabel}
           </span>
         </header>
