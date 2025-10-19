@@ -271,7 +271,9 @@ export default function CreateCampaignModal({
     (isSubmitted || (touchedFields as any)[name] || (dirtyFields as any)[name]);
 
   const firstRef = useRef<HTMLInputElement>(null);
+  const formRef = useRef<HTMLFormElement>(null);
   const trapRef = useRef<HTMLDivElement>(null);
+  const submitIntentRef = useRef<'save' | 'save_add'>('save');
 
   const openDatePicker = (field?: HTMLInputElement | null) => {
     const input = field ?? firstRef.current;
@@ -427,19 +429,16 @@ export default function CreateCampaignModal({
         console.error(e);
         showToast('Something went wrong while saving', { variant: 'error' });
       }
+    } finally {
+      submitIntentRef.current = 'save';
     },
     [addCampaign, initialRow, mode, onClose, onSaved, reset, updateCampaign]
   );
 
   const onInvalid = useCallback(() => {
+    submitIntentRef.current = 'save';
     showToast('Please fix the highlighted fields', { variant: 'error' });
   }, []);
-
-  const submitWithMode = useCallback(
-    (submitMode: 'save' | 'save_add') =>
-      handleSubmit((formData) => persistCampaign(formData, submitMode), onInvalid)(),
-    [handleSubmit, onInvalid, persistCampaign]
-  );
 
   const requestClose = useCallback(() => {
     if (mode === 'edit' && isDirty) {
@@ -458,19 +457,21 @@ export default function CreateCampaignModal({
       }
       if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 's') {
         e.preventDefault();
-        void submitWithMode('save');
+        submitIntentRef.current = 'save';
+        formRef.current?.requestSubmit();
         return;
       }
       const target = e.target as HTMLElement | null;
       const role = target?.getAttribute?.('role');
       if (!e.ctrlKey && !e.metaKey && !e.altKey && e.key === 'Enter' && role !== 'combobox') {
-        void submitWithMode('save');
+        submitIntentRef.current = 'save';
+        formRef.current?.requestSubmit();
       }
     };
     document.addEventListener('keydown', onKey);
     setTimeout(() => firstRef.current?.focus(), 0);
     return () => document.removeEventListener('keydown', onKey);
-  }, [requestClose, submitWithMode]);
+  }, [requestClose]);
 
   // Focus trap
   useEffect(() => {
@@ -583,8 +584,12 @@ export default function CreateCampaignModal({
           <div className="edge-fade edge-top" aria-hidden />
 
           <form
+            ref={formRef}
             id="create-edit-campaign-form"
-            onSubmit={handleSubmit((formData) => persistCampaign(formData, 'save'), onInvalid)}
+            onSubmit={handleSubmit(
+              (formData) => persistCampaign(formData, submitIntentRef.current),
+              onInvalid
+            )}
             className="grid gap-4 xl:grid-cols-12 items-start"
           >
             <div className="col-span-12 xl:col-span-7 flex flex-col gap-4">
@@ -1068,10 +1073,10 @@ export default function CreateCampaignModal({
             <button type="button" onClick={requestClose} className="btn-ghost">Cancel</button>
             {mode === 'create' && (
               <button
-                type="button"
+                type="submit"
                 disabled={isSubmitting}
                 className="btn-ghost"
-                onClick={() => { void submitWithMode('save_add'); }}
+                onClick={() => { submitIntentRef.current = 'save_add'; }}
               >
                 Save & add another
               </button>
@@ -1080,6 +1085,7 @@ export default function CreateCampaignModal({
               type="submit"
               disabled={isSubmitting}
               className="btn-primary"
+              onClick={() => { submitIntentRef.current = 'save'; }}
             >
               {isSubmitting ? 'Saving...' : mode === 'edit' ? 'Save changes' : 'Save'}
             </button>
