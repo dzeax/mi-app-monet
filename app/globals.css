@@ -980,10 +980,10 @@ form[data-highcontrast='true'] .badge-field {
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  min-height: 2.1rem;
+  min-height: 2.52rem;
 }
 .geo-flag__icon{
-  width: 2.1rem;
+  width: 2.52rem;
   aspect-ratio: 1 / 1;
   border-radius: 9999px;
   box-shadow: 0 0 0 1px color-mix(in oklab, var(--color-text) 16%, transparent);
@@ -1001,7 +1001,7 @@ form[data-highcontrast='true'] .badge-field {
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  font-size: 1.3rem;
+  font-size: 1.56rem;
   line-height: 1;
 }
 .geo-flag--muted{

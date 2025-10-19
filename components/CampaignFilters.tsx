@@ -4,6 +4,7 @@ import { useCallback, useEffect, useMemo, useRef, useState, useId } from 'react'
 import type { CSSProperties } from 'react';
 import Chip from '@/components/ui/Chip';
 import type { Filters } from '@/hooks/useCampaignFilterEngine';
+import { geoEmoji } from '@/lib/geoFlags';
 
 type DatePreset =
   | 'today' | 'yesterday' | 'thisWeek' | 'lastWeek'
@@ -110,6 +111,7 @@ export default function CampaignFilters({
     types: string[];
     databases: string[];
     dbTypes: Array<'B2B' | 'B2C' | 'Mixed'>;
+    databaseGeoMap?: Record<string, string | undefined>;
   };
   pending?: boolean;
 }) {
@@ -153,6 +155,18 @@ export default function CampaignFilters({
   const databaseValue = filters.databases?.[0] ?? ALL;
   const themeValue = filters.themes?.[0] ?? ALL;
   const dbTypeValue = filters.dbTypes?.[0] ?? ALL;
+  const databaseGeoMap = options.databaseGeoMap ?? {};
+
+  const formatGeoOption = useCallback((geo: string) => `${geoEmoji(geo)} ${geo}`, []);
+
+  const formatDatabaseOption = useCallback(
+    (database: string) => {
+      const geo = databaseGeoMap[database];
+      if (!geo) return database;
+      return `${geoEmoji(geo)} ${database}`;
+    },
+    [databaseGeoMap],
+  );
 
   const setTypes = useCallback((value: string) => {
     updateFilters({ types: value === ALL ? [] : [value] });
@@ -417,6 +431,7 @@ export default function CampaignFilters({
               options={options.geos}
               allLabel="GEO: All"
               style={activeStyle(geoValue !== ALL)}
+              formatOption={formatGeoOption}
             />
             <FilterSelect
               label="Partner"
@@ -435,6 +450,7 @@ export default function CampaignFilters({
               allLabel="Database: All"
               style={activeStyle(databaseValue !== ALL)}
               widthClass="min-w-[200px]"
+              formatOption={formatDatabaseOption}
             />
             <button
               type="button"
@@ -505,6 +521,7 @@ type FilterSelectProps = {
   allLabel: string;
   style?: CSSProperties;
   widthClass?: string;
+  formatOption?: (value: string) => string;
 };
 
 function FilterSelect({
@@ -515,9 +532,15 @@ function FilterSelect({
   allLabel,
   style,
   widthClass = 'min-w-[150px]',
+  formatOption,
 }: FilterSelectProps) {
   const htmlId = useId();
   const disabled = options.length === 0;
+
+  const renderOption = useCallback(
+    (opt: string) => (formatOption ? formatOption(opt) : opt),
+    [formatOption],
+  );
 
   return (
     <label className={`flex flex-col gap-1 ${widthClass}`}>
@@ -533,7 +556,7 @@ function FilterSelect({
         <option value={ALL}>{allLabel}</option>
         {options.map((opt) => (
           <option key={opt} value={opt}>
-            {opt}
+            {renderOption(opt)}
           </option>
         ))}
       </select>

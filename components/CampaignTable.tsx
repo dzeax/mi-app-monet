@@ -16,6 +16,7 @@ import type { DBType } from '@/data/reference';
 import { useCatalogOverrides } from '@/context/CatalogOverridesContext';
 import { DEFAULT_ROUTING_RATE } from '@/lib/campaign-calcs';
 import GeoFlag from '@/components/GeoFlag';
+import { normalizeGeo } from '@/lib/geoFlags';
 
 import ExportModal from '@/components/export/ExportModal';          // [EXPORT]
 import { type ColumnSpec } from '@/utils/exporters';                // [EXPORT]
@@ -459,6 +460,22 @@ export default function CampaignTable() {
     const presentDbTypes = new Set(
       rows.map(r => canonDbType(r.databaseType)).filter((x): x is DBType => !!x)
     );
+    const databaseGeoTracker = new Map<string, string>();
+    for (const row of rows) {
+      const dbName = (row.database ?? '').trim();
+      if (!dbName) continue;
+      const geo = normalizeGeo(row.geo);
+      if (!geo) continue;
+      const key = dbName.toLowerCase();
+      if (!databaseGeoTracker.has(key)) databaseGeoTracker.set(key, geo);
+    }
+    for (const ref of catalogs?.DATABASES ?? []) {
+      const key = ref.name.trim().toLowerCase();
+      if (!key) continue;
+      const geo = normalizeGeo(ref.geo);
+      if (!geo) continue;
+      if (!databaseGeoTracker.has(key)) databaseGeoTracker.set(key, geo);
+    }
 
     // mapas canÃ³nicos (lc -> etiqueta canÃ³nica)
     const partnerMap = new Map(PARTNERS.map(p => [lc(p.name), p.name]));
@@ -484,6 +501,12 @@ export default function CampaignTable() {
     const dbTypeOpts = dbOrder.filter(t => presentDbTypes.has(t));
 
       const databaseOpts = Array.from(presentDatabases).sort((a, b) => a.localeCompare(b, 'es'));
+      const databaseGeoMap: Record<string, string> = {};
+      for (const name of databaseOpts) {
+        const key = name.trim().toLowerCase();
+        const geo = databaseGeoTracker.get(key);
+        if (geo) databaseGeoMap[name] = geo;
+      }
 
       return {
         geos: geoOpts,
@@ -492,8 +515,9 @@ export default function CampaignTable() {
         types: typeOpts,
         databases: databaseOpts,
         dbTypes: dbTypeOpts,
+        databaseGeoMap,
       };
-    }, [rows, PARTNERS, THEMES, TYPES]);
+    }, [rows, PARTNERS, THEMES, TYPES, catalogs?.DATABASES]);
 
   /* ====== Orden/paginaciÃ³n ====== */
   const [sortKey, setSortKey] = useState<SortKey>('none');
