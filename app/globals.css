@@ -1,5 +1,7 @@
 /* Importa Tailwind (v4) */
 @import "tailwindcss";
+/* Banderas SVG (flag-icons) */
+@import "flag-icons/css/flag-icons.min.css";
 
 /* Fuente Inter de Google Fonts */
 @import url("https://fonts.googleapis.com/css2?family=Inter:wght@300;400;600;700&display=swap");
@@ -971,6 +973,42 @@ form[data-highcontrast='true'] .badge-field {
 /* utilidad: añade espacio inferior al contenido para no taparlo */
 .with-app-footer{
   padding-bottom: calc(var(--footer-h) + max(0px, env(safe-area-inset-bottom)));
+}
+
+/* --- GEO flag badge --- */
+.geo-flag{
+  display: inline-flex;
+  align-items: center;
+  gap: .5rem;
+  font-size: .875rem;
+  font-weight: 600;
+  letter-spacing: .02em;
+}
+.geo-flag__icon{
+  width: 1.5rem;
+  height: 1.5rem;
+  border-radius: 9999px;
+  box-shadow: 0 0 0 1px color-mix(in oklab, var(--color-text) 16%, transparent);
+  overflow: hidden;
+  flex-shrink: 0;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  background: color-mix(in oklab, var(--color-surface) 90%, transparent);
+}
+.geo-flag__icon.fi{
+  background-size: cover;
+  background-position: center;
+}
+.geo-flag__icon--fallback{
+  font-size: 1rem;
+}
+.geo-flag__code{
+  color: color-mix(in oklab, var(--color-text) 85%, transparent);
+  text-transform: uppercase;
+}
+.geo-flag--muted{
+  opacity: .65;
 }
 
 

@@ -1,21 +1,21 @@
 'use client';
 
+import type { ReactNode } from 'react';
+
 type GeoFlagProps = {
   geo?: string | null;
 };
 
-const REGIONAL_INDICATOR_START = 0x1f1e6;
 const GEO_ALIASES: Record<string, string> = {
   UK: 'GB',
 };
 
 const SPECIAL_LABELS: Record<string, string> = {
-  EU: 'European Union',
   MULTI: 'Multiple geos',
+  EU: 'European Union',
 };
 
-const SPECIAL_EMOJIS: Record<string, string> = {
-  EU: String.fromCodePoint(0x1f1ea, 0x1f1fa),
+const FALLBACK_SYMBOLS: Record<string, string> = {
   MULTI: String.fromCodePoint(0x1f310),
 };
 
@@ -30,56 +30,69 @@ function normalizeGeo(geo?: string | null) {
   return (geo ?? '').trim().toUpperCase();
 }
 
-function regionalFlagEmoji(code: string) {
-  if (!/^[A-Z]{2}$/.test(code)) return undefined;
-  const points = Array.from(code).map((char) => REGIONAL_INDICATOR_START + (char.charCodeAt(0) - 65));
-  return String.fromCodePoint(...points);
+function canonicalGeo(code: string) {
+  if (!code) return '';
+  const normalized = GEO_ALIASES[code] ?? code;
+  return normalized;
 }
 
-function resolveEmoji(code: string) {
-  if (code in SPECIAL_EMOJIS) {
-    return SPECIAL_EMOJIS[code];
+function flagClassName(code: string) {
+  if (!code) return undefined;
+  const canonical = canonicalGeo(code);
+  const candidate = canonical.toLowerCase();
+  if (/^[a-z]{2}$/.test(candidate) || /^[a-z]{2,3}-[a-z]{2,3}$/.test(candidate)) {
+    return `fi-${candidate}`;
   }
-  const canonical = GEO_ALIASES[code] ?? code;
-  return regionalFlagEmoji(canonical);
+  return undefined;
 }
 
-function resolveLabel(code: string) {
-  if (!code) return 'Sin GEO';
-  if (code in SPECIAL_LABELS) return SPECIAL_LABELS[code];
-  const canonical = GEO_ALIASES[code] ?? code;
+function resolveLabel(rawCode: string, canonical: string) {
+  if (!rawCode) return 'Sin GEO';
+  if (canonical in SPECIAL_LABELS) return SPECIAL_LABELS[canonical];
   if (/^[A-Z]{2}$/.test(canonical)) {
     const label = displayNames?.of(canonical);
     if (label) return label;
   }
-  return code;
+  return canonical || rawCode;
 }
 
 export default function GeoFlag({ geo }: GeoFlagProps) {
   const code = normalizeGeo(geo);
+  const canonical = canonicalGeo(code);
 
   if (!code) {
     const title = 'Sin GEO definido';
     return (
-      <span className="inline-flex items-center gap-2 text-sm opacity-60" title={title} aria-label={title}>
-        <span className="text-base leading-none" aria-hidden>
+      <span className="geo-flag geo-flag--muted" title={title} aria-label={title}>
+        <span className="geo-flag__icon geo-flag__icon--fallback" aria-hidden>
           {EMOJI_UNKNOWN}
         </span>
-        <span className="font-medium tracking-wide">--</span>
+        <span className="geo-flag__code">--</span>
       </span>
     );
   }
 
-  const emoji = resolveEmoji(code) ?? EMOJI_UNKNOWN;
-  const label = resolveLabel(code);
+  const flagClass = flagClassName(canonical);
+  const label = resolveLabel(code, canonical);
   const title = `${label}${code ? ` (${code})` : ''}`;
 
-  return (
-    <span className="inline-flex items-center gap-2 text-sm" title={title} aria-label={title}>
-      <span className="text-base leading-none" aria-hidden>
-        {emoji}
+  let icon: ReactNode;
+
+  if (flagClass) {
+    icon = <span className={`geo-flag__icon fi fis ${flagClass}`} aria-hidden />;
+  } else {
+    const symbol = FALLBACK_SYMBOLS[canonical] ?? FALLBACK_SYMBOLS[code] ?? EMOJI_UNKNOWN;
+    icon = (
+      <span className="geo-flag__icon geo-flag__icon--fallback" aria-hidden>
+        {symbol}
       </span>
-      <span className="font-medium tracking-wide">{code}</span>
+    );
+  }
+
+  return (
+    <span className="geo-flag" title={title} aria-label={title}>
+      {icon}
+      <span className="geo-flag__code">{code}</span>
     </span>
   );
 }
