@@ -428,9 +428,9 @@ export default function CreateCampaignModal({
       } catch (e) {
         console.error(e);
         showToast('Something went wrong while saving', { variant: 'error' });
+      } finally {
+        submitIntentRef.current = 'save';
       }
-    } finally {
-      submitIntentRef.current = 'save';
     },
     [addCampaign, initialRow, mode, onClose, onSaved, reset, updateCampaign]
   );
