@@ -24,6 +24,12 @@ const fmtEUR = new Intl.NumberFormat('es-ES', { style: 'currency', currency: 'EU
 const fmtInt = new Intl.NumberFormat('es-ES');
 const fmtPct = new Intl.NumberFormat('es-ES', { style: 'percent', maximumFractionDigits: 2 });
 
+const sanitizeNumber = (value: string) =>
+  value.replace(/\u2212/g, '-').replace(/\u00a0/g, ' ');
+const formatEUR = (value: number) => sanitizeNumber(fmtEUR.format(value));
+const formatInt = (value: number) => sanitizeNumber(fmtInt.format(value));
+const formatPct = (value: number) => sanitizeNumber(fmtPct.format(value));
+
 type SortKey = keyof CampaignRow | 'marginPct' | '_idx' | 'none';
 
 const COLVIS_STORAGE_KEY = 'monet_colvis_v1';
@@ -114,29 +120,29 @@ const COLUMN_DEFS: ColumnDef[] = [
   { id: 'theme', label: 'THEME', defaultVisible: true, sortable: true, sortKey: 'theme',
     renderCell: (r) => r.theme },
   { id: 'price', label: 'PRICE', numeric: true, defaultVisible: true, sortable: true, sortKey: 'price',
-    renderCell: (r) => fmtEUR.format(r.price) },
+    renderCell: (r) => formatEUR(r.price) },
   { id: 'type', label: 'TYPE', defaultVisible: true, sortable: true, sortKey: 'type',
     renderCell: (r) => r.type },
   { id: 'vSent', label: 'V SENT', numeric: true, defaultVisible: true, sortable: true, sortKey: 'vSent',
-    renderCell: (r) => fmtInt.format(r.vSent), renderSummary: (s) => fmtInt.format(s.vSent) },
+    renderCell: (r) => formatInt(r.vSent), renderSummary: (s) => formatInt(s.vSent) },
   { id: 'routingCosts', label: 'ROUTING COSTS', numeric: true, defaultVisible: true, sortable: true, sortKey: 'routingCosts',
-    renderCell: (r) => fmtEUR.format(r.routingCosts), renderSummary: (s) => fmtEUR.format(s.routingCosts) },
+    renderCell: (r) => formatEUR(r.routingCosts), renderSummary: (s) => formatEUR(s.routingCosts) },
   { id: 'qty', label: 'QTY', numeric: true, defaultVisible: true, sortable: true, sortKey: 'qty',
-    renderCell: (r) => fmtInt.format(r.qty), renderSummary: (s) => fmtInt.format(s.qty) },
+    renderCell: (r) => formatInt(r.qty), renderSummary: (s) => formatInt(s.qty) },
   { id: 'turnover', label: 'TURNOVER', numeric: true, defaultVisible: true, sortable: true, sortKey: 'turnover',
-    renderCell: (r) => fmtEUR.format(r.turnover), renderSummary: (s) => fmtEUR.format(s.turnover) },
+    renderCell: (r) => formatEUR(r.turnover), renderSummary: (s) => formatEUR(s.turnover) },
   { id: 'margin', label: 'MARGIN', numeric: true, defaultVisible: true, sortable: true, sortKey: 'margin',
     renderCell: (r) => {
       const pct = r.turnover > 0 ? r.margin / r.turnover : null;
-      return <span className={marginPctTextClass(pct)}>{fmtEUR.format(r.margin)}</span>;
+      return <span className={marginPctTextClass(pct)}>{formatEUR(r.margin)}</span>;
     },
     renderSummary: (s) => (
-      <span className={marginPctTextClass(s.marginPct)}>{fmtEUR.format(s.margin)}</span>
+      <span className={marginPctTextClass(s.marginPct)}>{formatEUR(s.margin)}</span>
     ) },
   { id: 'marginPct', label: 'MARGIN (%)', numeric: true, defaultVisible: true, sortable: true, sortKey: 'marginPct',
     renderCell: (r) => {
       const pct = r.turnover > 0 ? r.margin / r.turnover : null;
-      return <span className={marginPctTextClass(pct)}>{pct == null ? 'â€”' : fmtPct.format(pct)}</span>;
+      return <span className={marginPctTextClass(pct)}>{pct == null ? '--' : formatPct(pct)}</span>;
     },
     renderSummary: (s) => {
       const tier = marginPctTier(s.marginPct);
@@ -147,12 +153,12 @@ const COLUMN_DEFS: ColumnDef[] = [
         : '';
       return (
         <span className={`font-bold ${marginPctTextClass(s.marginPct)} ${badge}`}>
-          {s.marginPct == null ? 'â€”' : fmtPct.format(s.marginPct)}
+          {s.marginPct == null ? '--' : formatPct(s.marginPct)}
         </span>
       );
     } },
   { id: 'ecpm', label: 'ECPM', numeric: true, defaultVisible: true, sortable: true, sortKey: 'ecpm',
-    renderCell: (r) => fmtEUR.format(r.ecpm), renderSummary: (s) => fmtEUR.format(s.weightedEcpm) },
+    renderCell: (r) => formatEUR(r.ecpm), renderSummary: (s) => formatEUR(s.weightedEcpm) },
   { id: 'database', label: 'DATABASE', defaultVisible: true, sortable: true, sortKey: 'database',
     renderCell: (r) => r.database },
   { id: 'geo', label: 'GEO', defaultVisible: true, sortable: true, sortKey: 'geo',
@@ -228,7 +234,7 @@ function activePresetLabelFromRange(range?: [string|null,string|null] | null) {
     const [s,e] = rangeForPresetKey(k as any);
     if (s===start && e===end) return label;
   }
-  return `${start} â†’ ${end}`;
+  return `${start}  to  ${end}`;
 }
 
 function toneClassFromTier(tier: MarginTier | null) {
@@ -380,11 +386,11 @@ function TableActions({
         type="button"
         aria-haspopup="menu"
         aria-expanded={open}
+        aria-label="Table actions"
         onClick={() => setOpen((prev) => !prev)}
-        className="inline-flex items-center gap-1 rounded-md border border-[--color-border] bg-[color:var(--color-surface)]/70 px-2 py-1 text-xs font-medium hover:border-[color:var(--color-primary)] hover:text-[color:var(--color-text)] transition-colors"
+        className="inline-flex h-6 w-8 items-center justify-center rounded-md border border-[--color-border] bg-[color:var(--color-surface)]/70 px-2 py-1 text-xs font-medium hover:border-[color:var(--color-primary)] hover:text-[color:var(--color-text)] transition-colors"
       >
-        <span>Actions</span>
-        <span aria-hidden>v</span>
+        <span aria-hidden>...</span>
       </button>
       {open ? (
         <div
@@ -638,7 +644,7 @@ export default function CampaignTable() {
   // Offset donde debe â€œpegarseâ€ el thead (debajo del stack sticky)
   const stackedBottom = `calc(var(--content-sticky-top) + ${stickyHeight}px + ${bandGapPx}px)`;
 
-  /* === Header de columna sticky â€” usa la regla CSS global === */
+  /* === Header de columna sticky - usa la regla CSS global === */
   const Th = ({ col }: { col: ColumnDef }) => {
     const active = col.sortable && sortKey === (col.sortKey ?? (col.id as SortKey));
     const ariaSort =
@@ -709,14 +715,14 @@ export default function CampaignTable() {
 
           <KpiSummaryPanel
             periodLabel={periodLabel}
-            turnover={fmtEUR.format(summary.turnover)}
-            marginPct={summary.marginPct == null ? 'â€”' : fmtPct.format(summary.marginPct)}
-            marginValue={fmtEUR.format(summary.margin)}
+            turnover={formatEUR(summary.turnover)}
+            marginPct={summary.marginPct == null ? '--' : formatPct(summary.marginPct)}
+            marginValue={formatEUR(summary.margin)}
             marginTier={marginTier}
-            vSent={fmtInt.format(summary.vSent)}
-            ecpm={fmtEUR.format(summary.weightedEcpm)}
-            routing={fmtEUR.format(summary.routingCosts)}
-            qty={fmtInt.format(summary.qty)}
+            vSent={formatInt(summary.vSent)}
+            ecpm={formatEUR(summary.weightedEcpm)}
+            routing={formatEUR(summary.routingCosts)}
+            qty={formatInt(summary.qty)}
           />
         </div>
       </div>
@@ -751,7 +757,7 @@ export default function CampaignTable() {
                   onOpenColumns={() => setPickerOpen(true)}
                   onOpenRouting={isAdmin ? () => setOpenRoutingOverride(true) : undefined}
                   onOpenExport={() => setOpenExport(true)}
-                  countLabel={fmtInt.format(sortedAll.length)}
+                  countLabel={formatInt(sortedAll.length)}
                 />
               </th>
             </tr>
@@ -805,10 +811,10 @@ export default function CampaignTable() {
         </table>
       </div>
 
-      {/* PaginaciÃ³n */}
+      {/* Pagination */}
       <div className="flex flex-wrap items-center justify-between gap-3 mt-3">
         <div className="text-sm opacity-80">
-          Showing {sortedAll.length === 0 ? 0 : start + 1}â€“{Math.min(end, sortedAll.length)} of {sortedAll.length}
+          Showing {sortedAll.length === 0 ? 0 : start + 1} to {Math.min(end, sortedAll.length)} of {sortedAll.length}
         </div>
         <div className="flex items-center gap-2">
           <label className="text-sm">Rows per page</label>
@@ -843,7 +849,7 @@ export default function CampaignTable() {
         />
       )}
 
-      {/* [EXPORT] Modal de exportaciÃ³n */}
+      {/* [EXPORT] Export modal */}
       {openExport && (
         <ExportModal
           onClose={() => setOpenExport(false)}

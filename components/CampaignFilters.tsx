@@ -295,7 +295,7 @@ export default function CampaignFilters({
                 className="absolute inset-y-0 right-0 px-3 text-sm text-[color:var(--color-text)]/60 hover:text-[color:var(--color-text)] focus:outline-none"
                 onClick={clearSearch}
               >
-                Ã—
+                x
               </button>
             ) : null}
           </div>
@@ -313,7 +313,7 @@ export default function CampaignFilters({
                     className="rounded-full px-2 py-[2px] hover:bg-black/5"
                     onClick={chip.onClear}
                   >
-                    Ã—
+                    x
                   </button>
                 </span>
               ))}
