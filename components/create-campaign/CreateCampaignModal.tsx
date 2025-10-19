@@ -165,7 +165,7 @@ export default function CreateCampaignModal({
       (c: any) => (c?.name || '').trim().toLowerCase() === (name || '').trim().toLowerCase()
     );
 
-  const [submitMode, setSubmitMode] = useState<'save' | 'save_add'>('save');
+  const submitModeRef = useRef<'save' | 'save_add'>('save');
   const [openAddCampaign, setOpenAddCampaign] = useState(false);
   const [openAddPartner, setOpenAddPartner] = useState(false);
   const [openAddDatabase, setOpenAddDatabase] = useState(false);
@@ -366,6 +366,7 @@ export default function CreateCampaignModal({
   // EnvÃƒÂ­o
   const onSubmit = async (data: FormValues) => {
     try {
+      const modeToApply = submitModeRef.current;
       const _price = parseNum(data.price);
       const _qty = parseNum(data.qty);
       const _vSent = parseNum(data.vSent);
@@ -413,10 +414,10 @@ export default function CreateCampaignModal({
         return;
       }
       showToast(
-        submitMode === 'save_add' ? 'Campaign saved. Add another...' : 'Campaign saved successfully'
+        modeToApply === 'save_add' ? 'Campaign saved. Add another...' : 'Campaign saved successfully'
       );
 
-      if (submitMode === 'save_add') {
+      if (modeToApply === 'save_add') {
         reset();
         setTimeout(() => firstRef.current?.focus(), 0);
       } else {
@@ -424,9 +425,14 @@ export default function CreateCampaignModal({
         onSaved?.(newId);
         onClose();
       }
+      submitModeRef.current = 'save';
     } catch (e) {
       console.error(e);
       showToast('Something went wrong while saving', { variant: 'error' });
+    } finally {
+      if (submitModeRef.current !== 'save') {
+        submitModeRef.current = 'save';
+      }
     }
   };
 
@@ -448,13 +454,13 @@ export default function CreateCampaignModal({
       if (e.key === 'Escape') requestClose();
       if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 's') {
         e.preventDefault();
-        setSubmitMode('save');
+        submitModeRef.current = 'save';
         formRef.current?.requestSubmit();
       }
       const target = e.target as HTMLElement | null;
       const role = target?.getAttribute?.('role');
       if (!e.ctrlKey && !e.metaKey && !e.altKey && e.key === 'Enter' && role !== 'combobox') {
-        setSubmitMode('save');
+        submitModeRef.current = 'save';
       }
     };
     document.addEventListener('keydown', onKey);
@@ -1062,7 +1068,7 @@ export default function CreateCampaignModal({
                 type="button"
                 disabled={isSubmitting}
                 className="btn-ghost"
-                onClick={() => { setSubmitMode('save_add'); formRef.current?.requestSubmit(); }}
+                onClick={() => { submitModeRef.current = 'save_add'; formRef.current?.requestSubmit(); }}
               >
                 Save & add another
               </button>
@@ -1071,7 +1077,7 @@ export default function CreateCampaignModal({
               type="button"
               disabled={isSubmitting}
               className="btn-primary"
-              onClick={() => { setSubmitMode('save'); formRef.current?.requestSubmit(); }}
+              onClick={() => { submitModeRef.current = 'save'; formRef.current?.requestSubmit(); }}
             >
               {isSubmitting ? 'Saving...' : mode === 'edit' ? 'Save changes' : 'Save'}
             </button>
