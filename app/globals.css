@@ -979,33 +979,30 @@ form[data-highcontrast='true'] .badge-field {
 .geo-flag{
   display: inline-flex;
   align-items: center;
-  gap: .5rem;
-  font-size: .875rem;
-  font-weight: 600;
-  letter-spacing: .02em;
+  justify-content: center;
+  min-height: 1.75rem;
 }
 .geo-flag__icon{
-  width: 1.5rem;
-  height: 1.5rem;
+  width: 1.75rem;
+  aspect-ratio: 1 / 1;
   border-radius: 9999px;
   box-shadow: 0 0 0 1px color-mix(in oklab, var(--color-text) 16%, transparent);
   overflow: hidden;
   flex-shrink: 0;
+  display: inline-block;
+  background: color-mix(in oklab, var(--color-surface) 90%, transparent);
+  background-position: center;
+  background-size: cover;
+}
+.geo-flag__icon.fi::before{
+  content: none;
+}
+.geo-flag__icon--fallback{
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  background: color-mix(in oklab, var(--color-surface) 90%, transparent);
-}
-.geo-flag__icon.fi{
-  background-size: cover;
-  background-position: center;
-}
-.geo-flag__icon--fallback{
-  font-size: 1rem;
-}
-.geo-flag__code{
-  color: color-mix(in oklab, var(--color-text) 85%, transparent);
-  text-transform: uppercase;
+  font-size: 1.1rem;
+  line-height: 1;
 }
 .geo-flag--muted{
   opacity: .65;

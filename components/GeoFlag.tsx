@@ -23,7 +23,7 @@ const EMOJI_UNKNOWN = String.fromCodePoint(0x1f3f3, 0xfe0f);
 
 const displayNames =
   typeof Intl !== 'undefined' && typeof Intl.DisplayNames === 'function'
-    ? new Intl.DisplayNames(['es', 'en'], { type: 'region' })
+    ? new Intl.DisplayNames(['en'], { type: 'region' })
     : undefined;
 
 function normalizeGeo(geo?: string | null) {
@@ -47,7 +47,7 @@ function flagClassName(code: string) {
 }
 
 function resolveLabel(rawCode: string, canonical: string) {
-  if (!rawCode) return 'Sin GEO';
+  if (!rawCode) return 'No GEO';
   if (canonical in SPECIAL_LABELS) return SPECIAL_LABELS[canonical];
   if (/^[A-Z]{2}$/.test(canonical)) {
     const label = displayNames?.of(canonical);
@@ -61,13 +61,13 @@ export default function GeoFlag({ geo }: GeoFlagProps) {
   const canonical = canonicalGeo(code);
 
   if (!code) {
-    const title = 'Sin GEO definido';
+    const title = 'No GEO defined';
     return (
       <span className="geo-flag geo-flag--muted" title={title} aria-label={title}>
         <span className="geo-flag__icon geo-flag__icon--fallback" aria-hidden>
           {EMOJI_UNKNOWN}
         </span>
-        <span className="geo-flag__code">--</span>
+        <span className="sr-only">No GEO</span>
       </span>
     );
   }
@@ -90,9 +90,9 @@ export default function GeoFlag({ geo }: GeoFlagProps) {
   }
 
   return (
-    <span className="geo-flag" title={title} aria-label={title}>
+    <span className={`geo-flag${flagClass ? '' : ' geo-flag--muted'}`} title={title} aria-label={title}>
       {icon}
-      <span className="geo-flag__code">{code}</span>
+      <span className="sr-only">{code}</span>
     </span>
   );
 }
