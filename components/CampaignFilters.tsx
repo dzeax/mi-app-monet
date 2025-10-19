@@ -4,7 +4,7 @@ import { useCallback, useEffect, useMemo, useRef, useState, useId } from 'react'
 import type { CSSProperties } from 'react';
 import Chip from '@/components/ui/Chip';
 import type { Filters } from '@/hooks/useCampaignFilterEngine';
-import { geoEmoji } from '@/lib/geoFlags';
+import { canonicalGeo, geoEmoji, geoLabel } from '@/lib/geoFlags';
 
 type DatePreset =
   | 'today' | 'yesterday' | 'thisWeek' | 'lastWeek'
@@ -157,13 +157,49 @@ export default function CampaignFilters({
   const dbTypeValue = filters.dbTypes?.[0] ?? ALL;
   const databaseGeoMap = options.databaseGeoMap ?? {};
 
-  const formatGeoOption = useCallback((geo: string) => `${geoEmoji(geo)} ${geo}`, []);
+  const formatGeoOption = useCallback((geo: string) => {
+    const canonical = canonicalGeo(geo);
+    const code = canonical || geo;
+    const label = canonical ? `${canonical} — ${geoLabel(canonical)}` : code;
+    if (canonical && /^[A-Z]{2}$/.test(canonical)) {
+      const url = `https://flagcdn.com/h20/${canonical.toLowerCase()}.png`;
+      return {
+        label,
+        className: 'geo-flag-option',
+        style: { backgroundImage: `url(${url})` },
+        title: label,
+      };
+    }
+    return {
+      label: `${geoEmoji(code)} ${label}`,
+      className: 'geo-flag-option geo-flag-option--fallback',
+      title: label,
+    };
+  }, []);
 
   const formatDatabaseOption = useCallback(
     (database: string) => {
       const geo = databaseGeoMap[database];
-      if (!geo) return database;
-      return `${geoEmoji(geo)} ${database}`;
+      if (!geo) {
+        return {
+          label: database,
+          className: 'geo-flag-option geo-flag-option--fallback',
+        };
+      }
+      const canonical = canonicalGeo(geo);
+      if (canonical && /^[A-Z]{2}$/.test(canonical)) {
+        const url = `https://flagcdn.com/h20/${canonical.toLowerCase()}.png`;
+        return {
+          label: database,
+          className: 'geo-flag-option',
+          style: { backgroundImage: `url(${url})` },
+          title: `${database} — ${geoLabel(canonical)} (${canonical})`,
+        };
+      }
+      return {
+        label: `${geoEmoji(geo)} ${database}`,
+        className: 'geo-flag-option geo-flag-option--fallback',
+      };
     },
     [databaseGeoMap],
   );
@@ -431,6 +467,7 @@ export default function CampaignFilters({
               options={options.geos}
               allLabel="GEO: All"
               style={activeStyle(geoValue !== ALL)}
+              selectClassName="geo-flag-select"
               formatOption={formatGeoOption}
             />
             <FilterSelect
@@ -450,6 +487,7 @@ export default function CampaignFilters({
               allLabel="Database: All"
               style={activeStyle(databaseValue !== ALL)}
               widthClass="min-w-[200px]"
+              selectClassName="geo-flag-select"
               formatOption={formatDatabaseOption}
             />
             <button
@@ -521,7 +559,13 @@ type FilterSelectProps = {
   allLabel: string;
   style?: CSSProperties;
   widthClass?: string;
-  formatOption?: (value: string) => string;
+  selectClassName?: string;
+  formatOption?: (value: string) => {
+    label: string;
+    className?: string;
+    style?: CSSProperties;
+    title?: string;
+  };
 };
 
 function FilterSelect({
@@ -532,13 +576,14 @@ function FilterSelect({
   allLabel,
   style,
   widthClass = 'min-w-[150px]',
+  selectClassName,
   formatOption,
 }: FilterSelectProps) {
   const htmlId = useId();
   const disabled = options.length === 0;
 
   const renderOption = useCallback(
-    (opt: string) => (formatOption ? formatOption(opt) : opt),
+    (opt: string) => (formatOption ? formatOption(opt) : { label: opt }),
     [formatOption],
   );
 
@@ -549,16 +594,25 @@ function FilterSelect({
         id={htmlId}
         value={value}
         onChange={(e) => onChange(e.target.value)}
-        className={`input h-11 pr-9 ${disabled ? 'opacity-60' : ''}`}
+        className={`input h-11 pr-9 ${disabled ? 'opacity-60' : ''} ${selectClassName ?? ''}`}
         style={style}
         disabled={disabled}
       >
         <option value={ALL}>{allLabel}</option>
-        {options.map((opt) => (
-          <option key={opt} value={opt}>
-            {renderOption(opt)}
-          </option>
-        ))}
+        {options.map((opt) => {
+          const formatted = renderOption(opt);
+          return (
+            <option
+              key={opt}
+              value={opt}
+              className={formatted.className}
+              style={formatted.style}
+              title={formatted.title}
+            >
+              {formatted.label}
+            </option>
+          );
+        })}
       </select>
     </label>
   );

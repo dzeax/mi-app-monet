@@ -1008,6 +1008,18 @@ form[data-highcontrast='true'] .badge-field {
   opacity: .65;
 }
 
+/* Select options with flags */
+.geo-flag-select option.geo-flag-option{
+  background-repeat: no-repeat;
+  background-position: .5rem 50%;
+  background-size: 1.6rem auto;
+  padding-left: 2.5rem;
+}
+.geo-flag-select option.geo-flag-option--fallback{
+  background-image: none !important;
+  padding-left: 1.25rem;
+}
+
 
 
 
