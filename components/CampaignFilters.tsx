@@ -264,7 +264,9 @@ export default function CampaignFilters({
     if (filters.dbTypes?.length) chips.push({ key: 'dbType', label: `DB Type: ${filters.dbTypes[0]}`, onClear: () => setDbType(ALL) });
     const [start, end] = filters.dateRange ?? [];
     if (start || end) {
-      const label = activePreset ? `Period: ${presetLabel(activePreset)}` : `Period: ${(start ?? 'â€¦')} â†’ ${(end ?? 'â€¦')}`;
+      const label = activePreset
+        ? `Period: ${presetLabel(activePreset)}`
+        : `Period: ${(start ?? 'N/A')} to ${(end ?? 'N/A')}`;
       chips.push({ key: 'date', label, onClear: clearDateRange });
     }
     return chips;
@@ -280,7 +282,7 @@ export default function CampaignFilters({
           <div className="relative">
             <input
               ref={inputRef}
-              placeholder="Search campaign, partner, theme, databaseâ€¦"
+              placeholder="Search campaign, partner, theme, database..."
               value={qDraft}
               onChange={(e) => setQDraft(e.target.value)}
               className="input w-full pr-12"

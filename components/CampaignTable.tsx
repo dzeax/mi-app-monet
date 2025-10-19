@@ -354,33 +354,71 @@ function TableActions({
   onOpenExport: () => void;
   countLabel: string;
 }) {
+  const [open, setOpen] = useState(false);
+  const ref = useRef<HTMLDivElement | null>(null);
+
+  useEffect(() => {
+    if (!open) return;
+    const handleClick = (event: MouseEvent) => {
+      if (!ref.current) return;
+      if (!ref.current.contains(event.target as Node)) setOpen(false);
+    };
+    const handleKey = (event: KeyboardEvent) => {
+      if (event.key === 'Escape') setOpen(false);
+    };
+    window.addEventListener('mousedown', handleClick);
+    window.addEventListener('keydown', handleKey);
+    return () => {
+      window.removeEventListener('mousedown', handleClick);
+      window.removeEventListener('keydown', handleKey);
+    };
+  }, [open]);
+
   return (
-    <div className="flex justify-end gap-1.5 text-xs text-[color:var(--color-text)]/80">
-      <TableActionButton label="Columns" onClick={onOpenColumns} />
-      {onOpenRouting ? <TableActionButton label="Routing" onClick={onOpenRouting} /> : null}
-      <TableActionButton label="Export" onClick={onOpenExport} badge={countLabel} />
+    <div className="relative flex justify-end" ref={ref}>
+      <button
+        type="button"
+        aria-haspopup="menu"
+        aria-expanded={open}
+        onClick={() => setOpen((prev) => !prev)}
+        className="inline-flex items-center gap-1 rounded-md border border-[--color-border] bg-[color:var(--color-surface)]/70 px-2 py-1 text-xs font-medium hover:border-[color:var(--color-primary)] hover:text-[color:var(--color-text)] transition-colors"
+      >
+        <span>Actions</span>
+        <span aria-hidden>v</span>
+      </button>
+      {open ? (
+        <div
+          role="menu"
+          className="absolute right-0 top-full mt-1 min-w-[150px] rounded-md border border-[--color-border] bg-[color:var(--color-surface)] shadow-lg divide-y divide-[--color-border]/60"
+        >
+          <MenuItem label="Columns" onClick={onOpenColumns} onClose={() => setOpen(false)} />
+          {onOpenRouting ? (
+            <MenuItem label="Routing rate" onClick={onOpenRouting} onClose={() => setOpen(false)} />
+          ) : null}
+          <MenuItem
+            label={`Export (${countLabel})`}
+            onClick={onOpenExport}
+            onClose={() => setOpen(false)}
+          />
+        </div>
+      ) : null}
     </div>
   );
 }
 
-function TableActionButton({
-  label,
-  onClick,
-  badge,
-}: {
-  label: string;
-  onClick: () => void;
-  badge?: string;
-}) {
+function MenuItem({ label, onClick, onClose }: { label: string; onClick: () => void; onClose: () => void }) {
+  const handleClick = () => {
+    onClose();
+    onClick();
+  };
   return (
     <button
       type="button"
-      onClick={onClick}
-      aria-label={badge ? `${label} (${badge})` : label}
-      className="inline-flex items-center gap-1 rounded-md border border-[--color-border] bg-[color:var(--color-surface)]/70 px-2 py-1 text-xs font-medium hover:border-[color:var(--color-primary)] hover:text-[color:var(--color-text)] transition-colors"
+      role="menuitem"
+      onClick={handleClick}
+      className="w-full px-3 py-2 text-left text-xs hover:bg-[color:var(--color-surface-2)]"
     >
-      <span>{label}</span>
-      {badge ? <span className="text-[10px] opacity-70">({badge})</span> : null}
+      {label}
     </button>
   );
 }
