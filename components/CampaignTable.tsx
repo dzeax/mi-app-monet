@@ -299,18 +299,24 @@ function KpiSummaryPanel({
   return (
     <aside className="relative h-full">
       <div
-        className="absolute inset-0 rounded-2xl border border-[color-mix(in_oklab,var(--color-border)_72%,transparent)] shadow-[0_22px_48px_rgba(15,23,42,0.18)]"
+        className="absolute inset-0 rounded-2xl border border-[color-mix(in_oklab,var(--color-border)_55%,white)] shadow-[0_20px_45px_rgba(15,23,42,0.12)]"
         style={{
-          background: 'linear-gradient(135deg, rgba(15,23,42,0.58), rgba(15,23,42,0.12))',
+          background: 'linear-gradient(160deg, rgba(226,232,240,0.85), rgba(226,232,240,0.55))',
         }}
       />
       <div className="relative z-[1] flex h-full flex-col rounded-2xl px-4 py-4 md:px-5 md:py-5 gap-4 overflow-hidden">
         <header className="flex items-start justify-between gap-3">
           <div>
-            <span className="text-[11px] uppercase tracking-[0.22em] text-white/65">Performance Summary</span>
-            <h3 className="text-lg md:text-xl font-semibold text-white mt-1">Live KPIs</h3>
+            <span className="text-[11px] uppercase tracking-[0.22em] text-[color:var(--color-text)]/60">Performance Summary</span>
+            <h3 className="text-lg md:text-xl font-semibold text-[color:var(--color-text)]/92 mt-1">Live KPIs</h3>
           </div>
-          <span className="rounded-full px-3 py-1 text-[11px] font-medium tabular-nums bg-white/12 text-white/85 shadow-inner backdrop-blur-sm border border-white/20">
+          <span
+            className="rounded-full px-3 py-1 text-[11px] font-medium tabular-nums text-[color:var(--color-text)]/75 border shadow-inner"
+            style={{
+              background: 'rgba(79,209,197,0.18)',
+              borderColor: 'rgba(79,209,197,0.32)',
+            }}
+          >
             {periodLabel}
           </span>
         </header>
