@@ -15,6 +15,7 @@ import CreateCampaignModal from './create-campaign/CreateCampaignModal';
 import type { DBType } from '@/data/reference';
 import { useCatalogOverrides } from '@/context/CatalogOverridesContext';
 import { DEFAULT_ROUTING_RATE } from '@/lib/campaign-calcs';
+import GeoFlag from '@/components/GeoFlag';
 
 import ExportModal from '@/components/export/ExportModal';          // [EXPORT]
 import { type ColumnSpec } from '@/utils/exporters';                // [EXPORT]
@@ -162,7 +163,7 @@ const COLUMN_DEFS: ColumnDef[] = [
   { id: 'database', label: 'DATABASE', defaultVisible: true, sortable: true, sortKey: 'database',
     renderCell: (r) => r.database },
   { id: 'geo', label: 'GEO', defaultVisible: true, sortable: true, sortKey: 'geo',
-    renderCell: (r) => r.geo },
+    renderCell: (r) => <GeoFlag geo={r.geo} /> },
   { id: 'databaseType', label: 'DB TYPE', defaultVisible: true, sortable: true, sortKey: 'databaseType',
     renderCell: (r) => r.databaseType },
 ];
