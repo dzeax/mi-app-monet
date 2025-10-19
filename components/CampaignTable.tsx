@@ -343,6 +343,48 @@ function KpiSummaryPanel({
 
 /* =================================================================== */
 
+function TableActions({
+  onOpenColumns,
+  onOpenRouting,
+  onOpenExport,
+  countLabel,
+}: {
+  onOpenColumns: () => void;
+  onOpenRouting?: () => void;
+  onOpenExport: () => void;
+  countLabel: string;
+}) {
+  return (
+    <div className="flex justify-end gap-1.5 text-xs text-[color:var(--color-text)]/80">
+      <TableActionButton label="Columns" onClick={onOpenColumns} />
+      {onOpenRouting ? <TableActionButton label="Routing" onClick={onOpenRouting} /> : null}
+      <TableActionButton label="Export" onClick={onOpenExport} badge={countLabel} />
+    </div>
+  );
+}
+
+function TableActionButton({
+  label,
+  onClick,
+  badge,
+}: {
+  label: string;
+  onClick: () => void;
+  badge?: string;
+}) {
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      aria-label={badge ? `${label} (${badge})` : label}
+      className="inline-flex items-center gap-1 rounded-md border border-[--color-border] bg-[color:var(--color-surface)]/70 px-2 py-1 text-xs font-medium hover:border-[color:var(--color-primary)] hover:text-[color:var(--color-text)] transition-colors"
+    >
+      <span>{label}</span>
+      {badge ? <span className="text-[10px] opacity-70">({badge})</span> : null}
+    </button>
+  );
+}
+
 export default function CampaignTable() {
   const { rows, removeCampaign, setRoutingRateOverride } = useCampaignData();
   const { isAdmin } = useAuth();
@@ -639,64 +681,6 @@ export default function CampaignTable() {
             qty={fmtInt.format(summary.qty)}
           />
         </div>
-
-                {/* Toolbar de acciones (fuera de filtros y KPIs) */}
-        <div className="flex justify-end gap-2 md:gap-3 mb-2">
-          <button
-            type="button"
-            className="btn-ghost text-sm px-3 py-1.5"
-            aria-haspopup="dialog"
-            title="Show/Hide columns"
-            onClick={() => setPickerOpen(true)}
-          >
-            Columns…
-          </button>
-          {isAdmin && (
-            <button
-              type="button"
-              className="text-sm px-3 py-1.5 rounded-md border border-[--color-border] hover:border-[--color-primary] hover:bg-[color-mix(in_oklab,var(--color-primary)_10%,transparent)] transition-colors inline-flex items-center gap-1.5"
-              aria-haspopup="dialog"
-              title="Override routing rate"
-              onClick={() => setOpenRoutingOverride(true)}
-            >
-              <span>Routing rate</span>
-            </button>
-          )}
-          <button
-            type="button"
-            className="text-sm px-3 py-1.5 rounded-md border border-[--color-border] hover:border-[--color-primary] hover:bg-[color-mix(in_oklab,var(--color-primary)_12%,transparent)] transition-colors inline-flex items-center gap-1.5"
-            aria-haspopup="dialog"
-            title="Export current view"
-            onClick={() => setOpenExport(true)}
-          >
-            <span className="mr-1">⇩</span>
-            <span>Export</span>
-            <span className="ml-0.5 text-[10px] opacity-70">({sortedAll.length})</span>
-          </button>
-        </div>{/* LÃ¡mina de fondo â€” debajo de thead */}
-        <div
-          aria-hidden
-          style={{
-            position: 'sticky',
-            top: 'var(--content-sticky-top)',
-            zIndex: 20,      // por debajo del stack sticky (60)
-            height: 0,
-            pointerEvents: 'none',
-          }}
-        >
-          <div
-            style={{
-              position: 'absolute',
-              left: '-0.5rem',
-              right: '-0.5rem',
-              height: `calc(${stickyHeight}px + ${bandGapPx}px)`,
-              background: 'var(--color-bg-outer)',
-              borderBottom: '1px solid var(--color-border)',
-              boxShadow: '0 6px 16px rgba(0,0,0,.06)',
-            }}
-          />
-        </div>
-
       </div>
 
       {/* ColumnPicker */}
@@ -724,7 +708,14 @@ export default function CampaignTable() {
               {visibleCols.map(col => (
                 <Th key={col.id} col={col} />
               ))}
-              <th className="w-[1%] text-right pr-2">â‹¯</th>
+              <th className="w-[1%] text-right pr-2">
+                <TableActions
+                  onOpenColumns={() => setPickerOpen(true)}
+                  onOpenRouting={isAdmin ? () => setOpenRoutingOverride(true) : undefined}
+                  onOpenExport={() => setOpenExport(true)}
+                  countLabel={fmtInt.format(sortedAll.length)}
+                />
+              </th>
             </tr>
           </thead>
 

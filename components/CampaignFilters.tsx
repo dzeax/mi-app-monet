@@ -7,7 +7,9 @@ import type { Filters } from '@/hooks/useCampaignFilterEngine';
 
 type DatePreset =
   | 'today' | 'yesterday' | 'thisWeek' | 'lastWeek'
-  | 'thisMonth' | 'lastMonth' | 'last7' | 'last30' | 'thisQuarter' | 'lastQuarter' | 'custom';
+  | 'thisMonth' | 'lastMonth' | 'last7' | 'last30'
+  | 'thisQuarter' | 'lastQuarter'
+  | 'custom';
 
 const DATE_PRESETS: [DatePreset, string][] = [
   ['today', 'Today'],
@@ -54,6 +56,15 @@ function endOfMonth(d: Date): Date {
 
 function rangeForPreset(p: Exclude<DatePreset, 'custom'>): [string, string] {
   const now = new Date();
+  if (p === 'thisQuarter' || p === 'lastQuarter') {
+    const currentQuarter = Math.floor(now.getMonth() / 3) + 1;
+    const targetQuarter = p === 'thisQuarter' ? currentQuarter : (currentQuarter === 1 ? 4 : currentQuarter - 1);
+    const targetYear = p === 'thisQuarter' ? now.getFullYear() : (currentQuarter === 1 ? now.getFullYear() - 1 : now.getFullYear());
+    const startMonth = (targetQuarter - 1) * 3;
+    const start = new Date(targetYear, startMonth, 1);
+    const end = new Date(targetYear, startMonth + 3, 0);
+    return [fmtLocal(start), fmtLocal(end)];
+  }
   if (p === 'today') {
     const a = new Date(now.getFullYear(), now.getMonth(), now.getDate());
     const s = fmtLocal(a); return [s, s];
@@ -88,11 +99,6 @@ export default function CampaignFilters({
   resetFilters,
   options,
   pending = false,
-  onOpenColumns,
-  onOpenExport,
-  exportCount,
-  onOpenRoutingOverride,
-  canOverrideRouting = false,
 }: {
   filters: Filters;
   updateFilters: (patch: Partial<Filters>) => void;
@@ -106,11 +112,6 @@ export default function CampaignFilters({
     dbTypes: Array<'B2B' | 'B2C' | 'Mixed'>;
   };
   pending?: boolean;
-  onOpenColumns?: () => void;
-  onOpenExport?: () => void;
-  exportCount?: number;
-  onOpenRoutingOverride?: () => void;
-  canOverrideRouting?: boolean;
 }) {
   const [qDraft, setQDraft] = useState(filters.q ?? '');
   const [customMode, setCustomMode] = useState(false);
@@ -551,28 +552,14 @@ function CalendarIcon() {
       <line x1="3" y1="10" x2="21" y2="10"/>
     </svg>
   );
-}
-
-function DownloadIcon() {
-  return (
-    <svg
-      xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"
-      width="14" height="14" fill="none" stroke="currentColor"
-      strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"
-    >
-      <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/>
-      <path d="M7 10l5 5 5-5"/>
-      <path d="M12 15V3"/>
-    </svg>
-  );
-}
-
-function presetLabel(p: Exclude<DatePreset,'custom'>) {
+}function presetLabel(p: Exclude<DatePreset,'custom'>) {
   switch (p) {
     case 'today': return 'Today';
     case 'yesterday': return 'Yesterday';
     case 'last7': return 'Last 7';
     case 'last30': return 'Last 30';
+    case 'thisQuarter': return 'This quarter';
+    case 'lastQuarter': return 'Last quarter';
     case 'thisWeek': return 'This week';
     case 'lastWeek': return 'Last week';
     case 'thisMonth': return 'This month';
