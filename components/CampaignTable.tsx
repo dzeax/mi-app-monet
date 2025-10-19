@@ -364,7 +364,10 @@ export default function CampaignTable() {
     // qué hay presente en el dataset (normalizado)
     const presentTypesLc = new Set(rows.map(r => lc(r.type)).filter(Boolean));
     const presentPartners = new Set(rows.map(r => lc(r.partner)).filter(Boolean));
-    const presentThemes = new Set(rows.map(r => lc(r.theme)).filter(Boolean));
+      const presentThemes = new Set(rows.map(r => lc(r.theme)).filter(Boolean));
+      const presentDatabases = new Set(
+        rows.map(r => (r.database ?? '').trim()).filter(Boolean)
+      );
     const presentGeos = new Set(rows.map(r => (r.geo ?? '').trim().toUpperCase()).filter(Boolean));
     const presentDbTypes = new Set(
       rows.map(r => canonDbType(r.databaseType)).filter((x): x is DBType => !!x)
@@ -393,14 +396,17 @@ export default function CampaignTable() {
     const dbOrder: DBType[] = ['B2B', 'B2C', 'Mixed'];
     const dbTypeOpts = dbOrder.filter(t => presentDbTypes.has(t));
 
-    return {
-      geos: geoOpts,
-      partners: partnerOpts,
-      themes: themeOpts,
-      types: typeOpts,
-      dbTypes: dbTypeOpts,
-    };
-  }, [rows, PARTNERS, THEMES, TYPES]);
+      const databaseOpts = Array.from(presentDatabases).sort((a, b) => a.localeCompare(b, 'es'));
+
+      return {
+        geos: geoOpts,
+        partners: partnerOpts,
+        themes: themeOpts,
+        types: typeOpts,
+        databases: databaseOpts,
+        dbTypes: dbTypeOpts,
+      };
+    }, [rows, PARTNERS, THEMES, TYPES]);
 
   /* ====== Orden/paginación ====== */
   const [sortKey, setSortKey] = useState<SortKey>('none');
