@@ -4,7 +4,7 @@ import { useCallback, useEffect, useMemo, useRef, useState, useId } from 'react'
 import type { CSSProperties } from 'react';
 import Chip from '@/components/ui/Chip';
 import type { Filters } from '@/hooks/useCampaignFilterEngine';
-import { canonicalGeo, geoEmoji, geoLabel } from '@/lib/geoFlags';
+import { canonicalGeo, geoEmoji, geoLabel, geoFlagClass } from '@/lib/geoFlags';
 
 type DatePreset =
   | 'today' | 'yesterday' | 'thisWeek' | 'lastWeek'
@@ -157,52 +157,22 @@ export default function CampaignFilters({
   const dbTypeValue = filters.dbTypes?.[0] ?? ALL;
   const databaseGeoMap = options.databaseGeoMap ?? {};
 
-  const formatGeoOption = useCallback((geo: string) => {
-    const canonical = canonicalGeo(geo);
-    const code = canonical || geo;
-    const label = canonical ? `${canonical} — ${geoLabel(canonical)}` : code;
-    if (canonical && /^[A-Z]{2}$/.test(canonical)) {
-      const url = `https://flagcdn.com/h20/${canonical.toLowerCase()}.png`;
-      return {
-        label,
-        className: 'geo-flag-option',
-        style: { backgroundImage: `url(${url})` },
-        title: label,
-      };
-    }
-    return {
-      label: `${geoEmoji(code)} ${label}`,
-      className: 'geo-flag-option geo-flag-option--fallback',
-      title: label,
-    };
-  }, []);
-
-  const formatDatabaseOption = useCallback(
-    (database: string) => {
-      const geo = databaseGeoMap[database];
-      if (!geo) {
-        return {
-          label: database,
-          className: 'geo-flag-option geo-flag-option--fallback',
-        };
-      }
+  const geoSelectOptions = useMemo(() => {
+    return options.geos.map((geo) => {
       const canonical = canonicalGeo(geo);
-      if (canonical && /^[A-Z]{2}$/.test(canonical)) {
-        const url = `https://flagcdn.com/h20/${canonical.toLowerCase()}.png`;
-        return {
-          label: database,
-          className: 'geo-flag-option',
-          style: { backgroundImage: `url(${url})` },
-          title: `${database} — ${geoLabel(canonical)} (${canonical})`,
-        };
-      }
-      return {
-        label: `${geoEmoji(geo)} ${database}`,
-        className: 'geo-flag-option geo-flag-option--fallback',
-      };
-    },
-    [databaseGeoMap],
-  );
+      const readable = canonical ? geoLabel(canonical) : geo;
+      const label = readable ? `${geo} — ${readable}` : geo;
+      return { value: geo, label, geo };
+    });
+  }, [options.geos]);
+
+  const databaseSelectOptions = useMemo(() => {
+    return options.databases.map((name) => ({
+      value: name,
+      label: name,
+      geo: databaseGeoMap[name],
+    }));
+  }, [options.databases, databaseGeoMap]);
 
   const setTypes = useCallback((value: string) => {
     updateFilters({ types: value === ALL ? [] : [value] });
@@ -460,15 +430,13 @@ export default function CampaignFilters({
               allLabel="Type: All"
               style={activeStyle(typeValue !== ALL)}
             />
-            <FilterSelect
+            <FlagSelect
               label="GEO"
               value={geoValue}
               onChange={setGeo}
-              options={options.geos}
+              options={geoSelectOptions}
               allLabel="GEO: All"
               style={activeStyle(geoValue !== ALL)}
-              selectClassName="geo-flag-select"
-              formatOption={formatGeoOption}
             />
             <FilterSelect
               label="Partner"
@@ -479,16 +447,14 @@ export default function CampaignFilters({
               style={activeStyle(partnerValue !== ALL)}
               widthClass="min-w-[200px]"
             />
-            <FilterSelect
+            <FlagSelect
               label="Database"
               value={databaseValue}
               onChange={setDatabase}
-              options={options.databases}
+              options={databaseSelectOptions}
               allLabel="Database: All"
               style={activeStyle(databaseValue !== ALL)}
               widthClass="min-w-[200px]"
-              selectClassName="geo-flag-select"
-              formatOption={formatDatabaseOption}
             />
             <button
               type="button"
@@ -559,13 +525,6 @@ type FilterSelectProps = {
   allLabel: string;
   style?: CSSProperties;
   widthClass?: string;
-  selectClassName?: string;
-  formatOption?: (value: string) => {
-    label: string;
-    className?: string;
-    style?: CSSProperties;
-    title?: string;
-  };
 };
 
 function FilterSelect({
@@ -576,16 +535,9 @@ function FilterSelect({
   allLabel,
   style,
   widthClass = 'min-w-[150px]',
-  selectClassName,
-  formatOption,
 }: FilterSelectProps) {
   const htmlId = useId();
   const disabled = options.length === 0;
-
-  const renderOption = useCallback(
-    (opt: string) => (formatOption ? formatOption(opt) : { label: opt }),
-    [formatOption],
-  );
 
   return (
     <label className={`flex flex-col gap-1 ${widthClass}`}>
@@ -594,27 +546,181 @@ function FilterSelect({
         id={htmlId}
         value={value}
         onChange={(e) => onChange(e.target.value)}
-        className={`input h-11 pr-9 ${disabled ? 'opacity-60' : ''} ${selectClassName ?? ''}`}
+        className={`input h-11 pr-9 ${disabled ? 'opacity-60' : ''}`}
         style={style}
         disabled={disabled}
       >
         <option value={ALL}>{allLabel}</option>
-        {options.map((opt) => {
-          const formatted = renderOption(opt);
-          return (
-            <option
-              key={opt}
-              value={opt}
-              className={formatted.className}
-              style={formatted.style}
-              title={formatted.title}
-            >
-              {formatted.label}
-            </option>
-          );
-        })}
+        {options.map((opt) => (
+          <option key={opt} value={opt}>
+            {opt}
+          </option>
+        ))}
       </select>
     </label>
+  );
+}
+
+type FlagSelectOption = {
+  value: string;
+  label: string;
+  geo?: string | null;
+};
+
+type FlagSelectProps = {
+  label: string;
+  value: string;
+  onChange: (value: string) => void;
+  options: FlagSelectOption[];
+  allLabel: string;
+  style?: CSSProperties;
+  widthClass?: string;
+};
+
+function FlagSelect({
+  label,
+  value,
+  onChange,
+  options,
+  allLabel,
+  style,
+  widthClass = 'min-w-[150px]',
+}: FlagSelectProps) {
+  const [open, setOpen] = useState(false);
+  const containerRef = useRef<HTMLElement | null>(null);
+  const listId = useId();
+  const disabled = options.length === 0;
+
+  const handleToggle = useCallback(() => {
+    if (disabled) return;
+    setOpen((prev) => !prev);
+  }, [disabled]);
+
+  const handleSelect = useCallback(
+    (next: string) => {
+      onChange(next);
+      setOpen(false);
+    },
+    [onChange],
+  );
+
+  useEffect(() => {
+    function onPointerDown(event: PointerEvent) {
+      if (!containerRef.current) return;
+      if (containerRef.current.contains(event.target as Node)) return;
+      setOpen(false);
+    }
+    window.addEventListener('pointerdown', onPointerDown);
+    return () => window.removeEventListener('pointerdown', onPointerDown);
+  }, []);
+
+  useEffect(() => {
+    function onKeyDown(event: KeyboardEvent) {
+      if (event.key === 'Escape') setOpen(false);
+    }
+    if (open) {
+      window.addEventListener('keydown', onKeyDown);
+      return () => window.removeEventListener('keydown', onKeyDown);
+    }
+  }, [open]);
+
+  const selected = value === ALL ? undefined : options.find((opt) => opt.value === value);
+
+  return (
+    <label className={`relative flex flex-col gap-1 ${widthClass}`} ref={containerRef}>
+      <span className="text-[11px] uppercase tracking-[0.14em] text-[color:var(--color-text)]/60">{label}</span>
+      <button
+        type="button"
+        className={`input h-11 pr-9 text-left flex items-center gap-3 w-full ${disabled ? 'opacity-60 cursor-not-allowed' : ''}`}
+        onClick={handleToggle}
+        style={style}
+        aria-haspopup="listbox"
+        aria-expanded={open}
+        aria-controls={open ? listId : undefined}
+        disabled={disabled}
+      >
+        {selected ? (
+          <FlagOptionContent option={selected} />
+        ) : (
+          <span className="text-sm">{allLabel}</span>
+        )}
+        <svg
+          className={`ml-auto h-4 w-4 text-[color:var(--color-text)]/60 transition-transform ${open ? 'rotate-180' : ''}`}
+          viewBox="0 0 20 20"
+          fill="none"
+          stroke="currentColor"
+          strokeWidth="1.6"
+          aria-hidden="true"
+        >
+          <path d="M5 7.5L10 12.5L15 7.5" strokeLinecap="round" strokeLinejoin="round" />
+        </svg>
+      </button>
+      {open ? (
+        <ul
+          id={listId}
+          role="listbox"
+          className="flag-select-menu"
+        >
+          <li
+            role="option"
+            aria-selected={value === ALL}
+            className={`flag-select-option ${value === ALL ? 'is-active' : ''}`}
+            onClick={() => handleSelect(ALL)}
+            tabIndex={0}
+            onKeyDown={(event) => {
+              if (event.key === 'Enter' || event.key === ' ') {
+                event.preventDefault();
+                handleSelect(ALL);
+              }
+            }}
+          >
+            <span className="flag-option__label">{allLabel}</span>
+          </li>
+          {options.map((opt) => (
+            <li
+              key={opt.value}
+              role="option"
+              aria-selected={value === opt.value}
+              className={`flag-select-option ${value === opt.value ? 'is-active' : ''}`}
+              onClick={() => handleSelect(opt.value)}
+              tabIndex={0}
+              onKeyDown={(event) => {
+                if (event.key === 'Enter' || event.key === ' ') {
+                  event.preventDefault();
+                  handleSelect(opt.value);
+                }
+              }}
+            >
+              <FlagOptionContent option={opt} />
+            </li>
+          ))}
+        </ul>
+      ) : null}
+    </label>
+  );
+}
+
+function FlagOptionContent({ option }: { option: FlagSelectOption }) {
+  return (
+    <span className="flag-option">
+      <FlagGlyph geo={option.geo} />
+      <span className="flag-option__label">{option.label}</span>
+    </span>
+  );
+}
+
+function FlagGlyph({ geo }: { geo?: string | null }) {
+  if (!geo) return null;
+  const canonical = canonicalGeo(geo);
+  if (!canonical) return null;
+  const flagClass = geoFlagClass(canonical);
+  if (flagClass) {
+    return <span className={`flag-option-flag fi fis ${flagClass}`} aria-hidden="true" />;
+  }
+  return (
+    <span className="flag-option-flag flag-option-flag--fallback" aria-hidden="true">
+      {geoEmoji(canonical)}
+    </span>
   );
 }
 
