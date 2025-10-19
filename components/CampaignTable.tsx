@@ -136,7 +136,7 @@ const COLUMN_DEFS: ColumnDef[] = [
   { id: 'marginPct', label: 'MARGIN (%)', numeric: true, defaultVisible: true, sortable: true, sortKey: 'marginPct',
     renderCell: (r) => {
       const pct = r.turnover > 0 ? r.margin / r.turnover : null;
-      return <span className={marginPctTextClass(pct)}>{pct == null ? '—' : fmtPct.format(pct)}</span>;
+      return <span className={marginPctTextClass(pct)}>{pct == null ? 'â€”' : fmtPct.format(pct)}</span>;
     },
     renderSummary: (s) => {
       const tier = marginPctTier(s.marginPct);
@@ -147,7 +147,7 @@ const COLUMN_DEFS: ColumnDef[] = [
         : '';
       return (
         <span className={`font-bold ${marginPctTextClass(s.marginPct)} ${badge}`}>
-          {s.marginPct == null ? '—' : fmtPct.format(s.marginPct)}
+          {s.marginPct == null ? 'â€”' : fmtPct.format(s.marginPct)}
         </span>
       );
     } },
@@ -228,7 +228,7 @@ function activePresetLabelFromRange(range?: [string|null,string|null] | null) {
     const [s,e] = rangeForPresetKey(k as any);
     if (s===start && e===end) return label;
   }
-  return `${start} → ${end}`;
+  return `${start} â†’ ${end}`;
 }
 
 function toneClassFromTier(tier: MarginTier | null) {
@@ -325,7 +325,7 @@ function KpiSummaryPanel({
           <KpiHighlight label="Turnover" value={turnover} />
           <KpiHighlight label="Margin (%)" value={marginPct} subValue={marginValue} tier={marginTier} />
           <KpiHighlight label="V Sent" value={vSent} />
-          <KpiHighlight label="eCPM" value={ecpm} hint="€/k" />
+          <KpiHighlight label="eCPM" value={ecpm} hint="â‚¬/k" />
         </div>
 
         <footer className="mt-auto flex flex-wrap items-center justify-between gap-3 text-xs md:text-sm text-[color:var(--color-text)]/70 tabular-nums">
@@ -349,7 +349,7 @@ export default function CampaignTable() {
   const { settings } = useRoutingSettings();
   const defaultRoutingRate = settings.defaultRate ?? DEFAULT_ROUTING_RATE;
 
-  /* ====== Catálogos canónicos ====== */
+  /* ====== CatÃ¡logos canÃ³nicos ====== */
   const catalogs = useCatalogOverrides();
   const PARTNERS = catalogs?.PARTNERS ?? [];
   const THEMES = (catalogs?.THEMES ?? []) as string[];
@@ -359,9 +359,9 @@ export default function CampaignTable() {
   const engine = useCampaignFilterEngine(rows);
   const dataSource = engine.filteredRows as unknown as (CampaignRow & { _idx: number })[];
 
-  // Opciones sin duplicados y con etiquetas canónicas
+  // Opciones sin duplicados y con etiquetas canÃ³nicas
   const options = useMemo(() => {
-    // qué hay presente en el dataset (normalizado)
+    // quÃ© hay presente en el dataset (normalizado)
     const presentTypesLc = new Set(rows.map(r => lc(r.type)).filter(Boolean));
     const presentPartners = new Set(rows.map(r => lc(r.partner)).filter(Boolean));
       const presentThemes = new Set(rows.map(r => lc(r.theme)).filter(Boolean));
@@ -373,14 +373,14 @@ export default function CampaignTable() {
       rows.map(r => canonDbType(r.databaseType)).filter((x): x is DBType => !!x)
     );
 
-    // mapas canónicos (lc -> etiqueta canónica)
+    // mapas canÃ³nicos (lc -> etiqueta canÃ³nica)
     const partnerMap = new Map(PARTNERS.map(p => [lc(p.name), p.name]));
     const themeMap = new Map(THEMES.map(t => [lc(t), t]));
 
-    // TYPE: intersección entre canónicos y presentes (evita cpl/CPL)
+    // TYPE: intersecciÃ³n entre canÃ³nicos y presentes (evita cpl/CPL)
     const typeOpts = TYPES.filter(t => presentTypesLc.has(lc(t)));
 
-    // PARTNER/THEME: colapsa por lc y etiqueta con la canónica si existe
+    // PARTNER/THEME: colapsa por lc y etiqueta con la canÃ³nica si existe
     const partnerOpts = Array.from(presentPartners)
       .map(k => partnerMap.get(k) ?? (rows.find(r => lc(r.partner) === k)?.partner ?? k))
       .sort((a, b) => a.localeCompare(b, 'es'));
@@ -389,10 +389,10 @@ export default function CampaignTable() {
       .map(k => themeMap.get(k) ?? (rows.find(r => lc(r.theme) === k)?.theme ?? k))
       .sort((a, b) => a.localeCompare(b, 'es'));
 
-    // GEO: mayúsculas
+    // GEO: mayÃºsculas
     const geoOpts = Array.from(presentGeos).sort();
 
-    // DB TYPE: orden estable canónico
+    // DB TYPE: orden estable canÃ³nico
     const dbOrder: DBType[] = ['B2B', 'B2C', 'Mixed'];
     const dbTypeOpts = dbOrder.filter(t => presentDbTypes.has(t));
 
@@ -408,7 +408,7 @@ export default function CampaignTable() {
       };
     }, [rows, PARTNERS, THEMES, TYPES]);
 
-  /* ====== Orden/paginación ====== */
+  /* ====== Orden/paginaciÃ³n ====== */
   const [sortKey, setSortKey] = useState<SortKey>('none');
   const [sortDir, setSortDir] = useState<'asc' | 'desc'>('asc');
   const [page, setPage] = useState(1);
@@ -535,7 +535,7 @@ export default function CampaignTable() {
     else { setSortDir(sortDir === 'asc' ? 'desc' : 'asc'); }
   }
 
-  /* ====== Medición de alturas para la lámina / offset ====== */
+  /* ====== MediciÃ³n de alturas para la lÃ¡mina / offset ====== */
   const refSticky = useRef<HTMLDivElement>(null);
   const [stickyHeight, setStickyHeight] = useState(0);
 
@@ -555,10 +555,10 @@ export default function CampaignTable() {
     };
   }, []);
 
-  // Offset donde debe “pegarse” el thead (debajo del stack sticky)
+  // Offset donde debe â€œpegarseâ€ el thead (debajo del stack sticky)
   const stackedBottom = `calc(var(--content-sticky-top) + ${stickyHeight}px + ${bandGapPx}px)`;
 
-  /* === Header de columna sticky — usa la regla CSS global === */
+  /* === Header de columna sticky â€” usa la regla CSS global === */
   const Th = ({ col }: { col: ColumnDef }) => {
     const active = col.sortable && sortKey === (col.sortKey ?? (col.id as SortKey));
     const ariaSort =
@@ -621,21 +621,16 @@ export default function CampaignTable() {
                 filters={engine.filters}
                 updateFilters={engine.updateFilters}
                 resetFilters={engine.resetFilters}
-                options={options}
-                pending={engine.pending}
-                onOpenColumns={() => setPickerOpen(true)}
-                onOpenExport={() => setOpenExport(true)}
-                exportCount={sortedAll.length}
-                onOpenRoutingOverride={isAdmin ? () => setOpenRoutingOverride(true) : undefined}
-                canOverrideRouting={isAdmin}
-              />
+                  options={options}
+                  pending={engine.pending}
+                />
             </div>
           </div>
 
           <KpiSummaryPanel
             periodLabel={periodLabel}
             turnover={fmtEUR.format(summary.turnover)}
-            marginPct={summary.marginPct == null ? '—' : fmtPct.format(summary.marginPct)}
+            marginPct={summary.marginPct == null ? 'â€”' : fmtPct.format(summary.marginPct)}
             marginValue={fmtEUR.format(summary.margin)}
             marginTier={marginTier}
             vSent={fmtInt.format(summary.vSent)}
@@ -645,7 +640,40 @@ export default function CampaignTable() {
           />
         </div>
 
-        {/* Lámina de fondo — debajo de thead */}
+                {/* Toolbar de acciones (fuera de filtros y KPIs) */}
+        <div className="flex justify-end gap-2 md:gap-3 mb-2">
+          <button
+            type="button"
+            className="btn-ghost text-sm px-3 py-1.5"
+            aria-haspopup="dialog"
+            title="Show/Hide columns"
+            onClick={() => setPickerOpen(true)}
+          >
+            Columns…
+          </button>
+          {isAdmin && (
+            <button
+              type="button"
+              className="text-sm px-3 py-1.5 rounded-md border border-[--color-border] hover:border-[--color-primary] hover:bg-[color-mix(in_oklab,var(--color-primary)_10%,transparent)] transition-colors inline-flex items-center gap-1.5"
+              aria-haspopup="dialog"
+              title="Override routing rate"
+              onClick={() => setOpenRoutingOverride(true)}
+            >
+              <span>Routing rate</span>
+            </button>
+          )}
+          <button
+            type="button"
+            className="text-sm px-3 py-1.5 rounded-md border border-[--color-border] hover:border-[--color-primary] hover:bg-[color-mix(in_oklab,var(--color-primary)_12%,transparent)] transition-colors inline-flex items-center gap-1.5"
+            aria-haspopup="dialog"
+            title="Export current view"
+            onClick={() => setOpenExport(true)}
+          >
+            <span className="mr-1">⇩</span>
+            <span>Export</span>
+            <span className="ml-0.5 text-[10px] opacity-70">({sortedAll.length})</span>
+          </button>
+        </div>{/* LÃ¡mina de fondo â€” debajo de thead */}
         <div
           aria-hidden
           style={{
@@ -696,7 +724,7 @@ export default function CampaignTable() {
               {visibleCols.map(col => (
                 <Th key={col.id} col={col} />
               ))}
-              <th className="w-[1%] text-right pr-2">⋯</th>
+              <th className="w-[1%] text-right pr-2">â‹¯</th>
             </tr>
           </thead>
 
@@ -748,10 +776,10 @@ export default function CampaignTable() {
         </table>
       </div>
 
-      {/* Paginación */}
+      {/* PaginaciÃ³n */}
       <div className="flex flex-wrap items-center justify-between gap-3 mt-3">
         <div className="text-sm opacity-80">
-          Showing {sortedAll.length === 0 ? 0 : start + 1}–{Math.min(end, sortedAll.length)} of {sortedAll.length}
+          Showing {sortedAll.length === 0 ? 0 : start + 1}â€“{Math.min(end, sortedAll.length)} of {sortedAll.length}
         </div>
         <div className="flex items-center gap-2">
           <label className="text-sm">Rows per page</label>
@@ -786,7 +814,7 @@ export default function CampaignTable() {
         />
       )}
 
-      {/* [EXPORT] Modal de exportación */}
+      {/* [EXPORT] Modal de exportaciÃ³n */}
       {openExport && (
         <ExportModal
           onClose={() => setOpenExport(false)}
@@ -800,3 +828,7 @@ export default function CampaignTable() {
     </div>
   );
 }
+
+
+
+

@@ -7,13 +7,15 @@ import type { Filters } from '@/hooks/useCampaignFilterEngine';
 
 type DatePreset =
   | 'today' | 'yesterday' | 'thisWeek' | 'lastWeek'
-  | 'thisMonth' | 'lastMonth' | 'last7' | 'last30' | 'custom';
+  | 'thisMonth' | 'lastMonth' | 'last7' | 'last30' | 'thisQuarter' | 'lastQuarter' | 'custom';
 
 const DATE_PRESETS: [DatePreset, string][] = [
   ['today', 'Today'],
   ['yesterday', 'Yesterday'],
   ['last7', 'Last 7'],
   ['last30', 'Last 30'],
+  ['thisQuarter', 'This quarter'],
+  ['lastQuarter', 'Last quarter'],
   ['thisWeek', 'This week'],
   ['lastWeek', 'Last week'],
   ['thisMonth', 'This month'],
@@ -261,7 +263,7 @@ export default function CampaignFilters({
     if (filters.dbTypes?.length) chips.push({ key: 'dbType', label: `DB Type: ${filters.dbTypes[0]}`, onClear: () => setDbType(ALL) });
     const [start, end] = filters.dateRange ?? [];
     if (start || end) {
-      const label = activePreset ? `Period: ${presetLabel(activePreset)}` : `Period: ${(start ?? '…')} → ${(end ?? '…')}`;
+      const label = activePreset ? `Period: ${presetLabel(activePreset)}` : `Period: ${(start ?? 'â€¦')} â†’ ${(end ?? 'â€¦')}`;
       chips.push({ key: 'date', label, onClear: clearDateRange });
     }
     return chips;
@@ -277,7 +279,7 @@ export default function CampaignFilters({
           <div className="relative">
             <input
               ref={inputRef}
-              placeholder="Search campaign, partner, theme, database…"
+              placeholder="Search campaign, partner, theme, databaseâ€¦"
               value={qDraft}
               onChange={(e) => setQDraft(e.target.value)}
               className="input w-full pr-12"
@@ -290,7 +292,7 @@ export default function CampaignFilters({
                 className="absolute inset-y-0 right-0 px-3 text-sm text-[color:var(--color-text)]/60 hover:text-[color:var(--color-text)] focus:outline-none"
                 onClick={clearSearch}
               >
-                ×
+                Ã—
               </button>
             ) : null}
           </div>
@@ -308,7 +310,7 @@ export default function CampaignFilters({
                     className="rounded-full px-2 py-[2px] hover:bg-black/5"
                     onClick={chip.onClear}
                   >
-                    ×
+                    Ã—
                   </button>
                 </span>
               ))}
@@ -444,7 +446,7 @@ export default function CampaignFilters({
           <div className="flex items-center gap-2 md:gap-3">
             {pending ? (
               <span className="text-xs opacity-70" role="status" aria-live="polite">
-                Updating…
+                Updatingâ€¦
               </span>
             ) : null}
             <button
@@ -462,45 +464,7 @@ export default function CampaignFilters({
             >
               Reset
             </button>
-            <div className="hidden sm:block h-6 w-px bg-[--color-border]" aria-hidden />
-            <div className="flex items-center gap-2">
-              <button
-                type="button"
-                className="btn-ghost text-sm px-3 py-1.5"
-                aria-haspopup="dialog"
-                title="Show/Hide columns"
-                onClick={() => onOpenColumns?.()}
-              >
-                Columns…
-              </button>
-              {canOverrideRouting && onOpenRoutingOverride && (
-                <button
-                  type="button"
-                  className="text-sm px-3 py-1.5 rounded-md border border-[--color-border] hover:border-[--color-primary] hover:bg-[color-mix(in_oklab,var(--color-primary)_10%,transparent)] transition-colors inline-flex items-center gap-1.5"
-                  aria-haspopup="dialog"
-                  title="Override routing rate"
-                  onClick={() => onOpenRoutingOverride?.()}
-                >
-                  <span>Routing rate</span>
-                </button>
-              )}
-              {onOpenExport && (
-                <button
-                  type="button"
-                  className="text-sm px-3 py-1.5 rounded-md border border-[--color-border] hover:border-[--color-primary] hover:bg-[color-mix(in_oklab,var(--color-primary)_12%,transparent)] transition-colors inline-flex items-center gap-1.5"
-                  aria-haspopup="dialog"
-                  title="Export current view"
-                  onClick={() => onOpenExport?.()}
-                >
-                  <DownloadIcon />
-                  <span>Export</span>
-                  {typeof exportCount === 'number' && exportCount > 0 && (
-                    <span className="ml-0.5 text-[10px] opacity-70">({exportCount})</span>
-                  )}
-                </button>
-              )}
             </div>
-          </div>
         </div>
 
         {showAdvancedBlock && (
@@ -615,3 +579,5 @@ function presetLabel(p: Exclude<DatePreset,'custom'>) {
     case 'lastMonth': return 'Last month';
   }
 }
+
+
