@@ -449,7 +449,7 @@ export default function CampaignFilters({
           <div className="flex items-center gap-2 md:gap-3">
             {pending ? (
               <span className="text-xs opacity-70" role="status" aria-live="polite">
-                Updatingâ€¦
+                Updating...
               </span>
             ) : null}
             <button

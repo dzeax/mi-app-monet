@@ -331,7 +331,7 @@ function KpiSummaryPanel({
           <KpiHighlight label="Turnover" value={turnover} />
           <KpiHighlight label="Margin (%)" value={marginPct} subValue={marginValue} tier={marginTier} />
           <KpiHighlight label="V Sent" value={vSent} />
-          <KpiHighlight label="eCPM" value={ecpm} hint="â‚¬/k" />
+          <KpiHighlight label="eCPM" value={ecpm} hint="EUR/k" />
         </div>
 
         <footer className="mt-auto flex flex-wrap items-center justify-between gap-3 text-xs md:text-sm text-[color:var(--color-text)]/70 tabular-nums">
