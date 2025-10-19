@@ -1074,6 +1074,7 @@ export default function CreateCampaignModal({
             {mode === 'create' && (
               <button
                 type="submit"
+                form="create-edit-campaign-form"
                 disabled={isSubmitting}
                 className="btn-ghost"
                 onClick={() => { submitIntentRef.current = 'save_add'; }}
@@ -1083,6 +1084,7 @@ export default function CreateCampaignModal({
             )}
             <button
               type="submit"
+              form="create-edit-campaign-form"
               disabled={isSubmitting}
               className="btn-primary"
               onClick={() => { submitIntentRef.current = 'save'; }}
