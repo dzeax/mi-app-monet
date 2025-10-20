@@ -1,7 +1,6 @@
-// components/reports/ReportsKpis.tsx
 'use client';
 
-import { fmtEUR2, fmtINT as fmtNum } from '@/utils/format';
+import { fmtEUR2, fmtINT } from '@/utils/format';
 
 type Kpis = {
   vSent: number;
@@ -11,44 +10,140 @@ type Kpis = {
   marginPct: number | null;
 };
 
-export default function ReportsKpis({ kpis }: { kpis: Kpis }) {
-  const marginText =
-    `${fmtEUR2.format(kpis.margin)}${
-      kpis.marginPct == null ? '' : ` (${(kpis.marginPct * 100).toFixed(1)}%)`
-    }`;
+type Props = {
+  kpis: Kpis;
+  periodLabel: string;
+  filteredRows?: number;
+  groupCount?: number;
+  className?: string;
+};
 
-  const highlight: 'pos' | 'neg' | undefined =
-    kpis.margin > 0 ? 'pos' : kpis.margin < 0 ? 'neg' : undefined;
+type MarginTier = 'green' | 'amber' | 'red' | null;
+
+const fmtPct = new Intl.NumberFormat('es-ES', {
+  style: 'percent',
+  maximumFractionDigits: 2,
+});
+
+export default function ReportsKpis({
+  kpis,
+  periodLabel,
+  filteredRows,
+  groupCount,
+  className = '',
+}: Props) {
+  const marginTier = getMarginTier(kpis.marginPct);
+
+  const turnover = fmtEUR2.format(kpis.turnover);
+  const marginPct = kpis.marginPct == null ? '--' : fmtPct.format(kpis.marginPct);
+  const marginValue = fmtEUR2.format(kpis.margin);
+  const vSent = fmtINT.format(kpis.vSent);
+  const ecpm = fmtEUR2.format(kpis.ecpm);
+
+  const rowsLabel = filteredRows == null ? '--' : fmtINT.format(filteredRows);
+  const groupsLabel = groupCount == null ? '--' : fmtINT.format(groupCount);
+  const containerClass = ['relative h-full', className].filter(Boolean).join(' ');
 
   return (
-    <div className="grid gap-3 mt-4 sm:grid-cols-2 lg:grid-cols-4">
-      <Kpi title="Total V Sent" value={fmtNum.format(kpis.vSent)} />
-      <Kpi title="Turnover" value={fmtEUR2.format(kpis.turnover)} />
-      <Kpi title="Margin" value={marginText} highlight={highlight} />
-      <Kpi title="Weighted eCPM" value={fmtEUR2.format(kpis.ecpm)} />
-    </div>
+    <aside className={containerClass}>
+      <div
+        className="absolute inset-0 rounded-2xl border border-[color-mix(in_oklab,var(--color-border)_55%,white)] shadow-[0_20px_45px_rgba(15,23,42,0.12)]"
+        style={{
+          background: 'linear-gradient(160deg, rgba(226,232,240,0.85), rgba(226,232,240,0.55))',
+        }}
+        aria-hidden="true"
+      />
+      <div className="relative z-[1] flex h-full flex-col rounded-2xl px-4 py-4 md:px-5 md:py-5 gap-4 overflow-hidden">
+        <header className="flex items-start justify-between gap-3">
+          <div>
+            <span className="text-[11px] uppercase tracking-[0.22em] text-[color:var(--color-text)]/60">
+              Performance Summary
+            </span>
+            <h3 className="text-lg md:text-xl font-semibold text-[color:var(--color-text)]/92 mt-1">
+              Live KPIs
+            </h3>
+          </div>
+          <span
+            className="rounded-full px-3 py-1 text-[11px] font-medium tabular-nums text-[color:var(--color-text)]/75 border shadow-inner"
+            style={{
+              background: 'rgba(79,209,197,0.18)',
+              borderColor: 'rgba(79,209,197,0.32)',
+            }}
+          >
+            {periodLabel}
+          </span>
+        </header>
+
+        <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 md:gap-4">
+          <KpiHighlight label="Turnover" value={turnover} />
+          <KpiHighlight label="Margin (%)" value={marginPct} subValue={marginValue} tier={marginTier} />
+          <KpiHighlight label="V Sent" value={vSent} />
+          <KpiHighlight label="eCPM" value={ecpm} hint="EUR/k" />
+        </div>
+
+        <footer className="mt-auto flex flex-wrap items-center justify-between gap-3 text-xs md:text-sm text-[color:var(--color-text)]/70 tabular-nums">
+          <span>
+            Rows <strong className="ml-1 text-[color:var(--color-text)]/85">{rowsLabel}</strong>
+          </span>
+          <span>
+            Groups <strong className="ml-1 text-[color:var(--color-text)]/85">{groupsLabel}</strong>
+          </span>
+        </footer>
+      </div>
+    </aside>
   );
 }
 
-function Kpi({
-  title,
+function getMarginTier(value: number | null | undefined): MarginTier {
+  if (value == null) return null;
+  if (value >= 0.7) return 'green';
+  if (value >= 0.01) return 'amber';
+  return 'red';
+}
+
+function toneClassFromTier(tier: MarginTier | null) {
+  switch (tier) {
+    case 'green':
+      return 'text-[color:var(--color-primary)]';
+    case 'amber':
+      return 'text-[color-mix(in_oklab,var(--color-accent)_58%,var(--color-primary)_42%)]';
+    case 'red':
+      return 'text-[color:var(--color-accent)]';
+    default:
+      return 'text-[color:var(--color-text)]/90';
+  }
+}
+
+function KpiHighlight({
+  label,
   value,
-  highlight,
+  tier = null,
+  subValue,
+  hint,
 }: {
-  title: string;
+  label: string;
   value: string;
-  highlight?: 'pos' | 'neg';
+  tier?: MarginTier | null;
+  subValue?: string;
+  hint?: string;
 }) {
-  const color =
-    highlight === 'pos'
-      ? 'text-[--color-primary]'
-      : highlight === 'neg'
-      ? 'text-[--color-accent]'
-      : 'opacity-100';
+  const toneClass = toneClassFromTier(tier ?? null);
+
   return (
-    <div className="rounded-xl border border-[--color-border] bg-[color:var(--color-surface)]/80 p-3">
-      <div className="text-xs uppercase opacity-70">{title}</div>
-      <div className={`text-xl font-semibold mt-1 ${color}`}>{value}</div>
+    <div className="rounded-xl border border-[color-mix(in_oklab,var(--color-border)_65%,transparent)] bg-[color-mix(in_oklab,var(--color-surface)_92%,var(--color-surface-2))]/92 px-4 py-3 sm:px-5 sm:py-4 shadow-[0_16px_32px_rgba(15,23,42,0.12)]">
+      <span className="text-[11px] uppercase tracking-[0.16em] text-[color:var(--color-text)]/55">{label}</span>
+      <div
+        className={['mt-2 flex items-baseline gap-2', toneClass].join(' ')}
+        style={{ fontVariantNumeric: 'tabular-nums' }}
+      >
+        <span className="text-xl sm:text-2xl font-semibold">{value}</span>
+        {hint ? <span className="text-xs opacity-70">{hint}</span> : null}
+      </div>
+      {subValue ? (
+        <div className={['mt-1 text-xs sm:text-sm tabular-nums', tier ? toneClass : 'text-[color:var(--color-text)]/65'].join(' ')}>
+          {subValue}
+        </div>
+      ) : null}
     </div>
   );
 }

@@ -16,6 +16,107 @@ const fmtEUR = new Intl.NumberFormat('es-ES', { style: 'currency', currency: 'EU
 const fmtInt = new Intl.NumberFormat('es-ES');
 const fmtPct = new Intl.NumberFormat('es-ES', { style: 'percent', maximumFractionDigits: 2 });
 
+type DatePresetKey =
+  | 'today'
+  | 'yesterday'
+  | 'thisWeek'
+  | 'lastWeek'
+  | 'thisMonth'
+  | 'lastMonth'
+  | 'last7'
+  | 'last30';
+
+const PERIOD_PRESETS: Array<{ key: DatePresetKey; label: string }> = [
+  { key: 'today', label: 'Today' },
+  { key: 'yesterday', label: 'Yesterday' },
+  { key: 'last7', label: 'Last 7' },
+  { key: 'last30', label: 'Last 30' },
+  { key: 'thisWeek', label: 'This week' },
+  { key: 'lastWeek', label: 'Last week' },
+  { key: 'thisMonth', label: 'This month' },
+  { key: 'lastMonth', label: 'Last month' },
+];
+
+const fmtLocal = (d: Date) => {
+  const year = d.getFullYear();
+  const month = String(d.getMonth() + 1).padStart(2, '0');
+  const day = String(d.getDate()).padStart(2, '0');
+  return `${year}-${month}-${day}`;
+};
+
+function startOfWeek(d: Date) {
+  const copy = new Date(d.getFullYear(), d.getMonth(), d.getDate());
+  const offset = (copy.getDay() || 7) - 1;
+  copy.setDate(copy.getDate() - offset);
+  return copy;
+}
+
+function endOfWeek(d: Date) {
+  const start = startOfWeek(d);
+  return new Date(start.getFullYear(), start.getMonth(), start.getDate() + 6);
+}
+
+function startOfMonth(d: Date) {
+  return new Date(d.getFullYear(), d.getMonth(), 1);
+}
+
+function endOfMonth(d: Date) {
+  return new Date(d.getFullYear(), d.getMonth() + 1, 0);
+}
+
+function rangeForPresetKey(key: DatePresetKey): [string, string] {
+  const now = new Date();
+  if (key === 'today') {
+    const base = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+    const iso = fmtLocal(base);
+    return [iso, iso];
+  }
+  if (key === 'yesterday') {
+    const base = new Date(now.getFullYear(), now.getMonth(), now.getDate() - 1);
+    const iso = fmtLocal(base);
+    return [iso, iso];
+  }
+  if (key === 'thisWeek') {
+    return [fmtLocal(startOfWeek(now)), fmtLocal(endOfWeek(now))];
+  }
+  if (key === 'lastWeek') {
+    const ref = new Date(now.getFullYear(), now.getMonth(), now.getDate() - 7);
+    return [fmtLocal(startOfWeek(ref)), fmtLocal(endOfWeek(ref))];
+  }
+  if (key === 'thisMonth') {
+    return [fmtLocal(startOfMonth(now)), fmtLocal(endOfMonth(now))];
+  }
+  if (key === 'lastMonth') {
+    const ref = new Date(now.getFullYear(), now.getMonth() - 1, 15);
+    return [fmtLocal(startOfMonth(ref)), fmtLocal(endOfMonth(ref))];
+  }
+  if (key === 'last7') {
+    const start = new Date(now.getFullYear(), now.getMonth(), now.getDate() - 6);
+    const end = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+    return [fmtLocal(start), fmtLocal(end)];
+  }
+  const start = new Date(now.getFullYear(), now.getMonth(), now.getDate() - 29);
+  const end = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+  return [fmtLocal(start), fmtLocal(end)];
+}
+
+function formatPeriodLabel(from?: string, to?: string): string {
+  if (!from && !to) return 'All data';
+  if (from && !to) return `Since ${from}`;
+  if (!from && to) return `Until ${to}`;
+  if (!from || !to) return 'All data';
+
+  for (const preset of PERIOD_PRESETS) {
+    const [presetStart, presetEnd] = rangeForPresetKey(preset.key);
+    if (presetStart === from && presetEnd === to) {
+      return preset.label;
+    }
+  }
+
+  if (from === to) return from;
+  return `${from} to ${to}`;
+}
+
 export default function ReportsView() {
   const {
     filters, setFilters,
@@ -80,30 +181,39 @@ export default function ReportsView() {
     margin: frB2C.margin + frB2B.margin + intl.margin,
   };
   const subtotalMarginPct = subtotal.turnover > 0 ? subtotal.margin / subtotal.turnover : null;
+  const periodLabel = useMemo(
+    () => formatPeriodLabel(filters.from, filters.to),
+    [filters.from, filters.to]
+  );
 
   return (
     <div className="grid gap-6">
-      {/* Filtros (en tarjeta) */}
-      <Card>
-        <ReportsHeader
-          groupBy={groupBy}
-          metric={metric}
-          topN={topN}
-          filters={filters}
-          onChangeFilters={setFilters}
-          onChangeGroupBy={setGroupBy}
-          onChangeMetric={(m: Metric) => setMetric(m)}
-          onChangeTopN={setTopN}
-          onQuickLast30={quickLast30}
-          onExportCsv={exportCsv}
-          summary={{ filteredCount: summary.filteredRows, groupCount: summary.groups }}
-        />
-      </Card>
+      {/* Filtros + KPIs */}
+      <div className="grid grid-cols-1 items-stretch gap-4 lg:grid-cols-[minmax(0,1.85fr)_minmax(0,1fr)] lg:gap-5">
+        <Card className="h-full">
+          <ReportsHeader
+            groupBy={groupBy}
+            metric={metric}
+            topN={topN}
+            filters={filters}
+            onChangeFilters={setFilters}
+            onChangeGroupBy={setGroupBy}
+            onChangeMetric={(m: Metric) => setMetric(m)}
+            onChangeTopN={setTopN}
+            onQuickLast30={quickLast30}
+            onExportCsv={exportCsv}
+            summary={{ filteredCount: summary.filteredRows, groupCount: summary.groups }}
+          />
+        </Card>
 
-      {/* KPIs globales */}
-      <Card>
-        <ReportsKpis kpis={summary.totals} />
-      </Card>
+        <ReportsKpis
+          className="h-full"
+          kpis={summary.totals}
+          periodLabel={periodLabel}
+          filteredRows={summary.filteredRows}
+          groupCount={summary.groups}
+        />
+      </div>
 
       {/* Unified time series — inmediatamente tras KPIs */}
       <Card>
