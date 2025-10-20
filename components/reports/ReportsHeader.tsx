@@ -1,10 +1,8 @@
 'use client';
 
-import { useEffect, useMemo, useRef, useState } from 'react';
-import type { RefObject } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import Link from 'next/link';
 import Chip from '@/components/ui/Chip';
-import { useCatalogOverrides } from '@/context/CatalogOverridesContext';
 import type { GroupBy, Metric, ReportFilters } from '@/types/reports';
 
 type Props = {
@@ -12,38 +10,35 @@ type Props = {
   metric: Metric;
   topN: number;
 
+  focusKey: string | null;
+  focusOptions: string[];
+
   filters: ReportFilters;
   onChangeFilters: (next: ReportFilters) => void;
 
   onChangeGroupBy: (g: GroupBy) => void;
   onChangeMetric: (m: Metric) => void;
   onChangeTopN: (n: number) => void;
+  onChangeFocus: (key: string | null) => void;
 
   onQuickLast30?: () => void;
   onExportCsv?: () => void;
 
   summary?: { filteredCount?: number; groupCount?: number };
-
-  trendIncludeOthers: boolean;
-  onToggleTrendIncludeOthers: (v: boolean) => void;
-  trendFocusKey: string | null;
-  trendFocusOptions: string[];
-  onChangeTrendFocus: (key: string | null) => void;
-  trendGroupBy: 'none' | 'database' | 'partner' | 'geo';
 };
 
+const metrics: Metric[] = ['turnover', 'margin', 'ecpm', 'vSent'];
+
 const groupByOptions: { value: GroupBy; label: string }[] = [
-  { value: 'database',     label: 'Database' },
-  { value: 'partner',      label: 'Partner' },
-  { value: 'campaign',     label: 'Campaign' },
-  { value: 'advertiser',   label: 'Advertiser' },
-  { value: 'theme',        label: 'Theme' },
-  { value: 'geo',          label: 'GEO' },
-  { value: 'type',         label: 'Type' },
+  { value: 'database', label: 'Database' },
+  { value: 'partner', label: 'Partner' },
+  { value: 'campaign', label: 'Campaign' },
+  { value: 'advertiser', label: 'Advertiser' },
+  { value: 'theme', label: 'Theme' },
+  { value: 'geo', label: 'GEO' },
+  { value: 'type', label: 'Type' },
   { value: 'databaseType', label: 'DB Type' },
 ];
-
-const metrics: Metric[] = ['turnover', 'margin', 'ecpm', 'vSent'];
 
 type DatePreset =
   | 'today'
@@ -74,120 +69,83 @@ const DATE_PRESET_OPTIONS: Array<[DatePreset, string]> = [
   ['custom', 'Custom'],
 ];
 
-function fmtLocal(d: Date) {
-  const y = d.getFullYear();
-  const m = String(d.getMonth() + 1).padStart(2, '0');
-  const day = String(d.getDate()).padStart(2, '0');
-  return `${y}-${m}-${day}`;
+function fmtLocal(date: Date) {
+  const year = date.getFullYear();
+  const month = String(date.getMonth() + 1).padStart(2, '0');
+  const day = String(date.getDate()).padStart(2, '0');
+  return `${year}-${month}-${day}`;
 }
-function startOfWeek(d: Date) {
-  const n = new Date(d.getFullYear(), d.getMonth(), d.getDate());
-  const w = (n.getDay() || 7) - 1;
-  n.setDate(n.getDate() - w);
-  return n;
+function startOfWeek(date: Date) {
+  const copy = new Date(date.getFullYear(), date.getMonth(), date.getDate());
+  const offset = (copy.getDay() || 7) - 1;
+  copy.setDate(copy.getDate() - offset);
+  return copy;
 }
-function endOfWeek(d: Date) {
-  const s = startOfWeek(d);
-  return new Date(s.getFullYear(), s.getMonth(), s.getDate() + 6);
+function endOfWeek(date: Date) {
+  const start = startOfWeek(date);
+  return new Date(start.getFullYear(), start.getMonth(), start.getDate() + 6);
 }
-function startOfMonth(d: Date) {
-  return new Date(d.getFullYear(), d.getMonth(), 1);
+function startOfMonth(date: Date) {
+  return new Date(date.getFullYear(), date.getMonth(), 1);
 }
-function endOfMonth(d: Date) {
-  return new Date(d.getFullYear(), d.getMonth() + 1, 0);
+function endOfMonth(date: Date) {
+  return new Date(date.getFullYear(), date.getMonth() + 1, 0);
 }
-function startOfQuarter(d: Date) {
-  const q = Math.floor(d.getMonth() / 3);
-  return new Date(d.getFullYear(), q * 3, 1);
+function startOfQuarter(date: Date) {
+  const quarter = Math.floor(date.getMonth() / 3);
+  return new Date(date.getFullYear(), quarter * 3, 1);
 }
-function endOfQuarter(d: Date) {
-  const start = startOfQuarter(d);
+function endOfQuarter(date: Date) {
+  const start = startOfQuarter(date);
   return new Date(start.getFullYear(), start.getMonth() + 3, 0);
 }
-function shiftQuarter(d: Date, delta: number) {
-  const start = startOfQuarter(d);
+function shiftQuarter(date: Date, delta: number) {
+  const start = startOfQuarter(date);
   return new Date(start.getFullYear(), start.getMonth() + delta * 3, 1);
 }
 
-function rangeForPreset(p: NonCustomPreset): [string, string] {
+function rangeForPreset(preset: NonCustomPreset): [string, string] {
   const now = new Date();
-  if (p === 'today') {
+  if (preset === 'today') {
     const base = new Date(now.getFullYear(), now.getMonth(), now.getDate());
     const iso = fmtLocal(base);
     return [iso, iso];
   }
-  if (p === 'yesterday') {
+  if (preset === 'yesterday') {
     const base = new Date(now.getFullYear(), now.getMonth(), now.getDate() - 1);
     const iso = fmtLocal(base);
     return [iso, iso];
   }
-  if (p === 'thisWeek') {
-    return [fmtLocal(startOfWeek(now)), fmtLocal(endOfWeek(now))];
+  if (preset === 'thisWeek') return [fmtLocal(startOfWeek(now)), fmtLocal(endOfWeek(now))];
+  if (preset === 'lastWeek') {
+    const ref = new Date(now.getFullYear(), now.getMonth(), now.getDate() - 7);
+    return [fmtLocal(startOfWeek(ref)), fmtLocal(endOfWeek(ref))];
   }
-  if (p === 'lastWeek') {
-    const k = new Date(now.getFullYear(), now.getMonth(), now.getDate() - 7);
-    return [fmtLocal(startOfWeek(k)), fmtLocal(endOfWeek(k))];
+  if (preset === 'thisMonth') return [fmtLocal(startOfMonth(now)), fmtLocal(endOfMonth(now))];
+  if (preset === 'lastMonth') {
+    const ref = new Date(now.getFullYear(), now.getMonth() - 1, 15);
+    return [fmtLocal(startOfMonth(ref)), fmtLocal(endOfMonth(ref))];
   }
-  if (p === 'thisMonth') {
-    return [fmtLocal(startOfMonth(now)), fmtLocal(endOfMonth(now))];
-  }
-  if (p === 'lastMonth') {
-    const k = new Date(now.getFullYear(), now.getMonth() - 1, 15);
-    return [fmtLocal(startOfMonth(k)), fmtLocal(endOfMonth(k))];
-  }
-  if (p === 'thisQuarter') {
-    return [fmtLocal(startOfQuarter(now)), fmtLocal(endOfQuarter(now))];
-  }
-  if (p === 'lastQuarter') {
+  if (preset === 'thisQuarter') return [fmtLocal(startOfQuarter(now)), fmtLocal(endOfQuarter(now))];
+  if (preset === 'lastQuarter') {
     const ref = shiftQuarter(now, -1);
     return [fmtLocal(startOfQuarter(ref)), fmtLocal(endOfQuarter(ref))];
   }
-  if (p === 'last7') {
-    const a = new Date(now.getFullYear(), now.getMonth(), now.getDate() - 6);
-    const b = new Date(now.getFullYear(), now.getMonth(), now.getDate());
-    return [fmtLocal(a), fmtLocal(b)];
+  if (preset === 'last7') {
+    const start = new Date(now.getFullYear(), now.getMonth(), now.getDate() - 6);
+    const end = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+    return [fmtLocal(start), fmtLocal(end)];
   }
-  const a = new Date(now.getFullYear(), now.getMonth(), now.getDate() - 29);
-  const b = new Date(now.getFullYear(), now.getMonth(), now.getDate());
-  return [fmtLocal(a), fmtLocal(b)];
+  const start = new Date(now.getFullYear(), now.getMonth(), now.getDate() - 29);
+  const end = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+  return [fmtLocal(start), fmtLocal(end)];
 }
 
-function cloneFilters(input?: ReportFilters | null): ReportFilters {
-  if (!input) return {};
-  return JSON.parse(JSON.stringify(input)) as ReportFilters;
-}
-
-function normalizeFilters(input?: ReportFilters | null): ReportFilters {
-  if (!input) return {};
-  const next: ReportFilters = {};
-  (Object.entries(input) as [keyof ReportFilters, ReportFilters[keyof ReportFilters]][]).forEach(([key, value]) => {
-    if (value == null) return;
-    if (Array.isArray(value)) {
-      if (value.length > 0) next[key] = [...value] as ReportFilters[keyof ReportFilters];
-      return;
-    }
-    if (typeof value === 'string') {
-      if (value !== '') next[key] = value as ReportFilters[keyof ReportFilters];
-      return;
-    }
-    if (typeof value === 'boolean') {
-      if (value) next[key] = value as ReportFilters[keyof ReportFilters];
-      return;
-    }
-    next[key] = value as ReportFilters[keyof ReportFilters];
-  });
-  return next;
-}
-
-function filtersEqual(a?: ReportFilters | null, b?: ReportFilters | null) {
-  return JSON.stringify(normalizeFilters(a)) === JSON.stringify(normalizeFilters(b));
-}
-
-function mergeDraft(prev: ReportFilters, patch: Partial<ReportFilters>): ReportFilters {
-  const next: ReportFilters = { ...prev, ...patch };
+function updateFilter(filters: ReportFilters, patch: Partial<ReportFilters>) {
+  const next: ReportFilters = { ...filters, ...patch };
   (Object.keys(next) as (keyof ReportFilters)[]).forEach((key) => {
     const value = next[key];
-    if (value === undefined || value === null) {
+    if (value == null) {
       delete next[key];
       return;
     }
@@ -206,62 +164,21 @@ export default function ReportsHeader({
   groupBy,
   metric,
   topN,
+  focusKey,
+  focusOptions,
   filters,
   onChangeFilters,
   onChangeGroupBy,
   onChangeMetric,
   onChangeTopN,
+  onChangeFocus,
   onQuickLast30,
   onExportCsv,
   summary,
-  trendIncludeOthers,
-  onToggleTrendIncludeOthers,
-  trendFocusKey,
-  trendFocusOptions,
-  onChangeTrendFocus,
-  trendGroupBy,
 }: Props) {
-  const { PARTNERS, DATABASES, THEMES, TYPES } = useCatalogOverrides();
-
-  const geoOptions = useMemo(() => {
-    const set = new Set<string>();
-    DATABASES.forEach((d) => d.geo && set.add((d.geo || '').toUpperCase()));
-    return Array.from(set).sort();
-  }, [DATABASES]);
-
-  const databaseOptions = useMemo(() => {
-    const set = new Set<string>();
-    DATABASES.forEach((d) => {
-      const name = (d.name || '').trim();
-      if (name) set.add(name);
-    });
-    return Array.from(set).sort((a, b) => a.localeCompare(b));
-  }, [DATABASES]);
-
-  const partnerOptions = useMemo(
-    () => PARTNERS.map((p) => ({ id: p.id, name: p.name, isInternal: !!p.isInternal })),
-    [PARTNERS],
-  );
-  const themeOptions = useMemo(() => THEMES, [THEMES]);
-  const typeOptions = useMemo(() => TYPES, [TYPES]);
-  const dbTypeOptions = ['B2C', 'B2B', 'Mixed'] as const;
-
-  const s = summary || {};
-
-  const [draft, setDraft] = useState<ReportFilters>(() => cloneFilters(filters));
-
-  useEffect(() => {
-    setDraft(cloneFilters(filters));
-  }, [filters]);
-
-  const updateDraft = (patch: Partial<ReportFilters>) => {
-    setDraft((prev) => mergeDraft(prev, patch));
-  };
-
-  const startDate = draft.from || '';
-  const endDate = draft.to || '';
+  const startDate = filters.from ?? '';
+  const endDate = filters.to ?? '';
   const hasRange = !!(startDate && endDate);
-
   const [activePreset, setActivePreset] = useState<DatePreset>('custom');
 
   useEffect(() => {
@@ -271,8 +188,8 @@ export default function ReportsHeader({
     }
     for (const [key] of DATE_PRESET_OPTIONS) {
       if (key === 'custom') continue;
-      const [sRange, eRange] = rangeForPreset(key as NonCustomPreset);
-      if (sRange === startDate && eRange === endDate) {
+      const [s, e] = rangeForPreset(key as NonCustomPreset);
+      if (s === startDate && e === endDate) {
         setActivePreset(key);
         return;
       }
@@ -280,8 +197,8 @@ export default function ReportsHeader({
     setActivePreset('custom');
   }, [startDate, endDate, hasRange]);
 
-  const startRef: RefObject<HTMLInputElement> = useRef(null);
-  const endRef: RefObject<HTMLInputElement> = useRef(null);
+  const startRef = useRef<HTMLInputElement>(null);
+  const endRef = useRef<HTMLInputElement>(null);
 
   const openPicker = (ref: RefObject<HTMLInputElement>) => {
     const el = ref.current;
@@ -298,33 +215,11 @@ export default function ReportsHeader({
     }
     const [from, to] = rangeForPreset(preset as NonCustomPreset);
     setActivePreset(preset);
-    updateDraft({ from, to });
+    onChangeFilters(updateFilter(filters, { from, to }));
     if (preset === 'last30') onQuickLast30?.();
   };
 
-  const toggleOnlyInternal = () => {
-    const next = !draft.onlyInternalPartners;
-    updateDraft({ onlyInternalPartners: next ? true : undefined });
-  };
-
-  const handleApply = () => {
-    onChangeFilters(normalizeFilters(draft));
-  };
-
-  const handleDiscard = () => {
-    setDraft(cloneFilters(filters));
-  };
-
-  const handleClear = () => {
-    setActivePreset('custom');
-    setDraft({});
-    onChangeFilters({});
-  };
-
-  const isDirty = useMemo(() => !filtersEqual(filters, draft), [filters, draft]);
-
-  const canFocus = trendGroupBy !== 'none' && trendFocusOptions.length > 0;
-  const focusOptionsSorted = useMemo(() => trendFocusOptions.slice().sort(), [trendFocusOptions]);
+  const focusDisabled = focusOptions.length === 0;
 
   return (
     <div className="grid gap-4">
@@ -334,9 +229,9 @@ export default function ReportsHeader({
           <p className="muted">
             {groupByLabel(groupBy)} performance ·{' '}
             <span className="opacity-80">
-              {s.filteredCount != null ? `${s.filteredCount} rows` : ''}
-              {s.filteredCount != null && s.groupCount != null ? ' · ' : ''}
-              {s.groupCount != null ? `${s.groupCount} groups` : ''}
+              {summary?.filteredCount != null ? `${summary.filteredCount} rows` : ''}
+              {summary?.filteredCount != null && summary?.groupCount != null ? ' · ' : ''}
+              {summary?.groupCount != null ? `${summary.groupCount} groups` : ''}
             </span>
           </p>
         </div>
@@ -354,7 +249,7 @@ export default function ReportsHeader({
 
       <div className="filters-stack">
         <div className="grid gap-3 md:grid-cols-12 items-end">
-          <div className="md:col-span-2">
+          <div className="md:col-span-3">
             <label className="text-sm grid gap-1">
               <span className="muted">Group by</span>
               <select
@@ -371,12 +266,12 @@ export default function ReportsHeader({
             </label>
           </div>
 
-          <div className="md:col-span-8">
-            <span className="muted text-sm mb-1 inline-block">Ranking metric</span>
+          <div className="md:col-span-5">
+            <span className="muted text-sm mb-1 inline-block">Metric</span>
             <div className="flex gap-1 flex-wrap">
               {metrics.map((item) => (
-                <Chip key={item} active={metric === item} onClick={() => onChangeMetric(item)} title={`Rank by ${item}`}>
-                  {item === 'turnover' ? 'Turnover' : item === 'margin' ? 'Margin' : item === 'ecpm' ? 'eCPM' : 'V Sent'}
+                <Chip key={item} active={metric === item} onClick={() => onChangeMetric(item)}>
+                  {metricLabel(item)}
                 </Chip>
               ))}
             </div>
@@ -384,7 +279,7 @@ export default function ReportsHeader({
 
           <div className="md:col-span-2">
             <label className="text-sm grid gap-1">
-              <span className="muted">Top N (ranking)</span>
+              <span className="muted">Top N</span>
               <input
                 type="number"
                 className="input"
@@ -393,6 +288,25 @@ export default function ReportsHeader({
                 value={topN}
                 onChange={(event) => onChangeTopN(Math.max(1, Math.min(50, Number(event.target.value || 1))))}
               />
+            </label>
+          </div>
+
+          <div className="md:col-span-2">
+            <label className="text-sm grid gap-1">
+              <span className="muted">Focus</span>
+              <select
+                className="input"
+                value={focusKey ?? ''}
+                onChange={(event) => onChangeFocus(event.target.value ? event.target.value : null)}
+                disabled={focusDisabled}
+              >
+                <option value="">All</option>
+                {focusOptions.map((option) => (
+                  <option key={option} value={option}>
+                    {option}
+                  </option>
+                ))}
+              </select>
             </label>
           </div>
         </div>
@@ -415,7 +329,7 @@ export default function ReportsHeader({
               ref={startRef}
               type="date"
               value={startDate}
-              onChange={(event) => updateDraft({ from: event.target.value || undefined })}
+              onChange={(event) => onChangeFilters(updateFilter(filters, { from: event.target.value || undefined }))}
               className="input input-date w-40 pr-9"
             />
             <button
@@ -433,7 +347,7 @@ export default function ReportsHeader({
               ref={endRef}
               type="date"
               value={endDate}
-              onChange={(event) => updateDraft({ to: event.target.value || undefined })}
+              onChange={(event) => onChangeFilters(updateFilter(filters, { to: event.target.value || undefined }))}
               className="input input-date w-40 pr-9"
             />
             <button
@@ -445,192 +359,25 @@ export default function ReportsHeader({
               📅
             </button>
           </div>
-
-          <div className="flex-1" />
-
-          <label className="inline-flex items-center gap-2 text-sm">
-            <input
-              type="checkbox"
-              className="accent-[--color-primary]"
-              checked={!!draft.onlyInternalPartners}
-              onChange={toggleOnlyInternal}
-            />
-            <span className="muted">Only internal</span>
-          </label>
-
-          <button
-            className="btn-primary"
-            type="button"
-            onClick={handleApply}
-            disabled={!isDirty}
-            title={isDirty ? 'Apply filters' : 'No pending changes'}
-          >
-            Apply
-          </button>
-
-          <button
-            className="btn-ghost"
-            type="button"
-            onClick={handleDiscard}
-            disabled={!isDirty}
-          >
-            Discard
-          </button>
-
-          <button className="btn-ghost" type="button" onClick={handleClear}>
-            Clear all
-          </button>
-        </div>
-
-        <div className="grid gap-3 md:grid-cols-2 lg:grid-cols-3">
-          <label className="text-sm grid gap-1">
-            <span className="muted">GEO</span>
-            <select
-              className="input"
-              value={draft.geos?.[0] ?? ''}
-              onChange={(event) => updateDraft({ geos: event.target.value ? [event.target.value] : undefined })}
-            >
-              <option value="">All</option>
-              {geoOptions.map((g) => (
-                <option key={g} value={g}>
-                  {g}
-                </option>
-              ))}
-            </select>
-          </label>
-
-          <label className="text-sm grid gap-1">
-            <span className="muted">Partner</span>
-            <select
-              className="input"
-              value={draft.partners?.[0] ?? ''}
-              onChange={(event) => updateDraft({ partners: event.target.value ? [event.target.value] : undefined })}
-            >
-              <option value="">All</option>
-              {partnerOptions.map((p) => (
-                <option key={p.id} value={p.name}>
-                  {p.name}{p.isInternal ? ' · INT' : ''}
-                </option>
-              ))}
-            </select>
-          </label>
-
-          <label className="text-sm grid gap-1">
-            <span className="muted">Database</span>
-            <select
-              className="input"
-              value={draft.databases?.[0] ?? ''}
-              onChange={(event) => updateDraft({ databases: event.target.value ? [event.target.value] : undefined })}
-            >
-              <option value="">All</option>
-              {databaseOptions.map((name) => (
-                <option key={name} value={name}>
-                  {name}
-                </option>
-              ))}
-            </select>
-          </label>
-
-          <label className="text-sm grid gap-1">
-            <span className="muted">Theme</span>
-            <select
-              className="input"
-              value={draft.themes?.[0] ?? ''}
-              onChange={(event) => updateDraft({ themes: event.target.value ? [event.target.value] : undefined })}
-            >
-              <option value="">All</option>
-              {themeOptions.map((t) => (
-                <option key={t} value={t}>
-                  {t}
-                </option>
-              ))}
-            </select>
-          </label>
-
-          <label className="text-sm grid gap-1">
-            <span className="muted">Type</span>
-            <select
-              className="input"
-              value={draft.types?.[0] ?? ''}
-              onChange={(event) =>
-                updateDraft({ types: event.target.value ? [event.target.value as (typeof typeOptions)[number]] : undefined })
-              }
-            >
-              <option value="">All</option>
-              {typeOptions.map((t) => (
-                <option key={t} value={t}>
-                  {t}
-                </option>
-              ))}
-            </select>
-          </label>
-
-          <label className="text-sm grid gap-1">
-            <span className="muted">DB Type</span>
-            <select
-              className="input"
-              value={draft.databaseTypes?.[0] ?? ''}
-              onChange={(event) =>
-                updateDraft({ databaseTypes: event.target.value ? [event.target.value as (typeof dbTypeOptions)[number]] : undefined })
-              }
-            >
-              <option value="">All</option>
-              {dbTypeOptions.map((t) => (
-                <option key={t} value={t}>
-                  {t}
-                </option>
-              ))}
-            </select>
-          </label>
-        </div>
-
-        <div className="pt-4 mt-2 border-t border-[color-mix(in_oklab,var(--color-border)_80%,transparent)]">
-          <div className="text-sm font-medium mb-2">Trend fine-tuning</div>
-          {trendGroupBy === 'none' ? (
-            <p className="text-sm text-[color:var(--color-text)]/60">
-              Focus and &quot;Others&quot; controls are unavailable for the current grouping.
-            </p>
-          ) : null}
-          <div className="flex flex-wrap items-end gap-3">
-            <label className="text-sm grid gap-1">
-              <span className="muted">Focus</span>
-              <select
-                className="input"
-                value={trendFocusKey ?? ''}
-                onChange={(event) => onChangeTrendFocus(event.target.value ? event.target.value : null)}
-                disabled={!canFocus}
-              >
-                <option value="">All</option>
-                {focusOptionsSorted.map((option) => (
-                  <option key={option} value={option}>
-                    {option}
-                  </option>
-                ))}
-              </select>
-            </label>
-
-            <label
-              className={`text-sm inline-flex items-center gap-2 ${
-                trendGroupBy === 'none' ? 'opacity-50' : ''
-              }`}
-              title={trendGroupBy === 'none' ? 'Available when grouping by Database, Partner or GEO' : undefined}
-            >
-              <input
-                type="checkbox"
-                className="accent-[--color-primary]"
-                checked={trendIncludeOthers}
-                onChange={(event) => onToggleTrendIncludeOthers(event.target.checked)}
-                disabled={trendGroupBy === 'none'}
-              />
-              <span className="muted">Include &quot;Others&quot;</span>
-            </label>
-          </div>
         </div>
       </div>
     </div>
   );
 }
 
-function groupByLabel(g: GroupBy) {
-  return groupByOptions.find((o) => o.value === g)?.label ?? 'Group';
+function groupByLabel(groupBy: GroupBy) {
+  return groupByOptions.find((option) => option.value === groupBy)?.label ?? 'Group';
+}
+
+function metricLabel(metric: Metric) {
+  switch (metric) {
+    case 'turnover':
+      return 'Turnover';
+    case 'margin':
+      return 'Margin';
+    case 'ecpm':
+      return 'eCPM';
+    case 'vSent':
+      return 'V Sent';
+  }
 }

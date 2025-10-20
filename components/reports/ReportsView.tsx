@@ -1,4 +1,4 @@
-﻿'use client';
+'use client';
 
 import { useEffect, useMemo, useState } from 'react';
 
@@ -43,45 +43,45 @@ const PERIOD_PRESETS: Array<{ key: DatePresetKey; label: string }> = [
   { key: 'lastQuarter', label: 'Last quarter' },
 ];
 
-const fmtLocal = (d: Date) => {
-  const year = d.getFullYear();
-  const month = String(d.getMonth() + 1).padStart(2, '0');
-  const day = String(d.getDate()).padStart(2, '0');
+const fmtLocal = (date: Date) => {
+  const year = date.getFullYear();
+  const month = String(date.getMonth() + 1).padStart(2, '0');
+  const day = String(date.getDate()).padStart(2, '0');
   return `${year}-${month}-${day}`;
 };
 
-function startOfWeek(d: Date) {
-  const copy = new Date(d.getFullYear(), d.getMonth(), d.getDate());
+function startOfWeek(date: Date) {
+  const copy = new Date(date.getFullYear(), date.getMonth(), date.getDate());
   const offset = (copy.getDay() || 7) - 1;
   copy.setDate(copy.getDate() - offset);
   return copy;
 }
 
-function endOfWeek(d: Date) {
-  const start = startOfWeek(d);
+function endOfWeek(date: Date) {
+  const start = startOfWeek(date);
   return new Date(start.getFullYear(), start.getMonth(), start.getDate() + 6);
 }
 
-function startOfMonth(d: Date) {
-  return new Date(d.getFullYear(), d.getMonth(), 1);
+function startOfMonth(date: Date) {
+  return new Date(date.getFullYear(), date.getMonth(), 1);
 }
 
-function endOfMonth(d: Date) {
-  return new Date(d.getFullYear(), d.getMonth() + 1, 0);
+function endOfMonth(date: Date) {
+  return new Date(date.getFullYear(), date.getMonth() + 1, 0);
 }
 
-function startOfQuarter(d: Date) {
-  const quarter = Math.floor(d.getMonth() / 3);
-  return new Date(d.getFullYear(), quarter * 3, 1);
+function startOfQuarter(date: Date) {
+  const quarter = Math.floor(date.getMonth() / 3);
+  return new Date(date.getFullYear(), quarter * 3, 1);
 }
 
-function endOfQuarter(d: Date) {
-  const start = startOfQuarter(d);
+function endOfQuarter(date: Date) {
+  const start = startOfQuarter(date);
   return new Date(start.getFullYear(), start.getMonth() + 3, 0);
 }
 
-function shiftQuarter(d: Date, delta: number) {
-  const start = startOfQuarter(d);
+function shiftQuarter(date: Date, delta: number) {
+  const start = startOfQuarter(date);
   return new Date(start.getFullYear(), start.getMonth() + delta * 3, 1);
 }
 
@@ -97,23 +97,17 @@ function rangeForPresetKey(key: DatePresetKey): [string, string] {
     const iso = fmtLocal(base);
     return [iso, iso];
   }
-  if (key === 'thisWeek') {
-    return [fmtLocal(startOfWeek(now)), fmtLocal(endOfWeek(now))];
-  }
+  if (key === 'thisWeek') return [fmtLocal(startOfWeek(now)), fmtLocal(endOfWeek(now))];
   if (key === 'lastWeek') {
     const reference = new Date(now.getFullYear(), now.getMonth(), now.getDate() - 7);
     return [fmtLocal(startOfWeek(reference)), fmtLocal(endOfWeek(reference))];
   }
-  if (key === 'thisMonth') {
-    return [fmtLocal(startOfMonth(now)), fmtLocal(endOfMonth(now))];
-  }
+  if (key === 'thisMonth') return [fmtLocal(startOfMonth(now)), fmtLocal(endOfMonth(now))];
   if (key === 'lastMonth') {
     const reference = new Date(now.getFullYear(), now.getMonth() - 1, 15);
     return [fmtLocal(startOfMonth(reference)), fmtLocal(endOfMonth(reference))];
   }
-  if (key === 'thisQuarter') {
-    return [fmtLocal(startOfQuarter(now)), fmtLocal(endOfQuarter(now))];
-  }
+  if (key === 'thisQuarter') return [fmtLocal(startOfQuarter(now)), fmtLocal(endOfQuarter(now))];
   if (key === 'lastQuarter') {
     const reference = shiftQuarter(now, -1);
     return [fmtLocal(startOfQuarter(reference)), fmtLocal(endOfQuarter(reference))];
@@ -159,7 +153,6 @@ export default function ReportsView() {
     computeTotals,
   } = useReportData();
 
-  const [trendIncludeOthers, setTrendIncludeOthers] = useState<boolean>(true);
   const [trendFocusKey, setTrendFocusKey] = useState<string | null>(null);
 
   const derivedTrendBy: TrendGroupBy = useMemo(() => {
@@ -177,7 +170,6 @@ export default function ReportsView() {
 
   useEffect(() => {
     if (derivedTrendBy === 'none') {
-      setTrendIncludeOthers(false);
       setTrendFocusKey(null);
     }
   }, [derivedTrendBy]);
@@ -193,29 +185,31 @@ export default function ReportsView() {
       metric,
       by: derivedTrendBy,
       topN: trendFocusKey ? 1 : topN,
-      includeOthers: trendFocusKey ? false : trendIncludeOthers,
+      includeOthers: trendFocusKey ? false : true,
       only: trendFocusKey ? [trendFocusKey] : undefined,
     }),
-    [makeTrendSeries, metric, derivedTrendBy, topN, trendIncludeOthers, trendFocusKey]
+    [makeTrendSeries, metric, derivedTrendBy, topN, trendFocusKey]
   );
 
   const exportCsv = () => {
     const header = ['group', 'vSent', 'turnover', 'margin', 'ecpm'];
     const lines = [header.join(',')];
-    fullRanking.forEach(r => {
-      const g = `"${String(r.label).replaceAll('"', '""')}"`;
-      lines.push([g, r.vSent, r.turnover.toFixed(2), r.margin.toFixed(2), r.ecpm.toFixed(2)].join(','));
+    fullRanking.forEach((row) => {
+      const label = `"${String(row.label).replaceAll('"', '""')}"`;
+      lines.push([label, row.vSent, row.turnover.toFixed(2), row.margin.toFixed(2), row.ecpm.toFixed(2)].join(','));
     });
     const blob = new Blob([lines.join('\n')], { type: 'text/csv;charset=utf-8' });
     const url = URL.createObjectURL(blob);
-    const a = document.createElement('a');
-    a.href = url; a.download = `${groupBy}_ranking.csv`; a.click();
+    const anchor = document.createElement('a');
+    anchor.href = url;
+    anchor.download = `${groupBy}_ranking.csv`;
+    anchor.click();
     URL.revokeObjectURL(url);
   };
 
-  const frB2C = computeTotals(r => (r.geo || '').toUpperCase() === 'FR' && r.databaseType === 'B2C');
-  const frB2B = computeTotals(r => (r.geo || '').toUpperCase() === 'FR' && r.databaseType === 'B2B');
-  const intl   = computeTotals(r => (r.geo || '').toUpperCase() !== 'FR' && (r.databaseType === 'B2B' || r.databaseType === 'B2C'));
+  const frB2C = computeTotals((row) => (row.geo || '').toUpperCase() === 'FR' && row.databaseType === 'B2C');
+  const frB2B = computeTotals((row) => (row.geo || '').toUpperCase() === 'FR' && row.databaseType === 'B2B');
+  const intl = computeTotals((row) => (row.geo || '').toUpperCase() !== 'FR' && (row.databaseType === 'B2B' || row.databaseType === 'B2C'));
 
   const subtotal = {
     vSent: frB2C.vSent + frB2B.vSent + intl.vSent,
@@ -223,6 +217,7 @@ export default function ReportsView() {
     margin: frB2C.margin + frB2B.margin + intl.margin,
   };
   const subtotalMarginPct = subtotal.turnover > 0 ? subtotal.margin / subtotal.turnover : null;
+
   const periodLabel = useMemo(
     () => formatPeriodLabel(filters.from, filters.to),
     [filters.from, filters.to]
@@ -236,20 +231,17 @@ export default function ReportsView() {
             groupBy={groupBy}
             metric={metric}
             topN={topN}
+            focusKey={trendFocusKey}
+            focusOptions={focusOptions}
             filters={filters}
             onChangeFilters={setFilters}
             onChangeGroupBy={setGroupBy}
-            onChangeMetric={(m: Metric) => setMetric(m)}
+            onChangeMetric={(value: Metric) => setMetric(value)}
             onChangeTopN={setTopN}
+            onChangeFocus={setTrendFocusKey}
             onQuickLast30={quickLast30}
             onExportCsv={exportCsv}
             summary={{ filteredCount: summary.filteredRows, groupCount: summary.groups }}
-            trendIncludeOthers={trendIncludeOthers}
-            onToggleTrendIncludeOthers={setTrendIncludeOthers}
-            trendFocusKey={trendFocusKey}
-            trendFocusOptions={focusOptions}
-            onChangeTrendFocus={setTrendFocusKey}
-            trendGroupBy={derivedTrendBy}
           />
         </Card>
 
@@ -269,7 +261,7 @@ export default function ReportsView() {
           metric={metric}
           by={derivedTrendBy}
           topN={topN}
-          includeOthers={trendIncludeOthers}
+          includeOthers={!trendFocusKey}
           focusKey={trendFocusKey}
           focusOptions={focusOptions}
           showControls={false}
@@ -337,11 +329,12 @@ function GeoTile({ title, v }: {
   );
 }
 
-function legendName(m: Metric) {
-  return m === 'turnover' ? 'Turnover' : m === 'margin' ? 'Margin' : m === 'ecpm' ? 'eCPM' : 'V Sent';
+function legendName(metric: Metric) {
+  return metric === 'turnover' ? 'Turnover' : metric === 'margin' ? 'Margin' : metric === 'ecpm' ? 'eCPM' : 'V Sent';
 }
-function groupLabel(g: string) {
-  switch (g) {
+
+function groupLabel(groupBy: string) {
+  switch (groupBy) {
     case 'database': return 'Database';
     case 'partner': return 'Partner';
     case 'campaign': return 'Campaign';
