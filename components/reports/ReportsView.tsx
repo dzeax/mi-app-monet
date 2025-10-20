@@ -28,7 +28,9 @@ type DatePresetKey =
   | 'last7'
   | 'last30'
   | 'thisQuarter'
-  | 'lastQuarter';
+  | 'lastQuarter'
+  | 'thisYear'
+  | 'lastYear';
 
 const PERIOD_PRESETS: Array<{ key: DatePresetKey; label: string }> = [
   { key: 'today', label: 'Today' },
@@ -41,6 +43,8 @@ const PERIOD_PRESETS: Array<{ key: DatePresetKey; label: string }> = [
   { key: 'lastMonth', label: 'Last month' },
   { key: 'thisQuarter', label: 'This quarter' },
   { key: 'lastQuarter', label: 'Last quarter' },
+  { key: 'thisYear', label: 'This year' },
+  { key: 'lastYear', label: 'Last year' },
 ];
 
 const fmtLocal = (date: Date) => {
@@ -85,6 +89,14 @@ function shiftQuarter(date: Date, delta: number) {
   return new Date(start.getFullYear(), start.getMonth() + delta * 3, 1);
 }
 
+function startOfYear(date: Date) {
+  return new Date(date.getFullYear(), 0, 1);
+}
+
+function endOfYear(date: Date) {
+  return new Date(date.getFullYear(), 11, 31);
+}
+
 function rangeForPresetKey(key: DatePresetKey): [string, string] {
   const now = new Date();
   if (key === 'today') {
@@ -111,6 +123,11 @@ function rangeForPresetKey(key: DatePresetKey): [string, string] {
   if (key === 'lastQuarter') {
     const reference = shiftQuarter(now, -1);
     return [fmtLocal(startOfQuarter(reference)), fmtLocal(endOfQuarter(reference))];
+  }
+  if (key === 'thisYear') return [fmtLocal(startOfYear(now)), fmtLocal(endOfYear(now))];
+  if (key === 'lastYear') {
+    const reference = new Date(now.getFullYear() - 1, 6, 1);
+    return [fmtLocal(startOfYear(reference)), fmtLocal(endOfYear(reference))];
   }
   if (key === 'last7') {
     const start = new Date(now.getFullYear(), now.getMonth(), now.getDate() - 6);

@@ -27,8 +27,6 @@ type Props = {
   summary?: { filteredCount?: number; groupCount?: number };
 };
 
-const metrics: Metric[] = ['turnover', 'margin', 'ecpm', 'vSent'];
-
 const groupByOptions: { value: GroupBy; label: string }[] = [
   { value: 'database', label: 'Database' },
   { value: 'partner', label: 'Partner' },
@@ -38,6 +36,13 @@ const groupByOptions: { value: GroupBy; label: string }[] = [
   { value: 'geo', label: 'GEO' },
   { value: 'type', label: 'Type' },
   { value: 'databaseType', label: 'DB Type' },
+];
+
+const metricOptions: { value: Metric; label: string }[] = [
+  { value: 'turnover', label: 'Turnover' },
+  { value: 'margin', label: 'Margin' },
+  { value: 'ecpm', label: 'eCPM' },
+  { value: 'vSent', label: 'V Sent' },
 ];
 
 type DatePreset =
@@ -51,6 +56,8 @@ type DatePreset =
   | 'lastMonth'
   | 'thisQuarter'
   | 'lastQuarter'
+  | 'thisYear'
+  | 'lastYear'
   | 'custom';
 
 type NonCustomPreset = Exclude<DatePreset, 'custom'>;
@@ -66,6 +73,8 @@ const DATE_PRESET_OPTIONS: Array<[DatePreset, string]> = [
   ['lastMonth', 'Last month'],
   ['thisQuarter', 'This quarter'],
   ['lastQuarter', 'Last quarter'],
+  ['thisYear', 'This year'],
+  ['lastYear', 'Last year'],
   ['custom', 'Custom'],
 ];
 
@@ -103,6 +112,12 @@ function shiftQuarter(date: Date, delta: number) {
   const start = startOfQuarter(date);
   return new Date(start.getFullYear(), start.getMonth() + delta * 3, 1);
 }
+function startOfYear(date: Date) {
+  return new Date(date.getFullYear(), 0, 1);
+}
+function endOfYear(date: Date) {
+  return new Date(date.getFullYear(), 11, 31);
+}
 
 function rangeForPreset(preset: NonCustomPreset): [string, string] {
   const now = new Date();
@@ -118,18 +133,23 @@ function rangeForPreset(preset: NonCustomPreset): [string, string] {
   }
   if (preset === 'thisWeek') return [fmtLocal(startOfWeek(now)), fmtLocal(endOfWeek(now))];
   if (preset === 'lastWeek') {
-    const ref = new Date(now.getFullYear(), now.getMonth(), now.getDate() - 7);
-    return [fmtLocal(startOfWeek(ref)), fmtLocal(endOfWeek(ref))];
+    const reference = new Date(now.getFullYear(), now.getMonth(), now.getDate() - 7);
+    return [fmtLocal(startOfWeek(reference)), fmtLocal(endOfWeek(reference))];
   }
   if (preset === 'thisMonth') return [fmtLocal(startOfMonth(now)), fmtLocal(endOfMonth(now))];
   if (preset === 'lastMonth') {
-    const ref = new Date(now.getFullYear(), now.getMonth() - 1, 15);
-    return [fmtLocal(startOfMonth(ref)), fmtLocal(endOfMonth(ref))];
+    const reference = new Date(now.getFullYear(), now.getMonth() - 1, 15);
+    return [fmtLocal(startOfMonth(reference)), fmtLocal(endOfMonth(reference))];
   }
   if (preset === 'thisQuarter') return [fmtLocal(startOfQuarter(now)), fmtLocal(endOfQuarter(now))];
   if (preset === 'lastQuarter') {
-    const ref = shiftQuarter(now, -1);
-    return [fmtLocal(startOfQuarter(ref)), fmtLocal(endOfQuarter(ref))];
+    const reference = shiftQuarter(now, -1);
+    return [fmtLocal(startOfQuarter(reference)), fmtLocal(endOfQuarter(reference))];
+  }
+  if (preset === 'thisYear') return [fmtLocal(startOfYear(now)), fmtLocal(endOfYear(now))];
+  if (preset === 'lastYear') {
+    const reference = new Date(now.getFullYear() - 1, 6, 1);
+    return [fmtLocal(startOfYear(reference)), fmtLocal(endOfYear(reference))];
   }
   if (preset === 'last7') {
     const start = new Date(now.getFullYear(), now.getMonth(), now.getDate() - 6);
@@ -141,8 +161,8 @@ function rangeForPreset(preset: NonCustomPreset): [string, string] {
   return [fmtLocal(start), fmtLocal(end)];
 }
 
-function updateFilter(filters: ReportFilters, patch: Partial<ReportFilters>) {
-  const next: ReportFilters = { ...filters, ...patch };
+function mergeFilters(base: ReportFilters, patch: Partial<ReportFilters>) {
+  const next: ReportFilters = { ...base, ...patch };
   (Object.keys(next) as (keyof ReportFilters)[]).forEach((key) => {
     const value = next[key];
     if (value == null) {
@@ -176,8 +196,20 @@ export default function ReportsHeader({
   onExportCsv,
   summary,
 }: Props) {
-  const startDate = filters.from ?? '';
-  const endDate = filters.to ?? '';
+  const [draft, setDraft] = useState<ReportFilters>(() => ({ ...filters }));
+  const [draftGroupBy, setDraftGroupBy] = useState<GroupBy>(groupBy);
+  const [draftMetric, setDraftMetric] = useState<Metric>(metric);
+  const [draftTopN, setDraftTopN] = useState<number>(topN);
+  const [draftFocus, setDraftFocus] = useState<string | null>(focusKey);
+
+  useEffect(() => setDraft({ ...filters }), [filters]);
+  useEffect(() => setDraftGroupBy(groupBy), [groupBy]);
+  useEffect(() => setDraftMetric(metric), [metric]);
+  useEffect(() => setDraftTopN(topN), [topN]);
+  useEffect(() => setDraftFocus(focusKey), [focusKey]);
+
+  const startDate = draft.from ?? '';
+  const endDate = draft.to ?? '';
   const hasRange = !!(startDate && endDate);
   const [activePreset, setActivePreset] = useState<DatePreset>('custom');
 
@@ -200,7 +232,7 @@ export default function ReportsHeader({
   const startRef = useRef<HTMLInputElement>(null);
   const endRef = useRef<HTMLInputElement>(null);
 
-  const openPicker = (ref: RefObject<HTMLInputElement>) => {
+  const openPicker = (ref: typeof startRef) => {
     const el = ref.current;
     if (!el) return;
     const picker = (el as unknown as { showPicker?: () => void }).showPicker;
@@ -214,10 +246,32 @@ export default function ReportsHeader({
       return;
     }
     const [from, to] = rangeForPreset(preset as NonCustomPreset);
+    setDraft((prev) => mergeFilters(prev, { from, to }));
     setActivePreset(preset);
-    onChangeFilters(updateFilter(filters, { from, to }));
     if (preset === 'last30') onQuickLast30?.();
   };
+
+  const handleApply = () => {
+    onChangeFilters(mergeFilters(filters, draft));
+    onChangeGroupBy(draftGroupBy);
+    onChangeMetric(draftMetric);
+    onChangeTopN(draftTopN);
+    onChangeFocus(draftFocus);
+  };
+
+  const handleReset = () => {
+    setDraft({ ...filters });
+    setDraftGroupBy(groupBy);
+    setDraftMetric(metric);
+    setDraftTopN(topN);
+    setDraftFocus(focusKey);
+  };
+
+  useEffect(() => {
+    if (focusOptions.length === 0) {
+      setDraftFocus(null);
+    }
+  }, [focusOptions]);
 
   const focusDisabled = focusOptions.length === 0;
 
@@ -254,8 +308,8 @@ export default function ReportsHeader({
               <span className="muted">Group by</span>
               <select
                 className="input"
-                value={groupBy}
-                onChange={(event) => onChangeGroupBy(event.target.value as GroupBy)}
+                value={draftGroupBy}
+                onChange={(event) => setDraftGroupBy(event.target.value as GroupBy)}
               >
                 {groupByOptions.map((option) => (
                   <option key={option.value} value={option.value}>
@@ -266,38 +320,30 @@ export default function ReportsHeader({
             </label>
           </div>
 
-          <div className="md:col-span-5">
-            <span className="muted text-sm mb-1 inline-block">Metric</span>
-            <div className="flex gap-1 flex-wrap">
-              {metrics.map((item) => (
-                <Chip key={item} active={metric === item} onClick={() => onChangeMetric(item)}>
-                  {metricLabel(item)}
-                </Chip>
-              ))}
-            </div>
-          </div>
-
-          <div className="md:col-span-2">
+          <div className="md:col-span-3">
             <label className="text-sm grid gap-1">
-              <span className="muted">Top N</span>
-              <input
-                type="number"
+              <span className="muted">Metric</span>
+              <select
                 className="input"
-                min={1}
-                max={50}
-                value={topN}
-                onChange={(event) => onChangeTopN(Math.max(1, Math.min(50, Number(event.target.value || 1))))}
-              />
+                value={draftMetric}
+                onChange={(event) => setDraftMetric(event.target.value as Metric)}
+              >
+                {metricOptions.map((option) => (
+                  <option key={option.value} value={option.value}>
+                    {option.label}
+                  </option>
+                ))}
+              </select>
             </label>
           </div>
 
-          <div className="md:col-span-2">
+          <div className="md:col-span-3">
             <label className="text-sm grid gap-1">
               <span className="muted">Focus</span>
               <select
                 className="input"
-                value={focusKey ?? ''}
-                onChange={(event) => onChangeFocus(event.target.value ? event.target.value : null)}
+                value={draftFocus ?? ''}
+                onChange={(event) => setDraftFocus(event.target.value ? event.target.value : null)}
                 disabled={focusDisabled}
               >
                 <option value="">All</option>
@@ -307,6 +353,20 @@ export default function ReportsHeader({
                   </option>
                 ))}
               </select>
+            </label>
+          </div>
+
+          <div className="md:col-span-3">
+            <label className="text-sm grid gap-1">
+              <span className="muted">Top N</span>
+              <input
+                type="number"
+                className="input"
+                min={1}
+                max={50}
+                value={draftTopN}
+                onChange={(event) => setDraftTopN(Math.max(1, Math.min(50, Number(event.target.value || 1))))}
+              />
             </label>
           </div>
         </div>
@@ -329,7 +389,7 @@ export default function ReportsHeader({
               ref={startRef}
               type="date"
               value={startDate}
-              onChange={(event) => onChangeFilters(updateFilter(filters, { from: event.target.value || undefined }))}
+              onChange={(event) => setDraft((prev) => mergeFilters(prev, { from: event.target.value || undefined }))}
               className="input input-date w-40 pr-9"
             />
             <button
@@ -347,7 +407,7 @@ export default function ReportsHeader({
               ref={endRef}
               type="date"
               value={endDate}
-              onChange={(event) => onChangeFilters(updateFilter(filters, { to: event.target.value || undefined }))}
+              onChange={(event) => setDraft((prev) => mergeFilters(prev, { to: event.target.value || undefined }))}
               className="input input-date w-40 pr-9"
             />
             <button
@@ -359,6 +419,23 @@ export default function ReportsHeader({
               📅
             </button>
           </div>
+
+          <div className="flex-1" />
+
+          <button
+            type="button"
+            className="btn-primary"
+            onClick={handleApply}
+          >
+            Apply
+          </button>
+          <button
+            type="button"
+            className="btn-ghost"
+            onClick={handleReset}
+          >
+            Reset
+          </button>
         </div>
       </div>
     </div>
@@ -367,17 +444,4 @@ export default function ReportsHeader({
 
 function groupByLabel(groupBy: GroupBy) {
   return groupByOptions.find((option) => option.value === groupBy)?.label ?? 'Group';
-}
-
-function metricLabel(metric: Metric) {
-  switch (metric) {
-    case 'turnover':
-      return 'Turnover';
-    case 'margin':
-      return 'Margin';
-    case 'ecpm':
-      return 'eCPM';
-    case 'vSent':
-      return 'V Sent';
-  }
 }
