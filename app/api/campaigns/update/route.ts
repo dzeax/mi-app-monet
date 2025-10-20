@@ -13,6 +13,7 @@ type UpdateCampaignRequest = {
 const ALLOWED_ROLES = new Set(['admin', 'editor']);
 
 export const dynamic = 'force-dynamic';
+export const runtime = 'nodejs';
 
 export async function PATCH(request: Request) {
   try {

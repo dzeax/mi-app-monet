@@ -4,6 +4,8 @@ import { z } from 'zod';
 import { createServerSupabase } from '@/lib/supabase/server';
 import { supabaseAdmin } from '@/lib/supabase/admin';
 
+export const runtime = 'nodejs';
+
 const payloadSchema = z.object({
   email: z.string().email(),
   displayName: z

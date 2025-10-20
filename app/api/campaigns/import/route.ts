@@ -230,3 +230,4 @@ export async function POST(req: Request) {
     duplicates,
   });
 }
+export const runtime = 'nodejs';

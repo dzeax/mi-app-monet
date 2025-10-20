@@ -8,6 +8,7 @@ import { mapFromDb, type CampaignDbInsert, type CampaignDbRow } from '@/lib/camp
 const ALLOWED_ROLES = new Set(['admin', 'editor']);
 
 export const dynamic = 'force-dynamic';
+export const runtime = 'nodejs';
 
 type CreateCampaignRequest = {
   data?: CampaignDbInsert;
