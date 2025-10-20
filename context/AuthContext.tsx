@@ -6,6 +6,7 @@ import {
   useContext,
   useEffect,
   useMemo,
+  useRef,
   useState,
 } from 'react';
 import { createClientComponentClient } from '@supabase/auth-helpers-nextjs';
