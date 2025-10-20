@@ -17,20 +17,12 @@ type Props = {
   keys: string[];
 
   metric: TrendMetric;
-  onChangeMetric: (m: TrendMetric) => void;
-
   by: GroupBy;
-  onChangeBy: (b: GroupBy) => void;
-
   topN: number;
-  onChangeTopN: (n: number) => void;
 
   includeOthers: boolean;
-  onToggleOthers: (v: boolean) => void;
-
   focusKey?: string | null;
   focusOptions?: string[];
-  onChangeFocus?: (key: string | null) => void;
 
   showControls?: boolean;
 };
@@ -85,113 +77,28 @@ export default function ReportsUnifiedTrend({
   data,
   keys,
   metric,
-  onChangeMetric,
   by,
-  onChangeBy,
   topN,
-  onChangeTopN,
   includeOthers,
-  onToggleOthers,
   focusKey = null,
   focusOptions = [],
-  onChangeFocus,
-  showControls = true,
+  showControls = false,
 }: Props) {
   const hasData = Array.isArray(data) && data.length > 0 && keys.length > 0;
-
-  const focusEnabled = by !== 'none' && !!onChangeFocus;
-  const hasFocus = focusEnabled && !!focusKey;
+  const hasFocus = by !== 'none' && !!focusKey;
 
   const controls = showControls ? (
-    <div className="flex items-end gap-2">
-      <label className="text-sm grid gap-1">
-        <span className="muted">Metric</span>
-        <select
-          className="input"
-          value={metric}
-          onChange={(event) => onChangeMetric(event.target.value as TrendMetric)}
-        >
-          <option value="turnover">Turnover</option>
-          <option value="margin">Margin</option>
-          <option value="marginPct">Margin %</option>
-          <option value="ecpm">eCPM</option>
-          <option value="vSent">V Sent</option>
-        </select>
-      </label>
-
-      <label className="text-sm grid gap-1">
-        <span className="muted">Group lines by</span>
-        <select
-          className="input"
-          value={by}
-          onChange={(event) => onChangeBy(event.target.value as GroupBy)}
-        >
-          <option value="none">Total</option>
-          <option value="database">Database</option>
-          <option value="partner">Partner</option>
-          <option value="geo">GEO</option>
-        </select>
-      </label>
-
-      <label className="text-sm grid gap-1">
-        <span className="muted">Focus</span>
-        <select
-          className="input"
-          value={focusKey ?? ''}
-          onChange={(event) => onChangeFocus?.(event.target.value ? event.target.value : null)}
-          disabled={!focusEnabled}
-        >
-          <option value="">All</option>
-          {focusOptions.map((option) => (
-            <option key={option} value={option}>
-              {option}
-            </option>
-          ))}
-        </select>
-      </label>
-
-      <label className="text-sm grid gap-1">
-        <span className="muted">Top N</span>
-        <input
-          type="number"
-          className="input"
-          min={1}
-          max={20}
-          value={topN}
-          onChange={(event) =>
-            onChangeTopN(Math.max(1, Math.min(20, Number(event.target.value || 1))))
-          }
-          disabled={by === 'none' || hasFocus}
-          title={hasFocus ? 'Disabled when Focus is active' : undefined}
-        />
-      </label>
-
-      <label
-        className={`text-sm inline-flex items-center gap-2 ${
-          by === 'none' || hasFocus ? 'opacity-50' : ''
-        }`}
-        title={hasFocus ? 'Disabled when Focus is active' : undefined}
-      >
-        <input
-          type="checkbox"
-          className="accent-[--color-primary]"
-          checked={includeOthers}
-          onChange={(event) => onToggleOthers(event.target.checked)}
-          disabled={by === 'none' || hasFocus}
-        />
-        <span className="muted">Include &quot;Others&quot;</span>
-      </label>
+    <div className="flex flex-wrap items-center gap-3 text-xs text-[color:var(--color-text)]/65">
+      <span>Metric: {metricLabel(metric)}</span>
+      <span>Grouping: {by === 'none' ? 'Total' : capitalise(by)}</span>
+      <span>Top {topN}{includeOthers ? ' + Others' : ''}</span>
+      {focusKey ? <span>Focus: {focusKey}</span> : null}
     </div>
   ) : null;
 
   return (
     <div className="rounded-xl border border-[--color-border] bg-[color:var(--color-surface)] p-3">
-      <div
-        className={[
-          'flex items-center gap-3',
-          showControls ? 'justify-between mb-2' : 'justify-start mb-3',
-        ].join(' ')}
-      >
+      <div className={['flex items-center gap-3', controls ? 'justify-between mb-2' : 'justify-start mb-3'].join(' ')}>
         <div className="text-sm font-medium">Time series</div>
         {controls}
       </div>
@@ -242,6 +149,7 @@ export default function ReportsUnifiedTrend({
                   stroke={colorAt(index)}
                   strokeWidth={2}
                   activeDot={{ r: 4 }}
+                  opacity={hasFocus && focusKey !== key ? 0.35 : 1}
                 />
               ))}
             </LineChart>
@@ -249,7 +157,25 @@ export default function ReportsUnifiedTrend({
         )}
       </div>
 
-      <div className="text-xs opacity-60 mt-2 text-right">Right click -&gt; &quot;Save image&quot;</div>
+      {showControls ? (
+        <div className="text-xs opacity-60 mt-2 text-right">
+          Focus options: {focusOptions.length || '0'} · Include &quot;Others&quot;: {includeOthers ? 'yes' : 'no'}
+        </div>
+      ) : null}
     </div>
   );
+}
+
+function metricLabel(metric: TrendMetric) {
+  switch (metric) {
+    case 'turnover': return 'Turnover';
+    case 'margin': return 'Margin';
+    case 'marginPct': return 'Margin %';
+    case 'ecpm': return 'eCPM';
+    case 'vSent': return 'V Sent';
+  }
+}
+
+function capitalise(value: string) {
+  return value.charAt(0).toUpperCase() + value.slice(1);
 }

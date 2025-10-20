@@ -1,6 +1,6 @@
-'use client';
+﻿'use client';
 
-import { useMemo, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 
 import Card from '@/components/ui/Card';
 import ReportsHeader from '@/components/reports/ReportsHeader';
@@ -11,6 +11,8 @@ import ReportsTopTable from '@/components/reports/ReportsTopTable';
 
 import { useReportData } from '@/hooks/useReportData';
 import type { Metric } from '@/types/reports';
+
+type TrendGroupBy = 'none' | 'database' | 'partner' | 'geo';
 
 const fmtEUR = new Intl.NumberFormat('es-ES', { style: 'currency', currency: 'EUR' });
 const fmtInt = new Intl.NumberFormat('es-ES');
@@ -99,22 +101,22 @@ function rangeForPresetKey(key: DatePresetKey): [string, string] {
     return [fmtLocal(startOfWeek(now)), fmtLocal(endOfWeek(now))];
   }
   if (key === 'lastWeek') {
-    const ref = new Date(now.getFullYear(), now.getMonth(), now.getDate() - 7);
-    return [fmtLocal(startOfWeek(ref)), fmtLocal(endOfWeek(ref))];
+    const reference = new Date(now.getFullYear(), now.getMonth(), now.getDate() - 7);
+    return [fmtLocal(startOfWeek(reference)), fmtLocal(endOfWeek(reference))];
   }
   if (key === 'thisMonth') {
     return [fmtLocal(startOfMonth(now)), fmtLocal(endOfMonth(now))];
   }
   if (key === 'lastMonth') {
-    const ref = new Date(now.getFullYear(), now.getMonth() - 1, 15);
-    return [fmtLocal(startOfMonth(ref)), fmtLocal(endOfMonth(ref))];
+    const reference = new Date(now.getFullYear(), now.getMonth() - 1, 15);
+    return [fmtLocal(startOfMonth(reference)), fmtLocal(endOfMonth(reference))];
   }
   if (key === 'thisQuarter') {
     return [fmtLocal(startOfQuarter(now)), fmtLocal(endOfQuarter(now))];
   }
   if (key === 'lastQuarter') {
-    const ref = shiftQuarter(now, -1);
-    return [fmtLocal(startOfQuarter(ref)), fmtLocal(endOfQuarter(ref))];
+    const reference = shiftQuarter(now, -1);
+    return [fmtLocal(startOfQuarter(reference)), fmtLocal(endOfQuarter(reference))];
   }
   if (key === 'last7') {
     const start = new Date(now.getFullYear(), now.getMonth(), now.getDate() - 6);
@@ -157,31 +159,46 @@ export default function ReportsView() {
     computeTotals,
   } = useReportData();
 
-  // Estado del unified trend
-  const [trendMetric, setTrendMetric] =
-    useState<'ecpm' | 'turnover' | 'margin' | 'marginPct' | 'vSent'>('turnover');
-  const [trendBy, setTrendBy] = useState<'none' | 'database' | 'partner' | 'geo'>('database');
-  const [trendTopN, setTrendTopN] = useState<number>(5);
   const [trendIncludeOthers, setTrendIncludeOthers] = useState<boolean>(true);
   const [trendFocusKey, setTrendFocusKey] = useState<string | null>(null);
 
+  const derivedTrendBy: TrendGroupBy = useMemo(() => {
+    const allowed = new Set<TrendGroupBy>(['none', 'database', 'partner', 'geo']);
+    if (allowed.has(groupBy as TrendGroupBy)) {
+      return groupBy as TrendGroupBy;
+    }
+    return 'none';
+  }, [groupBy]);
+
   const focusOptions = useMemo(
-    () => (trendBy === 'none' ? [] : listAvailableKeys(trendBy)),
-    [trendBy, listAvailableKeys]
+    () => (derivedTrendBy === 'none' ? [] : listAvailableKeys(derivedTrendBy)),
+    [derivedTrendBy, listAvailableKeys]
   );
+
+  useEffect(() => {
+    if (derivedTrendBy === 'none') {
+      setTrendIncludeOthers(false);
+      setTrendFocusKey(null);
+    }
+  }, [derivedTrendBy]);
+
+  useEffect(() => {
+    if (trendFocusKey && !focusOptions.includes(trendFocusKey)) {
+      setTrendFocusKey(null);
+    }
+  }, [trendFocusKey, focusOptions]);
 
   const trendSeries = useMemo(
     () => makeTrendSeries({
-      metric: trendMetric,
-      by: trendBy,
-      topN: trendFocusKey ? 1 : trendTopN,
+      metric,
+      by: derivedTrendBy,
+      topN: trendFocusKey ? 1 : topN,
       includeOthers: trendFocusKey ? false : trendIncludeOthers,
       only: trendFocusKey ? [trendFocusKey] : undefined,
     }),
-    [makeTrendSeries, trendMetric, trendBy, trendTopN, trendIncludeOthers, trendFocusKey]
+    [makeTrendSeries, metric, derivedTrendBy, topN, trendIncludeOthers, trendFocusKey]
   );
 
-  // Export ranking completo (no solo Top-N)
   const exportCsv = () => {
     const header = ['group', 'vSent', 'turnover', 'margin', 'ecpm'];
     const lines = [header.join(',')];
@@ -196,7 +213,6 @@ export default function ReportsView() {
     URL.revokeObjectURL(url);
   };
 
-  // ====== Geo mix (France B2C, France B2B, INTL) ======
   const frB2C = computeTotals(r => (r.geo || '').toUpperCase() === 'FR' && r.databaseType === 'B2C');
   const frB2B = computeTotals(r => (r.geo || '').toUpperCase() === 'FR' && r.databaseType === 'B2B');
   const intl   = computeTotals(r => (r.geo || '').toUpperCase() !== 'FR' && (r.databaseType === 'B2B' || r.databaseType === 'B2C'));
@@ -214,7 +230,6 @@ export default function ReportsView() {
 
   return (
     <div className="grid gap-6">
-      {/* Filtros + KPIs */}
       <div className="grid grid-cols-1 items-stretch gap-4 lg:grid-cols-[minmax(0,1.85fr)_minmax(0,1fr)] lg:gap-5">
         <Card className="h-full">
           <ReportsHeader
@@ -229,17 +244,12 @@ export default function ReportsView() {
             onQuickLast30={quickLast30}
             onExportCsv={exportCsv}
             summary={{ filteredCount: summary.filteredRows, groupCount: summary.groups }}
-            trendMetric={trendMetric}
-            onChangeTrendMetric={setTrendMetric}
-            trendBy={trendBy}
-            onChangeTrendBy={setTrendBy}
-            trendTopN={trendTopN}
-            onChangeTrendTopN={setTrendTopN}
             trendIncludeOthers={trendIncludeOthers}
             onToggleTrendIncludeOthers={setTrendIncludeOthers}
             trendFocusKey={trendFocusKey}
             trendFocusOptions={focusOptions}
             onChangeTrendFocus={setTrendFocusKey}
+            trendGroupBy={derivedTrendBy}
           />
         </Card>
 
@@ -252,27 +262,20 @@ export default function ReportsView() {
         />
       </div>
 
-      {/* Unified time series — inmediatamente tras KPIs */}
       <Card>
         <ReportsUnifiedTrend
           data={trendSeries.data}
           keys={trendSeries.keys}
-          metric={trendMetric}
-          onChangeMetric={setTrendMetric}
-          by={trendBy}
-          onChangeBy={setTrendBy}
-          topN={trendTopN}
-          onChangeTopN={setTrendTopN}
+          metric={metric}
+          by={derivedTrendBy}
+          topN={topN}
           includeOthers={trendIncludeOthers}
-          onToggleOthers={setTrendIncludeOthers}
           focusKey={trendFocusKey}
           focusOptions={focusOptions}
-          onChangeFocus={setTrendFocusKey}
           showControls={false}
         />
       </Card>
 
-      {/* Geo mix: France B2C / France B2B / INTL + subtotal */}
       <Card>
         <div className="mb-3 text-sm font-medium">Geo mix</div>
         <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
@@ -285,14 +288,13 @@ export default function ReportsView() {
           <span><strong>Turnover:</strong> {fmtEUR.format(subtotal.turnover)}</span>
           <span>
             <strong>Margin (%):</strong>{' '}
-            {subtotalMarginPct == null ? '—' : fmtPct.format(subtotalMarginPct)}{' '}
+            {subtotalMarginPct == null ? '--' : fmtPct.format(subtotalMarginPct)}{' '}
             <span className="opacity-70">({fmtEUR.format(subtotal.margin)})</span>
           </span>
           <span><strong>V Sent:</strong> {fmtInt.format(subtotal.vSent)}</span>
         </div>
       </Card>
 
-      {/* Top-N (gráfico de barras) */}
       <Card>
         <ReportsChart
           data={ranking}
@@ -304,7 +306,6 @@ export default function ReportsView() {
         />
       </Card>
 
-      {/* Top-N (tabla) */}
       <Card>
         <ReportsTopTable
           data={ranking}
@@ -326,7 +327,7 @@ function GeoTile({ title, v }: {
         <div><span className="opacity-70">Turnover</span><br /><strong>{fmtEUR.format(v.turnover)}</strong></div>
         <div>
           <span className="opacity-70">Margin (%)</span><br />
-          <strong>{v.marginPct == null ? '—' : fmtPct.format(v.marginPct)}</strong>
+          <strong>{v.marginPct == null ? '--' : fmtPct.format(v.marginPct)}</strong>
           <span className="opacity-70"> · {fmtEUR.format(v.margin)}</span>
         </div>
         <div><span className="opacity-70">V Sent</span><br /><strong>{fmtInt.format(v.vSent)}</strong></div>

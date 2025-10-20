@@ -7,9 +7,6 @@ import Chip from '@/components/ui/Chip';
 import { useCatalogOverrides } from '@/context/CatalogOverridesContext';
 import type { GroupBy, Metric, ReportFilters } from '@/types/reports';
 
-type TrendMetric = 'ecpm' | 'turnover' | 'margin' | 'marginPct' | 'vSent';
-type TrendGroupBy = 'none' | 'database' | 'partner' | 'geo';
-
 type Props = {
   groupBy: GroupBy;
   metric: Metric;
@@ -27,17 +24,12 @@ type Props = {
 
   summary?: { filteredCount?: number; groupCount?: number };
 
-  trendMetric: TrendMetric;
-  onChangeTrendMetric: (m: TrendMetric) => void;
-  trendBy: TrendGroupBy;
-  onChangeTrendBy: (b: TrendGroupBy) => void;
-  trendTopN: number;
-  onChangeTrendTopN: (n: number) => void;
   trendIncludeOthers: boolean;
   onToggleTrendIncludeOthers: (v: boolean) => void;
-  trendFocusKey?: string | null;
-  trendFocusOptions?: string[];
-  onChangeTrendFocus?: (key: string | null) => void;
+  trendFocusKey: string | null;
+  trendFocusOptions: string[];
+  onChangeTrendFocus: (key: string | null) => void;
+  trendGroupBy: 'none' | 'database' | 'partner' | 'geo';
 };
 
 const groupByOptions: { value: GroupBy; label: string }[] = [
@@ -120,14 +112,14 @@ function shiftQuarter(d: Date, delta: number) {
 function rangeForPreset(p: NonCustomPreset): [string, string] {
   const now = new Date();
   if (p === 'today') {
-    const a = new Date(now.getFullYear(), now.getMonth(), now.getDate());
-    const s = fmtLocal(a);
-    return [s, s];
+    const base = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+    const iso = fmtLocal(base);
+    return [iso, iso];
   }
   if (p === 'yesterday') {
-    const a = new Date(now.getFullYear(), now.getMonth(), now.getDate() - 1);
-    const s = fmtLocal(a);
-    return [s, s];
+    const base = new Date(now.getFullYear(), now.getMonth(), now.getDate() - 1);
+    const iso = fmtLocal(base);
+    return [iso, iso];
   }
   if (p === 'thisWeek') {
     return [fmtLocal(startOfWeek(now)), fmtLocal(endOfWeek(now))];
@@ -171,21 +163,15 @@ function normalizeFilters(input?: ReportFilters | null): ReportFilters {
   (Object.entries(input) as [keyof ReportFilters, ReportFilters[keyof ReportFilters]][]).forEach(([key, value]) => {
     if (value == null) return;
     if (Array.isArray(value)) {
-      if (value.length > 0) {
-        next[key] = [...value] as ReportFilters[keyof ReportFilters];
-      }
+      if (value.length > 0) next[key] = [...value] as ReportFilters[keyof ReportFilters];
       return;
     }
     if (typeof value === 'string') {
-      if (value !== '') {
-        next[key] = value as ReportFilters[keyof ReportFilters];
-      }
+      if (value !== '') next[key] = value as ReportFilters[keyof ReportFilters];
       return;
     }
     if (typeof value === 'boolean') {
-      if (value) {
-        next[key] = value as ReportFilters[keyof ReportFilters];
-      }
+      if (value) next[key] = value as ReportFilters[keyof ReportFilters];
       return;
     }
     next[key] = value as ReportFilters[keyof ReportFilters];
@@ -228,17 +214,12 @@ export default function ReportsHeader({
   onQuickLast30,
   onExportCsv,
   summary,
-  trendMetric,
-  onChangeTrendMetric,
-  trendBy,
-  onChangeTrendBy,
-  trendTopN,
-  onChangeTrendTopN,
   trendIncludeOthers,
   onToggleTrendIncludeOthers,
   trendFocusKey,
   trendFocusOptions,
   onChangeTrendFocus,
+  trendGroupBy,
 }: Props) {
   const { PARTNERS, DATABASES, THEMES, TYPES } = useCatalogOverrides();
 
@@ -305,11 +286,9 @@ export default function ReportsHeader({
   const openPicker = (ref: RefObject<HTMLInputElement>) => {
     const el = ref.current;
     if (!el) return;
-    if (typeof (el as unknown as { showPicker?: () => void }).showPicker === 'function') {
-      (el as unknown as { showPicker: () => void }).showPicker();
-    } else {
-      el.focus();
-    }
+    const picker = (el as unknown as { showPicker?: () => void }).showPicker;
+    if (picker) picker.call(el);
+    else el.focus();
   };
 
   const choosePreset = (preset: DatePreset) => {
@@ -320,9 +299,7 @@ export default function ReportsHeader({
     const [from, to] = rangeForPreset(preset as NonCustomPreset);
     setActivePreset(preset);
     updateDraft({ from, to });
-    if (preset === 'last30') {
-      onQuickLast30?.();
-    }
+    if (preset === 'last30') onQuickLast30?.();
   };
 
   const toggleOnlyInternal = () => {
@@ -334,21 +311,20 @@ export default function ReportsHeader({
     onChangeFilters(normalizeFilters(draft));
   };
 
+  const handleDiscard = () => {
+    setDraft(cloneFilters(filters));
+  };
+
   const handleClear = () => {
     setActivePreset('custom');
     setDraft({});
     onChangeFilters({});
   };
 
-  const handleResetDraft = () => {
-    setDraft(cloneFilters(filters));
-  };
-
   const isDirty = useMemo(() => !filtersEqual(filters, draft), [filters, draft]);
 
-  const focusOptions = trendFocusOptions ?? [];
-  const focusEnabled = trendBy !== 'none' && !!onChangeTrendFocus;
-  const hasFocus = focusEnabled && !!trendFocusKey;
+  const canFocus = trendGroupBy !== 'none' && trendFocusOptions.length > 0;
+  const focusOptionsSorted = useMemo(() => trendFocusOptions.slice().sort(), [trendFocusOptions]);
 
   return (
     <div className="grid gap-4">
@@ -356,7 +332,7 @@ export default function ReportsHeader({
         <div>
           <h1 className="text-2xl font-semibold">Reports</h1>
           <p className="muted">
-            {groupByLabel(groupBy)} performance -{' '}
+            {groupByLabel(groupBy)} performance ·{' '}
             <span className="opacity-80">
               {s.filteredCount != null ? `${s.filteredCount} rows` : ''}
               {s.filteredCount != null && s.groupCount != null ? ' · ' : ''}
@@ -384,11 +360,11 @@ export default function ReportsHeader({
               <select
                 className="input"
                 value={groupBy}
-                onChange={(e) => onChangeGroupBy(e.target.value as GroupBy)}
+                onChange={(event) => onChangeGroupBy(event.target.value as GroupBy)}
               >
-                {groupByOptions.map((o) => (
-                  <option key={o.value} value={o.value}>
-                    {o.label}
+                {groupByOptions.map((option) => (
+                  <option key={option.value} value={option.value}>
+                    {option.label}
                   </option>
                 ))}
               </select>
@@ -398,9 +374,9 @@ export default function ReportsHeader({
           <div className="md:col-span-8">
             <span className="muted text-sm mb-1 inline-block">Ranking metric</span>
             <div className="flex gap-1 flex-wrap">
-              {metrics.map((m) => (
-                <Chip key={m} active={metric === m} onClick={() => onChangeMetric(m)} title={`Rank by ${m}`}>
-                  {m === 'turnover' ? 'Turnover' : m === 'margin' ? 'Margin' : m === 'ecpm' ? 'eCPM' : 'V Sent'}
+              {metrics.map((item) => (
+                <Chip key={item} active={metric === item} onClick={() => onChangeMetric(item)} title={`Rank by ${item}`}>
+                  {item === 'turnover' ? 'Turnover' : item === 'margin' ? 'Margin' : item === 'ecpm' ? 'eCPM' : 'V Sent'}
                 </Chip>
               ))}
             </div>
@@ -415,9 +391,7 @@ export default function ReportsHeader({
                 min={1}
                 max={50}
                 value={topN}
-                onChange={(e) =>
-                  onChangeTopN(Math.max(1, Math.min(50, Number(e.target.value || 1))))
-                }
+                onChange={(event) => onChangeTopN(Math.max(1, Math.min(50, Number(event.target.value || 1))))}
               />
             </label>
           </div>
@@ -441,7 +415,7 @@ export default function ReportsHeader({
               ref={startRef}
               type="date"
               value={startDate}
-              onChange={(e) => updateDraft({ from: e.target.value || undefined })}
+              onChange={(event) => updateDraft({ from: event.target.value || undefined })}
               className="input input-date w-40 pr-9"
             />
             <button
@@ -459,7 +433,7 @@ export default function ReportsHeader({
               ref={endRef}
               type="date"
               value={endDate}
-              onChange={(e) => updateDraft({ to: e.target.value || undefined })}
+              onChange={(event) => updateDraft({ to: event.target.value || undefined })}
               className="input input-date w-40 pr-9"
             />
             <button
@@ -497,14 +471,14 @@ export default function ReportsHeader({
           <button
             className="btn-ghost"
             type="button"
-            onClick={handleResetDraft}
+            onClick={handleDiscard}
             disabled={!isDirty}
           >
-            Reset
+            Discard
           </button>
 
           <button className="btn-ghost" type="button" onClick={handleClear}>
-            Clear
+            Clear all
           </button>
         </div>
 
@@ -514,7 +488,7 @@ export default function ReportsHeader({
             <select
               className="input"
               value={draft.geos?.[0] ?? ''}
-              onChange={(e) => updateDraft({ geos: e.target.value ? [e.target.value] : undefined })}
+              onChange={(event) => updateDraft({ geos: event.target.value ? [event.target.value] : undefined })}
             >
               <option value="">All</option>
               {geoOptions.map((g) => (
@@ -530,13 +504,12 @@ export default function ReportsHeader({
             <select
               className="input"
               value={draft.partners?.[0] ?? ''}
-              onChange={(e) => updateDraft({ partners: e.target.value ? [e.target.value] : undefined })}
+              onChange={(event) => updateDraft({ partners: event.target.value ? [event.target.value] : undefined })}
             >
               <option value="">All</option>
               {partnerOptions.map((p) => (
                 <option key={p.id} value={p.name}>
-                  {p.name}
-                  {p.isInternal ? ' · INT' : ''}
+                  {p.name}{p.isInternal ? ' · INT' : ''}
                 </option>
               ))}
             </select>
@@ -547,7 +520,7 @@ export default function ReportsHeader({
             <select
               className="input"
               value={draft.databases?.[0] ?? ''}
-              onChange={(e) => updateDraft({ databases: e.target.value ? [e.target.value] : undefined })}
+              onChange={(event) => updateDraft({ databases: event.target.value ? [event.target.value] : undefined })}
             >
               <option value="">All</option>
               {databaseOptions.map((name) => (
@@ -563,7 +536,7 @@ export default function ReportsHeader({
             <select
               className="input"
               value={draft.themes?.[0] ?? ''}
-              onChange={(e) => updateDraft({ themes: e.target.value ? [e.target.value] : undefined })}
+              onChange={(event) => updateDraft({ themes: event.target.value ? [event.target.value] : undefined })}
             >
               <option value="">All</option>
               {themeOptions.map((t) => (
@@ -579,8 +552,8 @@ export default function ReportsHeader({
             <select
               className="input"
               value={draft.types?.[0] ?? ''}
-              onChange={(e) =>
-                updateDraft({ types: e.target.value ? [e.target.value as (typeof typeOptions)[number]] : undefined })
+              onChange={(event) =>
+                updateDraft({ types: event.target.value ? [event.target.value as (typeof typeOptions)[number]] : undefined })
               }
             >
               <option value="">All</option>
@@ -597,12 +570,8 @@ export default function ReportsHeader({
             <select
               className="input"
               value={draft.databaseTypes?.[0] ?? ''}
-              onChange={(e) =>
-                updateDraft({
-                  databaseTypes: e.target.value
-                    ? [e.target.value as (typeof dbTypeOptions)[number]]
-                    : undefined,
-                })
+              onChange={(event) =>
+                updateDraft({ databaseTypes: event.target.value ? [event.target.value as (typeof dbTypeOptions)[number]] : undefined })
               }
             >
               <option value="">All</option>
@@ -616,47 +585,23 @@ export default function ReportsHeader({
         </div>
 
         <div className="pt-4 mt-2 border-t border-[color-mix(in_oklab,var(--color-border)_80%,transparent)]">
-          <div className="text-sm font-medium mb-3">Time series controls</div>
+          <div className="text-sm font-medium mb-2">Trend fine-tuning</div>
+          {trendGroupBy === 'none' ? (
+            <p className="text-sm text-[color:var(--color-text)]/60">
+              Focus and &quot;Others&quot; controls are unavailable for the current grouping.
+            </p>
+          ) : null}
           <div className="flex flex-wrap items-end gap-3">
-            <label className="text-sm grid gap-1">
-              <span className="muted">Metric</span>
-              <select
-                className="input"
-                value={trendMetric}
-                onChange={(e) => onChangeTrendMetric(e.target.value as TrendMetric)}
-              >
-                <option value="turnover">Turnover</option>
-                <option value="margin">Margin</option>
-                <option value="marginPct">Margin %</option>
-                <option value="ecpm">eCPM</option>
-                <option value="vSent">V Sent</option>
-              </select>
-            </label>
-
-            <label className="text-sm grid gap-1">
-              <span className="muted">Group lines by</span>
-              <select
-                className="input"
-                value={trendBy}
-                onChange={(e) => onChangeTrendBy(e.target.value as TrendGroupBy)}
-              >
-                <option value="none">Total</option>
-                <option value="database">Database</option>
-                <option value="partner">Partner</option>
-                <option value="geo">GEO</option>
-              </select>
-            </label>
-
             <label className="text-sm grid gap-1">
               <span className="muted">Focus</span>
               <select
                 className="input"
                 value={trendFocusKey ?? ''}
-                onChange={(e) => onChangeTrendFocus?.(e.target.value ? e.target.value : null)}
-                disabled={!focusEnabled}
+                onChange={(event) => onChangeTrendFocus(event.target.value ? event.target.value : null)}
+                disabled={!canFocus}
               >
                 <option value="">All</option>
-                {focusOptions.map((option) => (
+                {focusOptionsSorted.map((option) => (
                   <option key={option} value={option}>
                     {option}
                   </option>
@@ -664,34 +609,18 @@ export default function ReportsHeader({
               </select>
             </label>
 
-            <label className="text-sm grid gap-1">
-              <span className="muted">Top N</span>
-              <input
-                type="number"
-                className="input"
-                min={1}
-                max={20}
-                value={trendTopN}
-                onChange={(e) =>
-                  onChangeTrendTopN(Math.max(1, Math.min(20, Number(e.target.value || 1))))
-                }
-                disabled={trendBy === 'none' || hasFocus}
-                title={hasFocus ? 'Disabled when Focus is active' : undefined}
-              />
-            </label>
-
             <label
               className={`text-sm inline-flex items-center gap-2 ${
-                trendBy === 'none' || hasFocus ? 'opacity-50' : ''
+                trendGroupBy === 'none' ? 'opacity-50' : ''
               }`}
-              title={hasFocus ? 'Disabled when Focus is active' : undefined}
+              title={trendGroupBy === 'none' ? 'Available when grouping by Database, Partner or GEO' : undefined}
             >
               <input
                 type="checkbox"
                 className="accent-[--color-primary]"
                 checked={trendIncludeOthers}
-                onChange={(e) => onToggleTrendIncludeOthers(e.target.checked)}
-                disabled={trendBy === 'none' || hasFocus}
+                onChange={(event) => onToggleTrendIncludeOthers(event.target.checked)}
+                disabled={trendGroupBy === 'none'}
               />
               <span className="muted">Include &quot;Others&quot;</span>
             </label>
