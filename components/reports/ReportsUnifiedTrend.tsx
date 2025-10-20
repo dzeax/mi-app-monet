@@ -1,4 +1,3 @@
-// components/reports/ReportsUnifiedTrend.tsx
 'use client';
 
 import {
@@ -17,7 +16,6 @@ type Props = {
   data: Array<Record<string, number | string>>;
   keys: string[];
 
-  // controles
   metric: TrendMetric;
   onChangeMetric: (m: TrendMetric) => void;
 
@@ -30,10 +28,11 @@ type Props = {
   includeOthers: boolean;
   onToggleOthers: (v: boolean) => void;
 
-  // 🔎 Focus (opcional)
   focusKey?: string | null;
   focusOptions?: string[];
   onChangeFocus?: (key: string | null) => void;
+
+  showControls?: boolean;
 };
 
 const chartTheme = {
@@ -54,23 +53,31 @@ const chartTheme = {
   ],
 };
 
-function colorAt(i: number) {
-  const p = chartTheme.palette;
-  return p[i % p.length];
+function colorAt(index: number) {
+  const palette = chartTheme.palette;
+  return palette[index % palette.length];
 }
 
-function formatByMetric(m: TrendMetric, v: number): string {
-  const n = Number(v || 0);
-  if (m === 'ecpm' || m === 'turnover' || m === 'margin') return fmtEUR2.format(n);
-  if (m === 'marginPct') return `${(n * 100).toFixed(1)}%`;
-  return fmtINT.format(n); // vSent
+function formatByMetric(metric: TrendMetric, value: number): string {
+  const numberValue = Number(value || 0);
+  if (metric === 'ecpm' || metric === 'turnover' || metric === 'margin') {
+    return fmtEUR2.format(numberValue);
+  }
+  if (metric === 'marginPct') {
+    return `${(numberValue * 100).toFixed(1)}%`;
+  }
+  return fmtINT.format(numberValue);
 }
 
-function yTickFormatter(m: TrendMetric) {
-  return (v: number) => {
-    if (m === 'marginPct') return `${(Number(v || 0) * 100).toFixed(0)}%`;
-    if (m === 'ecpm' || m === 'turnover' || m === 'margin') return fmtEUR2.format(Number(v || 0));
-    return fmtINT.format(Number(v || 0));
+function yTickFormatter(metric: TrendMetric) {
+  return (value: number) => {
+    if (metric === 'marginPct') {
+      return `${(Number(value || 0) * 100).toFixed(0)}%`;
+    }
+    if (metric === 'ecpm' || metric === 'turnover' || metric === 'margin') {
+      return fmtEUR2.format(Number(value || 0));
+    }
+    return fmtINT.format(Number(value || 0));
   };
 }
 
@@ -85,98 +92,108 @@ export default function ReportsUnifiedTrend({
   onChangeTopN,
   includeOthers,
   onToggleOthers,
-  // Focus
   focusKey = null,
   focusOptions = [],
   onChangeFocus,
+  showControls = true,
 }: Props) {
   const hasData = Array.isArray(data) && data.length > 0 && keys.length > 0;
 
   const focusEnabled = by !== 'none' && !!onChangeFocus;
   const hasFocus = focusEnabled && !!focusKey;
 
+  const controls = showControls ? (
+    <div className="flex items-end gap-2">
+      <label className="text-sm grid gap-1">
+        <span className="muted">Metric</span>
+        <select
+          className="input"
+          value={metric}
+          onChange={(event) => onChangeMetric(event.target.value as TrendMetric)}
+        >
+          <option value="turnover">Turnover</option>
+          <option value="margin">Margin</option>
+          <option value="marginPct">Margin %</option>
+          <option value="ecpm">eCPM</option>
+          <option value="vSent">V Sent</option>
+        </select>
+      </label>
+
+      <label className="text-sm grid gap-1">
+        <span className="muted">Group lines by</span>
+        <select
+          className="input"
+          value={by}
+          onChange={(event) => onChangeBy(event.target.value as GroupBy)}
+        >
+          <option value="none">Total</option>
+          <option value="database">Database</option>
+          <option value="partner">Partner</option>
+          <option value="geo">GEO</option>
+        </select>
+      </label>
+
+      <label className="text-sm grid gap-1">
+        <span className="muted">Focus</span>
+        <select
+          className="input"
+          value={focusKey ?? ''}
+          onChange={(event) => onChangeFocus?.(event.target.value ? event.target.value : null)}
+          disabled={!focusEnabled}
+        >
+          <option value="">All</option>
+          {focusOptions.map((option) => (
+            <option key={option} value={option}>
+              {option}
+            </option>
+          ))}
+        </select>
+      </label>
+
+      <label className="text-sm grid gap-1">
+        <span className="muted">Top N</span>
+        <input
+          type="number"
+          className="input"
+          min={1}
+          max={20}
+          value={topN}
+          onChange={(event) =>
+            onChangeTopN(Math.max(1, Math.min(20, Number(event.target.value || 1))))
+          }
+          disabled={by === 'none' || hasFocus}
+          title={hasFocus ? 'Disabled when Focus is active' : undefined}
+        />
+      </label>
+
+      <label
+        className={`text-sm inline-flex items-center gap-2 ${
+          by === 'none' || hasFocus ? 'opacity-50' : ''
+        }`}
+        title={hasFocus ? 'Disabled when Focus is active' : undefined}
+      >
+        <input
+          type="checkbox"
+          className="accent-[--color-primary]"
+          checked={includeOthers}
+          onChange={(event) => onToggleOthers(event.target.checked)}
+          disabled={by === 'none' || hasFocus}
+        />
+        <span className="muted">Include &quot;Others&quot;</span>
+      </label>
+    </div>
+  ) : null;
+
   return (
     <div className="rounded-xl border border-[--color-border] bg-[color:var(--color-surface)] p-3">
-      <div className="flex items-center justify-between gap-3 mb-2">
+      <div
+        className={[
+          'flex items-center gap-3',
+          showControls ? 'justify-between mb-2' : 'justify-start mb-3',
+        ].join(' ')}
+      >
         <div className="text-sm font-medium">Time series</div>
-
-        {/* Controles */}
-        <div className="flex items-end gap-2">
-          <label className="text-sm grid gap-1">
-            <span className="muted">Metric</span>
-            <select
-              className="input"
-              value={metric}
-              onChange={e => onChangeMetric(e.target.value as TrendMetric)}
-            >
-              <option value="ecpm">eCPM</option>
-              <option value="turnover">Turnover</option>
-              <option value="margin">Margin</option>
-              <option value="marginPct">Margin %</option>
-              <option value="vSent">V Sent</option>
-            </select>
-          </label>
-
-          <label className="text-sm grid gap-1">
-            <span className="muted">Group lines by</span>
-            <select
-              className="input"
-              value={by}
-              onChange={e => onChangeBy(e.target.value as GroupBy)}
-            >
-              <option value="none">Total</option>
-              <option value="database">Database</option>
-              <option value="partner">Partner</option>
-              <option value="geo">GEO</option>
-            </select>
-          </label>
-
-          {/* 🔎 Focus selector */}
-          <label className="text-sm grid gap-1">
-            <span className="muted">Focus</span>
-            <select
-              className="input"
-              value={focusKey ?? ''}
-              onChange={e => onChangeFocus?.(e.target.value ? e.target.value : null)}
-              disabled={!focusEnabled}
-            >
-              <option value="">All</option>
-              {focusOptions.map(k => (
-                <option key={k} value={k}>{k}</option>
-              ))}
-            </select>
-          </label>
-
-          <label className="text-sm grid gap-1">
-            <span className="muted">Top N</span>
-            <input
-              type="number"
-              className="input"
-              min={1}
-              max={20}
-              value={topN}
-              onChange={e => onChangeTopN(Math.max(1, Math.min(20, Number(e.target.value || 1))))}
-              disabled={by === 'none' || hasFocus}
-              title={hasFocus ? 'Disabled when Focus is active' : undefined}
-            />
-          </label>
-
-          <label
-            className={`text-sm inline-flex items-center gap-2 ${
-              by === 'none' || hasFocus ? 'opacity-50' : ''
-            }`}
-            title={hasFocus ? 'Disabled when Focus is active' : undefined}
-          >
-            <input
-              type="checkbox"
-              className="accent-[--color-primary]"
-              checked={includeOthers}
-              onChange={e => onToggleOthers(e.target.checked)}
-              disabled={by === 'none' || hasFocus}
-            />
-            <span className="muted">Include “Others”</span>
-          </label>
-        </div>
+        {controls}
       </div>
 
       <div className="h-[320px]">
@@ -209,17 +226,20 @@ export default function ReportsUnifiedTrend({
                 }}
                 itemStyle={{ color: 'var(--color-text)' }}
                 labelStyle={{ color: 'var(--color-text)' }}
-                formatter={(value: any, name: any) => [formatByMetric(metric, Number(value || 0)), String(name)]}
+                formatter={(value, name) => [
+                  formatByMetric(metric, Number(value || 0)),
+                  String(name ?? ''),
+                ]}
               />
               <Legend />
-              {keys.map((k, idx) => (
+              {keys.map((key, index) => (
                 <Line
-                  key={k}
+                  key={key}
                   type="monotone"
-                  dataKey={k}
-                  name={k}
+                  dataKey={key}
+                  name={key}
                   dot={false}
-                  stroke={colorAt(idx)}
+                  stroke={colorAt(index)}
                   strokeWidth={2}
                   activeDot={{ r: 4 }}
                 />
@@ -229,7 +249,7 @@ export default function ReportsUnifiedTrend({
         )}
       </div>
 
-      <div className="text-xs opacity-60 mt-2 text-right">Right click → “Save image”</div>
+      <div className="text-xs opacity-60 mt-2 text-right">Right click -&gt; &quot;Save image&quot;</div>
     </div>
   );
 }

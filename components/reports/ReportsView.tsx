@@ -24,7 +24,9 @@ type DatePresetKey =
   | 'thisMonth'
   | 'lastMonth'
   | 'last7'
-  | 'last30';
+  | 'last30'
+  | 'thisQuarter'
+  | 'lastQuarter';
 
 const PERIOD_PRESETS: Array<{ key: DatePresetKey; label: string }> = [
   { key: 'today', label: 'Today' },
@@ -35,6 +37,8 @@ const PERIOD_PRESETS: Array<{ key: DatePresetKey; label: string }> = [
   { key: 'lastWeek', label: 'Last week' },
   { key: 'thisMonth', label: 'This month' },
   { key: 'lastMonth', label: 'Last month' },
+  { key: 'thisQuarter', label: 'This quarter' },
+  { key: 'lastQuarter', label: 'Last quarter' },
 ];
 
 const fmtLocal = (d: Date) => {
@@ -64,6 +68,21 @@ function endOfMonth(d: Date) {
   return new Date(d.getFullYear(), d.getMonth() + 1, 0);
 }
 
+function startOfQuarter(d: Date) {
+  const quarter = Math.floor(d.getMonth() / 3);
+  return new Date(d.getFullYear(), quarter * 3, 1);
+}
+
+function endOfQuarter(d: Date) {
+  const start = startOfQuarter(d);
+  return new Date(start.getFullYear(), start.getMonth() + 3, 0);
+}
+
+function shiftQuarter(d: Date, delta: number) {
+  const start = startOfQuarter(d);
+  return new Date(start.getFullYear(), start.getMonth() + delta * 3, 1);
+}
+
 function rangeForPresetKey(key: DatePresetKey): [string, string] {
   const now = new Date();
   if (key === 'today') {
@@ -89,6 +108,13 @@ function rangeForPresetKey(key: DatePresetKey): [string, string] {
   if (key === 'lastMonth') {
     const ref = new Date(now.getFullYear(), now.getMonth() - 1, 15);
     return [fmtLocal(startOfMonth(ref)), fmtLocal(endOfMonth(ref))];
+  }
+  if (key === 'thisQuarter') {
+    return [fmtLocal(startOfQuarter(now)), fmtLocal(endOfQuarter(now))];
+  }
+  if (key === 'lastQuarter') {
+    const ref = shiftQuarter(now, -1);
+    return [fmtLocal(startOfQuarter(ref)), fmtLocal(endOfQuarter(ref))];
   }
   if (key === 'last7') {
     const start = new Date(now.getFullYear(), now.getMonth(), now.getDate() - 6);
@@ -126,9 +152,9 @@ export default function ReportsView() {
     ranking, fullRanking,
     summary,
     quickLast30,
-    makeTrendSeries,          // ⬅️ unificado
+    makeTrendSeries,
     listAvailableKeys,
-    computeTotals,            // ⬅️ nuevo helper para FR/INTL
+    computeTotals,
   } = useReportData();
 
   // Estado del unified trend
@@ -203,6 +229,17 @@ export default function ReportsView() {
             onQuickLast30={quickLast30}
             onExportCsv={exportCsv}
             summary={{ filteredCount: summary.filteredRows, groupCount: summary.groups }}
+            trendMetric={trendMetric}
+            onChangeTrendMetric={setTrendMetric}
+            trendBy={trendBy}
+            onChangeTrendBy={setTrendBy}
+            trendTopN={trendTopN}
+            onChangeTrendTopN={setTrendTopN}
+            trendIncludeOthers={trendIncludeOthers}
+            onToggleTrendIncludeOthers={setTrendIncludeOthers}
+            trendFocusKey={trendFocusKey}
+            trendFocusOptions={focusOptions}
+            onChangeTrendFocus={setTrendFocusKey}
           />
         </Card>
 
@@ -231,6 +268,7 @@ export default function ReportsView() {
           focusKey={trendFocusKey}
           focusOptions={focusOptions}
           onChangeFocus={setTrendFocusKey}
+          showControls={false}
         />
       </Card>
 
