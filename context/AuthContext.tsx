@@ -73,7 +73,6 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
 
   // Cliente único y estable para todo el provider
   const supabase = useMemo(() => createClientComponentClient(), []);
-  const focusTimeout = useRef<number | null>(null);
 
   // Carga inicial de sesión + perfil y suscripción a cambios
   useEffect(() => {
@@ -141,10 +140,6 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
 
     return () => {
       mounted = false;
-      if (focusTimeout.current) {
-        window.clearTimeout(focusTimeout.current);
-        focusTimeout.current = null;
-      }
       sub.subscription.unsubscribe();
       window.removeEventListener('focus', onFocus);
       document.removeEventListener('visibilitychange', onVisibility);
@@ -163,10 +158,6 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   );
 
   const signOut = useCallback(async () => {
-    if (focusTimeout.current) {
-      window.clearTimeout(focusTimeout.current);
-      focusTimeout.current = null;
-    }
     await supabase.auth.signOut();
   }, [supabase]);
 
