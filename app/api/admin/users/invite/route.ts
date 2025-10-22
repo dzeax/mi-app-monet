@@ -64,30 +64,25 @@ function resolveBaseUrl(req: Request): string {
   return `${url.protocol}//${url.host}`;
 }
 
+
+type ListUsersResult = Awaited<ReturnType<SupabaseClient['auth']['admin']['listUsers']>>;
+
 async function lookupUserIdByEmail(admin: SupabaseClient, email: string): Promise<string | null> {
-  const anyAdmin: any = admin as any;
-
-  try {
-    const getByEmail = anyAdmin?.auth?.admin?.getUserByEmail;
-    if (typeof getByEmail === 'function') {
-      const { data, error } = await getByEmail.call(anyAdmin.auth.admin, email);
-      if (error) throw error;
-      return data?.user?.id ?? null;
-    }
-  } catch {
-    // Ignore and fall through to listUsers
-  }
-
+  const normalizedEmail = email.toLowerCase();
   let page = 1;
   const perPage = 200;
-  while (true) {
-    const { data, error } = await admin.auth.admin.listUsers({ page, perPage });
+  let hasMore = true;
+
+  while (hasMore) {
+    const { data, error }: ListUsersResult = await admin.auth.admin.listUsers({ page, perPage });
     if (error) throw error;
-    const users = data?.users || [];
-    const found = users.find((user: any) => (user?.email || '').toLowerCase() === email);
-    if (found?.id) return String(found.id);
-    const total = (data as any)?.total || 0;
-    if (page * perPage >= total || users.length === 0) break;
+
+    const users = data?.users ?? [];
+    const matched = users.find((user) => (user?.email ?? '').toLowerCase() === normalizedEmail);
+    if (matched?.id) return matched.id;
+
+    const total = data?.total ?? 0;
+    hasMore = users.length > 0 && page * perPage < total;
     page += 1;
   }
 
@@ -228,14 +223,21 @@ export async function POST(req: Request) {
     );
   }
 
-  const profilePayload: Record<string, any> = {
+  const profilePayload: {
+    user_id: string;
+    email: string;
+    role: 'admin' | 'editor';
+    is_active: boolean;
+    display_name?: string | null;
+    avatar_url?: string | null;
+  } = {
     user_id: authUserId,
     email,
     role,
     is_active: true,
+    ...(displayName !== null ? { display_name: displayName } : {}),
+    ...(avatarUrl !== null ? { avatar_url: avatarUrl } : {}),
   };
-  if (displayName !== null) profilePayload.display_name = displayName;
-  if (avatarUrl !== null) profilePayload.avatar_url = avatarUrl;
 
   const { error: upsertError } = await admin.from('app_users').upsert(profilePayload, { onConflict: 'email' });
 

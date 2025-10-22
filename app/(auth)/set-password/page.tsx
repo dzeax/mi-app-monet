@@ -1,8 +1,10 @@
 'use client';
 
-import { Suspense, useEffect, useMemo, useState } from 'react';
+import { Suspense, type FormEvent, useEffect, useMemo, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { createClientComponentClient } from '@supabase/auth-helpers-nextjs';
+import Image from 'next/image';
+import type { Session } from '@supabase/supabase-js';
 
 type InviteParams = {
   accessToken: string | null;
@@ -43,6 +45,24 @@ export default function SetPasswordPage() {
 function SetPasswordContent() {
   const router = useRouter();
   const supabase = useMemo(() => createClientComponentClient(), []);
+  type GetSessionResult = Awaited<ReturnType<typeof supabase.auth.getSession>>;
+  type SetSessionResult = Awaited<ReturnType<typeof supabase.auth.setSession>>;
+
+  const withTimeout = async <T,>(promise: Promise<T>, ms: number): Promise<T | 'timeout'> => {
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    const timeoutPromise = new Promise<'timeout'>((resolve) => {
+      timer = window.setTimeout(() => resolve('timeout'), ms);
+    });
+
+    try {
+      return (await Promise.race([promise, timeoutPromise])) as T | 'timeout';
+    } finally {
+      if (timer) {
+        window.clearTimeout(timer);
+      }
+    }
+  };
+
   const [inviteParams, setInviteParams] = useState<InviteParams>(() => readInviteParams());
   const [tokensReady, setTokensReady] = useState(false);
 
@@ -105,9 +125,9 @@ function SetPasswordContent() {
           if (!mounted) return;
           setError(null);
           console.debug('[set-password] setSession success');
-        } catch (err: any) {
+        } catch (err: unknown) {
           if (!mounted) return;
-          const message = err?.message || 'Unable to initialize your session.';
+          const message = err instanceof Error ? err.message : 'Unable to initialize your session.';
           setError(message);
           console.error('[set-password] setSession error', err);
         } finally {
@@ -128,9 +148,10 @@ function SetPasswordContent() {
           setError((prev) => prev ?? 'Your session is not initialized. Please request a fresh invitation.');
           console.warn('[set-password] no active session available');
         }
-      } catch (err: any) {
+      } catch (err: unknown) {
         if (!mounted) return;
-        setError(err?.message || 'Unable to initialize your session.');
+        const message = err instanceof Error ? err.message : 'Unable to initialize your session.';
+        setError(message);
         console.error('[set-password] getSession error', err);
       }
     };
@@ -146,7 +167,7 @@ function SetPasswordContent() {
     return () => window.clearTimeout(timer);
   }, [initializingSession]);
 
-  const handleSubmit = async (event: React.FormEvent) => {
+  const handleSubmit = async (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
     if (busy) return;
 
@@ -176,12 +197,9 @@ function SetPasswordContent() {
     try {
       // Try to read current session, but do not hang if the helper is slow
       console.log('[set-password] submit:getSession:start');
-      const sessionOrTimeout: any = await Promise.race([
-        supabase.auth.getSession(),
-        new Promise((resolve) => setTimeout(() => resolve('timeout'), 1500)),
-      ]);
-      let activeSession =
-        sessionOrTimeout !== 'timeout' ? (sessionOrTimeout as any)?.data?.session ?? null : null;
+      const sessionOrTimeout = await withTimeout<GetSessionResult>(supabase.auth.getSession(), 1500);
+      let activeSession: Session | null =
+        sessionOrTimeout !== 'timeout' ? sessionOrTimeout.data.session : null;
       console.log('[set-password] submit:getSession:done', {
         timedOut: sessionOrTimeout === 'timeout',
         hasSession: Boolean(activeSession),
@@ -190,19 +208,19 @@ function SetPasswordContent() {
       // If no session, try to establish with tokens; but keep a short timeout as well
       if (!activeSession && accessToken && refreshToken) {
         console.debug('[set-password] retrying setSession inside submit');
-        const setOrTimeout: any = await Promise.race([
+        const setOrTimeout = await withTimeout<SetSessionResult>(
           supabase.auth.setSession({ access_token: accessToken, refresh_token: refreshToken }),
-          new Promise((resolve) => setTimeout(() => resolve('timeout'), 1500)),
-        ]);
-        if (setOrTimeout !== 'timeout' && (setOrTimeout as any)?.error) {
-          throw (setOrTimeout as any).error;
+          1500,
+        );
+        if (setOrTimeout !== 'timeout' && setOrTimeout.error) {
+          throw setOrTimeout.error;
         }
-        const refreshedOrTimeout: any = await Promise.race([
+        const refreshedOrTimeout = await withTimeout<GetSessionResult>(
           supabase.auth.getSession(),
-          new Promise((resolve) => setTimeout(() => resolve('timeout'), 1500)),
-        ]);
+          1500,
+        );
         activeSession =
-          refreshedOrTimeout !== 'timeout' ? (refreshedOrTimeout as any)?.data?.session ?? null : null;
+          refreshedOrTimeout !== 'timeout' ? refreshedOrTimeout.data.session : null;
         console.log('[set-password] submit:after retry getSession', {
           hasSession: Boolean(activeSession),
           timedOut: refreshedOrTimeout === 'timeout',
@@ -224,8 +242,9 @@ function SetPasswordContent() {
           ]);
           updated = true;
           console.log('[set-password] submit:updateUser success (sdk)');
-        } catch (e: any) {
-          const reason = String(e?.message || e || 'unknown');
+        } catch (sdkError: unknown) {
+          const reason =
+            sdkError instanceof Error ? sdkError.message : String(sdkError ?? 'unknown');
           console.warn('[set-password] sdk update failed, falling back', reason);
         }
       }
@@ -233,24 +252,28 @@ function SetPasswordContent() {
       if (!updated) {
         const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL as string;
         const anon = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY as string;
-        const bearer = (activeSession as any)?.access_token || accessToken;
+        const bearer = activeSession?.access_token ?? accessToken;
         if (!supabaseUrl || !anon || !bearer) {
           throw new Error('Missing configuration or bearer token for fallback update.');
         }
-        const res = await fetch(`${supabaseUrl}/auth/v1/user`, {
+        const headers: Record<string, string> = {
+          'Content-Type': 'application/json',
+          apikey: anon,
+          Authorization: `Bearer ${bearer}`,
+        };
+        const response = await fetch(`${supabaseUrl}/auth/v1/user`, {
           method: 'PUT',
-          headers: {
-            'Content-Type': 'application/json',
-            apikey: anon,
-            Authorization: `Bearer ${bearer}`,
-          } as any,
+          headers,
           body: JSON.stringify({ password }),
         });
-        if (!res.ok) {
-          let msg = `Fallback update failed (${res.status})`;
+        if (!response.ok) {
+          let msg = `Fallback update failed (${response.status})`;
           try {
-            const j = await res.json();
-            msg = j?.error_description || j?.error || msg;
+            const json = (await response.json()) as {
+              error?: string;
+              error_description?: string;
+            };
+            msg = json.error_description || json.error || msg;
           } catch {}
           throw new Error(msg);
         }
@@ -261,8 +284,9 @@ function SetPasswordContent() {
       console.log('[set-password] submit:navigate', redirectTarget || '/');
       await router.replace(redirectTarget || '/');
       console.log('[set-password] submit:navigate done');
-    } catch (err: any) {
-      setError(err?.message || 'Unable to update password.');
+    } catch (err: unknown) {
+      const message = err instanceof Error ? err.message : 'Unable to update password.';
+      setError(message);
       console.error('[set-password] submit error', err);
     } finally {
       // Ensure the button does not remain in a stuck state if navigation is blocked
@@ -275,11 +299,14 @@ function SetPasswordContent() {
     <div className="min-h-screen flex items-center justify-center bg-[--color-surface] text-[--color-text] px-4">
       <div className="max-w-md w-full rounded-lg border border-[--color-border] bg-[--color-surface-2] p-6 space-y-6 shadow-lg">
         <header className="space-y-4 text-center">
-          <img
+          <Image
             src="/dvlogo2.svg"
             alt="CampaignMinds"
-            className="h-12 mx-auto object-contain"
+            width={120}
+            height={48}
+            className="h-12 w-auto mx-auto object-contain"
             draggable={false}
+            priority
           />
           <div className="space-y-1">
             <h1 className="text-xl font-semibold">Set your password</h1>

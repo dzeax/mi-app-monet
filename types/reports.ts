@@ -1,12 +1,19 @@
-// types/reports.ts
 import type { DBType } from '@/data/reference';
 
 // Métricas soportadas en Reports
-export type Metric = 'turnover' | 'margin' | 'ecpm' | 'vSent';
+export type Metric =
+  | 'turnover'
+  | 'margin'
+  | 'marginPct'
+  | 'routingCosts'
+  | 'ecpm'
+  | 'vSent';
 
 export const METRIC_LABELS: Record<Metric, string> = {
   turnover: 'Turnover',
-  margin: 'Margin',
+  margin: 'Margin (€)',
+  marginPct: 'Margin (%)',
+  routingCosts: 'Routing costs',
   ecpm: 'eCPM',
   vSent: 'V Sent',
 };
@@ -44,8 +51,9 @@ export type ReportFilters = {
   themes?: string[];             // etiquetas
   databases?: string[];          // nombres visibles
   types?: Array<'CPL' | 'CPM' | 'CPC' | 'CPA'>;
-  databaseTypes?: DBType[];      // <- tipado fuerte desde catálogos
+  databaseTypes?: DBType[];      // tipado fuerte desde catálogos
   onlyInternalPartners?: boolean;
+  includeInternalInvoiceOffice?: boolean;
 };
 
 // Fila agregada (resultado de agrupar por GroupBy)
@@ -59,6 +67,8 @@ export type AggregateRow = {
   vSent: number;
   turnover: number;
   margin: number;
+  routingCosts: number;
+  marginPct: number | null;
   /** eCPM ponderado por vSent del agregado */
   ecpm: number;
 
@@ -84,6 +94,7 @@ export type ReportData = {
     vSent: number;
     turnover: number;
     margin: number;
+    routingCosts: number;
     ecpm: number;         // ponderado global
     marginPct: number | null;
   };

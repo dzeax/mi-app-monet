@@ -30,9 +30,6 @@ type Props = {
 const groupByOptions: { value: GroupBy; label: string }[] = [
   { value: 'database', label: 'Database' },
   { value: 'partner', label: 'Partner' },
-  { value: 'campaign', label: 'Campaign' },
-  { value: 'advertiser', label: 'Advertiser' },
-  { value: 'theme', label: 'Theme' },
   { value: 'geo', label: 'GEO' },
   { value: 'type', label: 'Type' },
   { value: 'databaseType', label: 'DB Type' },
@@ -40,7 +37,9 @@ const groupByOptions: { value: GroupBy; label: string }[] = [
 
 const metricOptions: { value: Metric; label: string }[] = [
   { value: 'turnover', label: 'Turnover' },
-  { value: 'margin', label: 'Margin' },
+  { value: 'margin', label: 'Margin (€)' },
+  { value: 'marginPct', label: 'Margin (%)' },
+  { value: 'routingCosts', label: 'Routing costs' },
   { value: 'ecpm', label: 'eCPM' },
   { value: 'vSent', label: 'V Sent' },
 ];
@@ -180,6 +179,58 @@ function mergeFilters(base: ReportFilters, patch: Partial<ReportFilters>) {
   return next;
 }
 
+function normalizeFilters(value: ReportFilters): ReportFilters {
+  return mergeFilters({}, value);
+}
+
+function cloneFilters(value: ReportFilters): ReportFilters {
+  const normalized = normalizeFilters(value);
+  return {
+    ...normalized,
+    geos: normalized.geos ? [...normalized.geos] : undefined,
+    partners: normalized.partners ? [...normalized.partners] : undefined,
+    campaigns: normalized.campaigns ? [...normalized.campaigns] : undefined,
+    advertisers: normalized.advertisers ? [...normalized.advertisers] : undefined,
+    themes: normalized.themes ? [...normalized.themes] : undefined,
+    databases: normalized.databases ? [...normalized.databases] : undefined,
+    types: normalized.types ? [...normalized.types] : undefined,
+    databaseTypes: normalized.databaseTypes ? [...normalized.databaseTypes] : undefined,
+  };
+}
+
+function arrayEquals<T>(a?: readonly T[], b?: readonly T[]): boolean {
+  if (!a && !b) return true;
+  if (!a || !b) return false;
+  if (a.length !== b.length) return false;
+  for (let index = 0; index < a.length; index += 1) {
+    if (a[index] !== b[index]) return false;
+  }
+  return true;
+}
+
+function areFiltersEqual(a: ReportFilters, b: ReportFilters): boolean {
+  const normalizedA = normalizeFilters(a);
+  const normalizedB = normalizeFilters(b);
+
+  if (normalizedA.from !== normalizedB.from) return false;
+  if (normalizedA.to !== normalizedB.to) return false;
+  if (!arrayEquals(normalizedA.geos, normalizedB.geos)) return false;
+  if (!arrayEquals(normalizedA.partners, normalizedB.partners)) return false;
+  if (!arrayEquals(normalizedA.campaigns, normalizedB.campaigns)) return false;
+  if (!arrayEquals(normalizedA.advertisers, normalizedB.advertisers)) return false;
+  if (!arrayEquals(normalizedA.themes, normalizedB.themes)) return false;
+  if (!arrayEquals(normalizedA.databases, normalizedB.databases)) return false;
+  if (!arrayEquals(normalizedA.types, normalizedB.types)) return false;
+  if (!arrayEquals(normalizedA.databaseTypes, normalizedB.databaseTypes)) return false;
+  if (!!normalizedA.onlyInternalPartners !== !!normalizedB.onlyInternalPartners) return false;
+
+  const includeA = normalizedA.includeInternalInvoiceOffice ?? true;
+  const includeB = normalizedB.includeInternalInvoiceOffice ?? true;
+  if (includeA !== includeB) return false;
+
+  return true;
+}
+
 export default function ReportsHeader({
   groupBy,
   metric,
@@ -196,21 +247,74 @@ export default function ReportsHeader({
   onExportCsv,
   summary,
 }: Props) {
-  const [draft, setDraft] = useState<ReportFilters>(() => ({ ...filters }));
+  const [draft, setDraft] = useState<ReportFilters>(() => cloneFilters(filters));
   const [draftGroupBy, setDraftGroupBy] = useState<GroupBy>(groupBy);
   const [draftMetric, setDraftMetric] = useState<Metric>(metric);
   const [draftTopN, setDraftTopN] = useState<number>(topN);
   const [draftFocus, setDraftFocus] = useState<string | null>(focusKey);
 
-  useEffect(() => setDraft({ ...filters }), [filters]);
+  type CommitOverrides = {
+    filters?: ReportFilters;
+    groupBy?: GroupBy;
+    metric?: Metric;
+    topN?: number;
+    focusKey?: string | null;
+  };
+
+  const initialValuesRef = useRef<{
+    filters: ReportFilters;
+    groupBy: GroupBy;
+    metric: Metric;
+    topN: number;
+    focusKey: string | null;
+  } | null>(null);
+
+  if (!initialValuesRef.current) {
+    initialValuesRef.current = {
+      filters: cloneFilters(filters),
+      groupBy,
+      metric,
+      topN,
+      focusKey,
+    };
+  }
+
+  useEffect(() => setDraft(cloneFilters(filters)), [filters]);
   useEffect(() => setDraftGroupBy(groupBy), [groupBy]);
   useEffect(() => setDraftMetric(metric), [metric]);
   useEffect(() => setDraftTopN(topN), [topN]);
   useEffect(() => setDraftFocus(focusKey), [focusKey]);
 
+  const commitChanges = (overrides: CommitOverrides = {}) => {
+    const nextFilters = cloneFilters(overrides.filters ?? draft);
+    const nextGroupBy = overrides.groupBy ?? draftGroupBy;
+    const nextMetric = overrides.metric ?? draftMetric;
+    const nextTopN = overrides.topN ?? draftTopN;
+    const nextFocus = overrides.focusKey ?? (draftFocus ?? null);
+
+    const filtersChanged = !areFiltersEqual(nextFilters, filters);
+    const groupByChanged = nextGroupBy !== groupBy;
+    const metricChanged = nextMetric !== metric;
+    const topNChanged = nextTopN !== topN;
+    const focusChanged = (nextFocus ?? null) !== (focusKey ?? null);
+
+    if (filtersChanged) onChangeFilters(nextFilters);
+    if (groupByChanged) onChangeGroupBy(nextGroupBy);
+    if (metricChanged) onChangeMetric(nextMetric);
+    if (topNChanged) onChangeTopN(nextTopN);
+    if (focusChanged) onChangeFocus(nextFocus);
+  };
+
+  const applyFilterPatch = (patch: Partial<ReportFilters>) => {
+    const nextDraft = mergeFilters(draft, patch);
+    setDraft(nextDraft);
+    commitChanges({ filters: nextDraft });
+  };
+
   const startDate = draft.from ?? '';
   const endDate = draft.to ?? '';
   const hasRange = !!(startDate && endDate);
+  const includeInternal = draft.includeInternalInvoiceOffice !== false;
   const [activePreset, setActivePreset] = useState<DatePreset>('custom');
 
   useEffect(() => {
@@ -246,25 +350,35 @@ export default function ReportsHeader({
       return;
     }
     const [from, to] = rangeForPreset(preset as NonCustomPreset);
-    setDraft((prev) => mergeFilters(prev, { from, to }));
     setActivePreset(preset);
+    applyFilterPatch({ from, to });
     if (preset === 'last30') onQuickLast30?.();
   };
 
   const handleApply = () => {
-    onChangeFilters(mergeFilters(filters, draft));
-    onChangeGroupBy(draftGroupBy);
-    onChangeMetric(draftMetric);
-    onChangeTopN(draftTopN);
-    onChangeFocus(draftFocus);
+    commitChanges();
   };
 
   const handleReset = () => {
-    setDraft({ ...filters });
-    setDraftGroupBy(groupBy);
-    setDraftMetric(metric);
-    setDraftTopN(topN);
-    setDraftFocus(focusKey);
+    const initial = initialValuesRef.current;
+    if (!initial) return;
+    const resetFilters = cloneFilters(initial.filters);
+    setDraft(resetFilters);
+    setDraftGroupBy(initial.groupBy);
+    setDraftMetric(initial.metric);
+    setDraftTopN(initial.topN);
+    setDraftFocus(initial.focusKey);
+    commitChanges({
+      filters: resetFilters,
+      groupBy: initial.groupBy,
+      metric: initial.metric,
+      topN: initial.topN,
+      focusKey: initial.focusKey,
+    });
+  };
+
+  const handleToggleInclude = (value: boolean) => {
+    applyFilterPatch({ includeInternalInvoiceOffice: value });
   };
 
   useEffect(() => {
@@ -281,10 +395,10 @@ export default function ReportsHeader({
         <div>
           <h1 className="text-2xl font-semibold">Reports</h1>
           <p className="muted">
-            {groupByLabel(groupBy)} performance ·{' '}
+            {groupByLabel(groupBy)} performance -{' '}
             <span className="opacity-80">
               {summary?.filteredCount != null ? `${summary.filteredCount} rows` : ''}
-              {summary?.filteredCount != null && summary?.groupCount != null ? ' · ' : ''}
+              {summary?.filteredCount != null && summary?.groupCount != null ? ' - ' : ''}
               {summary?.groupCount != null ? `${summary.groupCount} groups` : ''}
             </span>
           </p>
@@ -295,8 +409,12 @@ export default function ReportsHeader({
               Export CSV
             </button>
           )}
-          <Link href="/" className="btn-ghost">
-            ← Back to campaigns
+          <Link
+            href="/"
+            className="btn-primary flex items-center gap-2"
+          >
+            <span aria-hidden="true" className="text-base leading-none">&larr;</span>
+            <span>Back to campaigns</span>
           </Link>
         </div>
       </div>
@@ -309,7 +427,11 @@ export default function ReportsHeader({
               <select
                 className="input"
                 value={draftGroupBy}
-                onChange={(event) => setDraftGroupBy(event.target.value as GroupBy)}
+                onChange={(event) => {
+                  const value = event.target.value as GroupBy;
+                  setDraftGroupBy(value);
+                  commitChanges({ groupBy: value });
+                }}
               >
                 {groupByOptions.map((option) => (
                   <option key={option.value} value={option.value}>
@@ -326,7 +448,11 @@ export default function ReportsHeader({
               <select
                 className="input"
                 value={draftMetric}
-                onChange={(event) => setDraftMetric(event.target.value as Metric)}
+                onChange={(event) => {
+                  const value = event.target.value as Metric;
+                  setDraftMetric(value);
+                  commitChanges({ metric: value });
+                }}
               >
                 {metricOptions.map((option) => (
                   <option key={option.value} value={option.value}>
@@ -343,7 +469,11 @@ export default function ReportsHeader({
               <select
                 className="input"
                 value={draftFocus ?? ''}
-                onChange={(event) => setDraftFocus(event.target.value ? event.target.value : null)}
+                onChange={(event) => {
+                  const value = event.target.value ? event.target.value : null;
+                  setDraftFocus(value);
+                  commitChanges({ focusKey: value });
+                }}
                 disabled={focusDisabled}
               >
                 <option value="">All</option>
@@ -365,7 +495,11 @@ export default function ReportsHeader({
                 min={1}
                 max={50}
                 value={draftTopN}
-                onChange={(event) => setDraftTopN(Math.max(1, Math.min(50, Number(event.target.value || 1))))}
+                onChange={(event) => {
+                  const value = Math.max(1, Math.min(50, Number(event.target.value || 1)));
+                  setDraftTopN(value);
+                  commitChanges({ topN: value });
+                }}
               />
             </label>
           </div>
@@ -389,7 +523,10 @@ export default function ReportsHeader({
               ref={startRef}
               type="date"
               value={startDate}
-              onChange={(event) => setDraft((prev) => mergeFilters(prev, { from: event.target.value || undefined }))}
+              onChange={(event) => {
+                const value = event.target.value || undefined;
+                applyFilterPatch({ from: value });
+              }}
               className="input input-date w-40 pr-9"
             />
             <button
@@ -407,7 +544,10 @@ export default function ReportsHeader({
               ref={endRef}
               type="date"
               value={endDate}
-              onChange={(event) => setDraft((prev) => mergeFilters(prev, { to: event.target.value || undefined }))}
+              onChange={(event) => {
+                const value = event.target.value || undefined;
+                applyFilterPatch({ to: value });
+              }}
               className="input input-date w-40 pr-9"
             />
             <button
@@ -419,6 +559,16 @@ export default function ReportsHeader({
               📅
             </button>
           </div>
+
+          <label className="inline-flex items-center gap-2 text-sm">
+            <input
+              type="checkbox"
+              className="accent-[--color-primary]"
+              checked={includeInternal}
+              onChange={(event) => handleToggleInclude(event.target.checked)}
+            />
+            <span className="muted">Include invoice office INT</span>
+          </label>
 
           <div className="flex-1" />
 
@@ -445,3 +595,5 @@ export default function ReportsHeader({
 function groupByLabel(groupBy: GroupBy) {
   return groupByOptions.find((option) => option.value === groupBy)?.label ?? 'Group';
 }
+
+

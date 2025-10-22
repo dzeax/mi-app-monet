@@ -1,7 +1,7 @@
 'use client';
 
 import { createPortal } from 'react-dom';
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { createClientComponentClient } from '@supabase/auth-helpers-nextjs';
 
 import { useAuth } from '@/context/AuthContext';
@@ -52,10 +52,11 @@ const [editingEmail, setEditingEmail] = useState<string | null>(null);
 const [profileName, setProfileName] = useState('');
 const [profileAvatar, setProfileAvatar] = useState('');
 
+  const bannerTimer = useRef<number | null>(null);
   const showBanner = (text: string, tone: BannerTone = 'info') => {
     setBanner({ text, tone });
-    window.clearTimeout((showBanner as any)._timer);
-    (showBanner as any)._timer = window.setTimeout(() => setBanner(null), 3200);
+    if (bannerTimer.current != null) window.clearTimeout(bannerTimer.current);
+    bannerTimer.current = window.setTimeout(() => setBanner(null), 3200);
   };
 
   const startEditProfile = (row: UserRow) => {
@@ -88,27 +89,33 @@ const [profileAvatar, setProfileAvatar] = useState('');
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(payload),
       });
-      const data = await response.json().catch(() => ({}));
-      if (!response.ok || data?.ok !== true) {
-        const message = data?.error || `Profile update failed (${response.status})`;
+      const raw: unknown = await response.json().catch(() => ({}));
+      const obj: Record<string, unknown> = raw && typeof raw === 'object' ? (raw as Record<string, unknown>) : {};
+      const ok = obj['ok'] === true;
+      const messageFromServer = typeof obj['error'] === 'string' ? (obj['error'] as string) : undefined;
+      if (!response.ok || !ok) {
+        const message = messageFromServer || `Profile update failed (${response.status})`;
         throw new Error(message);
       }
       showBanner('Profile updated', 'ok');
+      const displayName = (obj['displayName'] ?? null) as string | null;
+      const avatarUrl = (obj['avatarUrl'] ?? null) as string | null;
       setRows((prev) =>
         prev.map((row) =>
           row.email === email
             ? {
                 ...row,
-                display_name: data.displayName ?? null,
-                avatar_url: data.avatarUrl ?? null,
+                display_name: displayName,
+                avatar_url: avatarUrl,
                 updated_at: new Date().toISOString(),
               }
             : row
         )
       );
       cancelEditProfile();
-    } catch (error: any) {
-      showBanner(error?.message || 'Unable to update profile', 'err');
+    } catch (error: unknown) {
+      const message = error instanceof Error ? error.message : 'Unable to update profile';
+      showBanner(message, 'err');
       setProfileBusy(false);
     }
   };
@@ -199,20 +206,25 @@ const [profileAvatar, setProfileAvatar] = useState('');
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(payloadBody),
       });
-      const payload = await response.json().catch(() => ({}));
-      if (!response.ok || payload?.ok !== true) {
-        const message = payload?.error || `Invite failed (${response.status})`;
+      const payload: unknown = await response.json().catch(() => ({}));
+      const obj: Record<string, unknown> = payload && typeof payload === 'object' ? (payload as Record<string, unknown>) : {};
+      const ok = obj['ok'] === true;
+      const errorMsg = typeof obj['error'] === 'string' ? (obj['error'] as string) : undefined;
+      if (!response.ok || !ok) {
+        const message = (typeof errorMsg === 'string' && errorMsg) || `Invite failed (${response.status})`;
         throw new Error(message);
       }
-      showBanner(payload?.invitationSent ? 'Invitation sent' : 'User updated', 'ok');
+      const invitationSent = obj['invitationSent'] === true;
+      showBanner(invitationSent ? 'Invitation sent' : 'User updated', 'ok');
       setInviteEmail('');
       setInviteRole('editor');
       setInviteName('');
       setInviteAvatar('');
       setTab('list');
       fetchUsers();
-    } catch (error: any) {
-      showBanner(error?.message || 'Unable to send invitation', 'err');
+    } catch (error: unknown) {
+      const message = error instanceof Error ? error.message : 'Unable to send invitation';
+      showBanner(message, 'err');
     }
   };
 
@@ -227,19 +239,23 @@ const [profileAvatar, setProfileAvatar] = useState('');
           action: row.user_id ? 'magic_link' : 'invite',
         }),
       });
-      const payload = await response.json().catch(() => ({}));
-      if (!response.ok || payload?.ok !== true) {
-        const message = payload?.error || `Invite failed (${response.status})`;
+      const payload: unknown = await response.json().catch(() => ({}));
+      const obj: Record<string, unknown> = payload && typeof payload === 'object' ? (payload as Record<string, unknown>) : {};
+      const ok = obj['ok'] === true;
+      const errorMsg = typeof obj['error'] === 'string' ? (obj['error'] as string) : undefined;
+      if (!response.ok || !ok) {
+        const message = (typeof errorMsg === 'string' && errorMsg) || `Invite failed (${response.status})`;
         throw new Error(message);
       }
-      if (!row.user_id && payload?.userId) {
+      if (!row.user_id && typeof obj['userId'] === 'string') {
         setRows((prev) =>
-          prev.map((item) => (item.email === row.email ? { ...item, user_id: payload.userId } : item))
+          prev.map((item) => (item.email === row.email ? { ...item, user_id: obj['userId'] as string } : item))
         );
       }
       showBanner(row.user_id ? 'Magic link sent' : 'Invitation re-sent', 'ok');
-    } catch (error: any) {
-      showBanner(error?.message || 'Unable to send link', 'err');
+    } catch (error: unknown) {
+      const message = error instanceof Error ? error.message : 'Unable to send link';
+      showBanner(message, 'err');
     }
   };
 
@@ -270,19 +286,21 @@ const [profileAvatar, setProfileAvatar] = useState('');
           deleteAuth: deleteAuth,
         }),
       });
-      const payload = await response.json().catch(() => ({}));
-      if (!response.ok || payload?.ok !== true) {
-        const message = payload?.error || `Delete failed (${response.status})`;
+      const payload: unknown = await response.json().catch(() => ({}));
+      const obj: Record<string, unknown> = payload && typeof payload === 'object' ? (payload as Record<string, unknown>) : {};
+      const ok = obj['ok'] === true;
+      const errorMsg = typeof obj['error'] === 'string' ? (obj['error'] as string) : undefined;
+      if (!response.ok || !ok) {
+        const message = (typeof errorMsg === 'string' && errorMsg) || `Delete failed (${response.status})`;
         throw new Error(message);
       }
-      showBanner(
-        payload?.deletedAuth ? 'User removed and auth account deleted' : 'Row deleted',
-        'ok'
-      );
+      const deletedAuth = obj['deletedAuth'] === true;
+      showBanner(deletedAuth ? 'User removed and auth account deleted' : 'Row deleted', 'ok');
       setRows((prev) => prev.filter((row) => row.email !== confirm.email));
       closeDeletePrompt();
-    } catch (error: any) {
-      showBanner(error?.message || 'Unable to delete user', 'err');
+    } catch (error: unknown) {
+      const message = error instanceof Error ? error.message : 'Unable to delete user';
+      showBanner(message, 'err');
     } finally {
       setConfirmBusy(false);
     }
@@ -335,10 +353,10 @@ const [profileAvatar, setProfileAvatar] = useState('');
           )}
 
           <div className="segmented">
-            <button className="segmented-tab" aria-selected={tab === 'list'} onClick={() => setTab('list')}>
+            <button type="button" className="segmented-tab" aria-pressed={tab === 'list'} onClick={() => setTab('list')}>
               Users
             </button>
-            <button className="segmented-tab" aria-selected={tab === 'invite'} onClick={() => setTab('invite')}>
+            <button type="button" className="segmented-tab" aria-pressed={tab === 'invite'} onClick={() => setTab('invite')}>
               Invite
             </button>
           </div>

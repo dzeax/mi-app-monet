@@ -1,7 +1,7 @@
 ﻿'use client';
 
 import { createPortal } from 'react-dom';
-import { Children, isValidElement, useCallback, useEffect, useRef, useState } from 'react';
+import { Children, isValidElement, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useForm } from 'react-hook-form';
 import { z } from 'zod';
 import { zodResolver } from '@hookform/resolvers/zod';
@@ -14,7 +14,7 @@ import QuickAddCampaignModal from '@/components/create-campaign/QuickAddCampaign
 import QuickAddPartnerModal from '@/components/create-campaign/QuickAddPartnerModal';
 import QuickAddDatabaseModal from '@/components/create-campaign/QuickAddDatabaseModal';
 import FieldWithAddon from '@/components/ui/FieldWithAddon';
-import type { DBType, InvoiceOffice } from '@/data/reference';
+import type { CampaignRef, PartnerRef, DatabaseRef, DBType, InvoiceOffice } from '@/data/reference';
 import { useAuth } from '@/context/AuthContext'; // ðŸ†• roles para quick-add
 
 // ======================= Utils =======================
@@ -26,7 +26,7 @@ const fmtNum = new Intl.NumberFormat('es-ES', { maximumFractionDigits: 2 });
 const SYMBOL_MULTIPLY = '\u00D7';
 const SYMBOL_MINUS = '\u2212';
 
-function parseNum(v: any): number {
+function parseNum(v: unknown): number {
   if (v === '' || v == null) return 0;
   if (typeof v === 'number') return Number.isFinite(v) ? v : 0;
 
@@ -99,8 +99,16 @@ type DealType = typeof DEAL_TYPES[number];
 const DB_TYPES = ['B2B', 'B2C', 'Mixed'] as const;
 const INVOICE_OFFICES = ['DAT', 'CAR', 'INT'] as const;
 
-const isDBType = (x: any): x is DBType => (DB_TYPES as readonly string[]).includes(x);
-const isInvoiceOffice = (x: any): x is InvoiceOffice => (INVOICE_OFFICES as readonly string[]).includes(x);
+const EMPTY_CAMPAIGNS: CampaignRef[] = [];
+const EMPTY_PARTNERS: PartnerRef[] = [];
+const EMPTY_DATABASES: DatabaseRef[] = [];
+
+type PickerInput = HTMLInputElement & { showPicker?: () => void };
+
+const isDBType = (value: unknown): value is DBType =>
+  typeof value === 'string' && (DB_TYPES as readonly string[]).includes(value);
+const isInvoiceOffice = (value: unknown): value is InvoiceOffice =>
+  typeof value === 'string' && (INVOICE_OFFICES as readonly string[]).includes(value);
 
 // Zod helpers
 const ZDealType = z.enum(DEAL_TYPES);
@@ -129,19 +137,27 @@ export default function CreateCampaignModal({
 
   // === CatÃƒÂ¡logos dinÃƒÂ¡micos ===
   const catalogs = useCatalogOverrides();
-  const CAMPAIGNS = catalogs?.CAMPAIGNS ?? [];
-  const PARTNERS = catalogs?.PARTNERS ?? [];
-  const DATABASES = catalogs?.DATABASES ?? [];
+  const CAMPAIGNS = catalogs?.CAMPAIGNS ?? EMPTY_CAMPAIGNS;
+  const PARTNERS = catalogs?.PARTNERS ?? EMPTY_PARTNERS;
+  const DATABASES = catalogs?.DATABASES ?? EMPTY_DATABASES;
   const THEMES = catalogs?.THEMES ?? [];
   const TYPES = (catalogs?.TYPES ?? DEAL_TYPES.slice()).slice();
 
+  const normalizeKey = useCallback((value: string) => value.trim().toLowerCase(), []);
+  const findCampaignByName = useCallback(
+    (name: string) => CAMPAIGNS.find((campaign) => normalizeKey(campaign.name) === normalizeKey(name)),
+    [CAMPAIGNS, normalizeKey]
+  );
+
   // Resolver de oficina de facturaciÃƒÂ³n tipado y seguro
-  function resolveOffice(geo?: string, partner?: string): InvoiceOffice {
-    const res = catalogs?.resolveInvoiceOfficeMerged
-      ? catalogs.resolveInvoiceOfficeMerged(geo, partner)
-      : 'DAT';
-    return isInvoiceOffice(res) ? res : 'DAT';
-  }
+  const resolveOffice = useCallback(
+    (geo?: string, partner?: string): InvoiceOffice => {
+      const resolver = catalogs?.resolveInvoiceOfficeMerged;
+      const result = resolver ? resolver(geo, partner) : 'DAT';
+      return isInvoiceOffice(result) ? result : 'DAT';
+    },
+    [catalogs]
+  );
 
   // == Scroll lock mientras el modal estÃƒÂ¡ abierto ==
   useEffect(() => {
@@ -159,19 +175,15 @@ export default function CreateCampaignModal({
     };
   }, []);
 
-  // funciones locales
-  const findCampaignByName = (name: string) =>
-    CAMPAIGNS.find(
-      (c: any) => (c?.name || '').trim().toLowerCase() === (name || '').trim().toLowerCase()
-    );
-
   const [openAddCampaign, setOpenAddCampaign] = useState(false);
   const [openAddPartner, setOpenAddPartner] = useState(false);
   const [openAddDatabase, setOpenAddDatabase] = useState(false);
   const highContrast = false;
 
   // ValidaciÃƒÂ³n con campaÃƒÂ±as dinÃƒÂ¡micas
-  const allowedCampaigns = new Set(CAMPAIGNS.map((c: any) => String(c?.name || '').toLowerCase()));
+  const allowedCampaigns = useMemo(() => {
+    return new Set(CAMPAIGNS.map((campaign) => normalizeKey(campaign.name)));
+  }, [CAMPAIGNS, normalizeKey]);
 
   const schema = z.object({
     date: z.string().min(1, 'Required'),
@@ -206,8 +218,8 @@ export default function CreateCampaignModal({
   type FieldName = keyof FormValues;
 
   // Helpers
-  const safeDealType = (t: any): DealType =>
-    (DEAL_TYPES as readonly string[]).includes(t) ? (t as DealType) : 'CPL';
+  const safeDealType = (value: unknown): DealType =>
+    typeof value === 'string' && (DEAL_TYPES as readonly string[]).includes(value) ? (value as DealType) : 'CPL';
 
   // RHF
   const { register, handleSubmit, formState, reset, watch, setValue, getValues } =
@@ -263,12 +275,17 @@ export default function CreateCampaignModal({
               // geo y databaseType se autocompletan tras escoger DB
             } as Partial<FormValues>,
     });
+  const { ref: dateInputRef, ...dateField } = register('date');
 
   const { errors, isSubmitting, isDirty, isSubmitted, touchedFields, dirtyFields } = formState;
 
-  const showErr = (name: FieldName) =>
-    !!(errors as any)[name] &&
-    (isSubmitted || (touchedFields as any)[name] || (dirtyFields as any)[name]);
+  const showErr = (name: FieldName) => {
+    const fieldError = errors[name];
+    if (!fieldError) return false;
+    const touched = touchedFields[name];
+    const dirty = dirtyFields[name];
+    return isSubmitted || Boolean(touched) || Boolean(dirty);
+  };
 
   const firstRef = useRef<HTMLInputElement>(null);
   const formRef = useRef<HTMLFormElement>(null);
@@ -281,9 +298,10 @@ export default function CreateCampaignModal({
 
     input.focus({ preventScroll: true });
 
-    if (typeof (input as any).showPicker === 'function') {
+    const pickerInput = input as PickerInput;
+    if (typeof pickerInput.showPicker === 'function') {
       try {
-        (input as any).showPicker();
+        pickerInput.showPicker();
         return;
       } catch {
         /* browsers can throw if called too quickly; fallback below */
@@ -316,13 +334,13 @@ export default function CreateCampaignModal({
   useEffect(() => {
     const c = findCampaignByName(campaign || '');
     setValue('advertiser', c?.advertiser ?? '', { shouldValidate: !!c });
-  }, [campaign, CAMPAIGNS, setValue]);
+  }, [campaign, findCampaignByName, setValue]);
 
   // Database -> GEO + DB Type (idempotente)
   useEffect(() => {
-    const db = DATABASES.find((d: any) => d?.name === database);
+    const db = DATABASES.find((d) => d.name === database);
     const nextGeo = db?.geo ?? '';
-    const nextDbType: DBType | undefined = isDBType(db?.dbType) ? db!.dbType : undefined;
+    const nextDbType: DBType | undefined = db?.dbType;
 
     const currGeo = getValues('geo');
     const currDbt = getValues('databaseType');
@@ -342,7 +360,7 @@ export default function CreateCampaignModal({
     if (curr !== inv) {
       setValue('invoiceOffice', inv, { shouldValidate: false, shouldDirty: true });
     }
-  }, [geo, partner, setValue, getValues]);
+  }, [geo, partner, setValue, getValues, resolveOffice]);
 
   // CÃƒÂ¡lculos en vivo
   useEffect(() => {
@@ -544,7 +562,7 @@ export default function CreateCampaignModal({
   // === UI ===
   const modal = (
     <div
-      className="fixed inset-0 z-[100] flex items-center justify-center p-4"
+      className="fixed inset-0 z-[200] flex items-center justify-center p-4"
       role="dialog"
       aria-modal="true"
     >
@@ -601,16 +619,17 @@ export default function CreateCampaignModal({
                     <>
                       <div className="field-with-suffix flex w-full items-stretch">
                         <input
-                          ref={firstRef as any}
+                          ref={(element) => {
+                            dateInputRef(element);
+                            firstRef.current = element;
+                          }}
                           type="date"
-                          {...register('date')}
+                          {...dateField}
                           aria-invalid={showErr('date') || undefined}
                           aria-describedby={showErr('date') ? errId('date') : undefined}
                           className={`input input-date h-10 ${showErr('date') ? 'input-error' : ''}`}
                           onMouseDown={(event) => {
-                            const target = event.currentTarget as HTMLInputElement & {
-                              showPicker?: () => void;
-                            };
+                            const target = event.currentTarget as PickerInput;
                             if (typeof target.showPicker === 'function') {
                               event.preventDefault();
                               openDatePicker(target);
@@ -642,7 +661,7 @@ export default function CreateCampaignModal({
                           id="campaign"
                           ariaLabel="Campaign"
                           className="w-full"
-                          options={CAMPAIGNS.map((c: any) => ({ id: c.id, value: c.name }))}
+                          options={CAMPAIGNS.map((c) => ({ id: c.id, value: c.name }))}
                           value={watch('campaign')}
                           onChange={(v) =>
                             setValue('campaign', v, { shouldValidate: true, shouldDirty: true })
@@ -728,7 +747,7 @@ export default function CreateCampaignModal({
                         aria-describedby={showErr('partner') ? errId('partner') : undefined}
                       >
                         <option value="">-- Select --</option>
-                        {PARTNERS.map((p: any) => (
+                        {PARTNERS.map((p) => (
                           <option key={p.id} value={p.name}>
                             {p.name}
                             {p.isInternal ? ' (INT)' : ''}
@@ -893,7 +912,7 @@ export default function CreateCampaignModal({
                         aria-describedby={showErr('database') ? errId('database') : undefined}
                       >
                         <option value="">-- Select --</option>
-                        {DATABASES.map((d: any) => (
+                        {DATABASES.map((d) => (
                           <option key={d.id} value={d.name}>
                             {d.name}
                           </option>

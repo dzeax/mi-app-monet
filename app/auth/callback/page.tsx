@@ -3,6 +3,7 @@
 import { Suspense, useEffect, useMemo, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { createClientComponentClient } from '@supabase/auth-helpers-nextjs';
+import type { VerifyOtpParams } from '@supabase/supabase-js';
 
 type Status = 'checking' | 'ok' | 'error';
 
@@ -64,9 +65,22 @@ function AuthCallbackContent() {
           if (error) throw error;
         } else if (token && flow) {
           setMessage('Detected token + type. Verifying...');
-          const payload: Record<string, unknown> = { token, type: flow };
-          if (email) payload.email = email;
-          const { error } = await supabase.auth.verifyOtp(payload as any);
+          const allowedTypes: VerifyOtpParams['type'][] = [
+            'magiclink',
+            'recovery',
+            'signup',
+            'email_change',
+            'invite',
+            'sms',
+          ];
+          if (!allowedTypes.includes(flow as VerifyOtpParams['type'])) {
+            throw new Error('Unsupported verification flow.');
+          }
+          const otpPayload: VerifyOtpParams = { token, type: flow as VerifyOtpParams['type'] };
+          if (email) {
+            otpPayload.email = email;
+          }
+          const { error } = await supabase.auth.verifyOtp(otpPayload);
           if (error) throw error;
         } else if (accessToken && refreshToken) {
           setMessage('Detected access+refresh tokens. Setting session...');
@@ -83,10 +97,11 @@ function AuthCallbackContent() {
         setStatus('ok');
         setMessage('Signed in. Redirecting...');
         router.replace(redirectTo || '/');
-      } catch (error: any) {
+      } catch (error: unknown) {
         if (cancelled) return;
         setStatus('error');
-        setMessage(error?.message || 'Could not validate the link.');
+        const message = error instanceof Error ? error.message : 'Could not validate the link.';
+        setMessage(message);
       }
     };
 
@@ -131,4 +146,3 @@ function CallbackFallback() {
     </div>
   );
 }
-

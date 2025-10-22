@@ -33,6 +33,7 @@
 :root {
   --color-muted: rgba(15, 23, 42, 0.65);
   --color-hover: color-mix(in oklab, var(--color-surface) 85%, #0f172a);
+  --header-h: 4.5rem;
 
   /* Paleta para charts (LIGHT) */
   --chart-1: #06b6d4; /* cyan-500 */
@@ -128,6 +129,77 @@ body {
   background: var(--color-surface);
   border-color: var(--color-border);
   box-shadow: 0 1px 2px rgba(0,0,0,.05);
+}
+
+/* Sidebar: glassy cards and elevated buttons */
+.sidebar-card {
+  border-radius: 1rem;
+  border: 1px solid color-mix(in oklab, var(--color-border) 70%, transparent);
+  background: color-mix(in oklab, var(--color-surface) 88%, var(--color-surface-2));
+  box-shadow: 0 14px 28px rgba(15,23,42,.10);
+  backdrop-filter: blur(6px);
+}
+html[data-theme="dark"] .sidebar-card {
+  background: color-mix(in oklab, var(--color-surface) 82%, var(--color-surface-2));
+  border-color: color-mix(in oklab, var(--color-border) 80%, transparent);
+  box-shadow: 0 22px 44px rgba(0,0,0,.45);
+}
+
+.sidebar-btn {
+  border-color: var(--color-border);
+  color: var(--color-text);
+  background: color-mix(in oklab, var(--color-surface) 96%, transparent);
+  transition: transform .15s ease, box-shadow .15s ease, background-color .15s ease;
+}
+.sidebar-btn:hover {
+  transform: translateY(-1px);
+  box-shadow: 0 10px 20px rgba(15,23,42,.10);
+  background: color-mix(in oklab, var(--color-surface) 98%, transparent);
+}
+.sidebar-btn--active {
+  position: relative;
+  background: color-mix(in oklab, var(--color-primary) 8%, var(--color-surface));
+  border-color: color-mix(in oklab, var(--color-primary) 45%, var(--color-border));
+  color: color-mix(in oklab, var(--color-primary) 70%, var(--color-text));
+}
+.sidebar-btn--active::before {
+  content: '';
+  position: absolute; left: 6px; top: 50%; transform: translateY(-50%);
+  height: 18px; width: 3px; border-radius: 999px;
+  background: var(--color-primary);
+}
+
+.sidebar-badge {
+  display: inline-flex; align-items: center; gap: 6px;
+  padding: 2px 8px; border-radius: 999px; font-size: 11px; font-weight: 600;
+  color: color-mix(in oklab, var(--color-primary) 82%, var(--color-text));
+  background: color-mix(in oklab, var(--color-primary) 18%, transparent);
+  border: 1px solid color-mix(in oklab, var(--color-primary) 35%, transparent);
+}
+
+/* Small circular icon buttons (header actions) */
+.icon-btn {
+  display: inline-flex; align-items: center; justify-content: center;
+  width: 28px; height: 28px; border-radius: 999px;
+  border: 1px solid color-mix(in oklab, var(--color-border) 75%, transparent);
+  background: transparent; color: color-mix(in oklab, var(--color-text) 80%, transparent);
+  transition: transform .15s ease, box-shadow .15s ease, background-color .15s ease;
+}
+.icon-btn:hover { background: rgba(0,0,0,.05); box-shadow: 0 6px 12px rgba(15,23,42,.08); transform: translateY(-1px); }
+.icon-btn:focus-visible { outline: none; box-shadow: 0 0 0 3px color-mix(in oklab, var(--color-primary) 30%, transparent); }
+
+.spinner-dot {
+  display: inline-block;
+  height: 16px;
+  width: 16px;
+  border-radius: 999px;
+  border: 2px solid currentColor;
+  border-right-color: transparent;
+  animation: spin 0.6s linear infinite;
+}
+
+@keyframes spin {
+  to { transform: rotate(360deg); }
 }
 
 .modal-body {
@@ -464,63 +536,191 @@ input[type="date"]:hover::-webkit-calendar-picker-indicator { opacity: 1; }
    Brand Bar (Header) — fixed size
    ======================= */
 .app-header {
-  position: sticky;
+  position: fixed;
+  left: 0;
+  right: 0;
   top: 0;
-  z-index: 100; /* Header siempre por encima de todo */
-
-  /* Fondo oscuro para destacar el logo */
-  background: linear-gradient(180deg, #0e1116 0%, #151a22 100%);
-  color: #e5e7eb;
-  border-bottom: 1px solid color-mix(in oklab, white 12%, transparent);
-
-  /* Tamaño fijo (unificado) */
-  --header-h: 5.5rem; /* 88px */
-  --logo-h: 56px;     /* altura visual del logo */
+  z-index: 120;
+  --header-h: 4.5rem;
+  --logo-h: 46px;
+  background: linear-gradient(135deg, rgba(14, 17, 29, 0.92), rgba(17, 54, 62, 0.88) 45%, rgba(39, 64, 122, 0.86) 100%);
+  color: rgba(236, 244, 255, 0.94);
+  border-bottom: 1px solid rgba(255, 255, 255, 0.08);
+  backdrop-filter: blur(18px);
+  box-shadow: 0 20px 48px rgba(8, 15, 40, 0.35);
 }
 
-/* (Opcional) Si prefieres mantener mobile más alto, comenta el bloque superior
-   y usa este media-query. Si lo dejas, recuerda ajustar --content-sticky-top en móvil.
-@media (min-width: 768px) {
-  .app-header { --header-h: 5.5rem; --logo-h: 56px; }
-}
-*/
-
-.app-header::after {
-  content: "";
-  position: absolute; left: 0; right: 0; bottom: -1px;
-  height: 2px;
-  background: linear-gradient(
-    90deg,
-    var(--color-primary) 0%,
-    color-mix(in oklab, var(--color-primary), transparent 40%) 50%,
-    var(--color-accent) 100%
-  );
-  opacity: .9;
-}
+.app-header::after { display: none; }
 
 .app-header .bar {
   height: var(--header-h);
-  /* Sin animaciones del shrink */
   transition: none;
+  color: inherit;
 }
 
-/* Botón ghost en header oscuro */
-.app-header .btn-ghost {
-  color: #e5e7eb;
-  border-color: transparent;
-  background: transparent;
-}
-.app-header .btn-ghost:hover { background: rgba(255,255,255,.06); }
-
-/* Glow sutil del logo */
 .app-header .brand-logo {
-  filter: drop-shadow(0 0 10px rgba(255,255,255,.08));
-  transition: none; /* sin transición ligada a scroll */
+  filter: drop-shadow(0 0 18px rgba(56, 189, 248, 0.45));
 }
 
-/* Respeta reduced motion */
-@media (prefers-reduced-motion: reduce) {
-  .app-header .brand-logo { transition: none; }
+.app-header .icon-btn {
+  border-color: rgba(255, 255, 255, 0.18);
+  background: rgba(255, 255, 255, 0.08);
+  color: rgba(240, 246, 255, 0.88);
+}
+.app-header .icon-btn:hover {
+  background: rgba(255, 255, 255, 0.2);
+  color: #fff;
+  box-shadow: 0 12px 28px rgba(12, 20, 40, 0.35);
+}
+.app-header .icon-btn:focus-visible {
+  box-shadow: 0 0 0 3px rgba(34, 197, 194, 0.45);
+}
+
+.header-progress {
+  position: absolute;
+  inset: 0 auto auto 0;
+  width: 100%;
+  height: 2px;
+  background: linear-gradient(90deg, var(--color-primary) 0%, #22d3ee 50%, #60a5fa 100%);
+  transform: scaleX(0);
+  transform-origin: left;
+  opacity: 0;
+  transition: transform .4s ease, opacity .2s ease;
+}
+.header-progress--active {
+  opacity: 1;
+  transform: scaleX(1);
+}
+
+.breadcrumb__link {
+  color: rgba(255, 255, 255, 0.65);
+  transition: color .15s ease;
+}
+.breadcrumb__link:hover { color: rgba(255, 255, 255, 0.9); }
+.breadcrumb__separator { color: rgba(255, 255, 255, 0.28); }
+.breadcrumb__current { color: rgba(255, 255, 255, 0.9); }
+
+
+.user-button {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.65rem;
+  padding: 0.35rem 0.85rem 0.35rem 0.35rem;
+  border-radius: 999px;
+  border: 1px solid rgba(255, 255, 255, 0.16);
+  background: rgba(255, 255, 255, 0.08);
+  color: inherit;
+  transition: background .15s ease, border-color .15s ease, box-shadow .15s ease;
+}
+.user-button:hover {
+  border-color: rgba(255, 255, 255, 0.28);
+  background: rgba(255, 255, 255, 0.14);
+  box-shadow: 0 10px 20px rgba(15, 23, 42, 0.32);
+}
+.user-button:focus-visible {
+  outline: none;
+  box-shadow: 0 0 0 3px rgba(34, 197, 194, 0.45);
+}
+.user-button__avatar {
+  position: relative;
+  height: 32px;
+  width: 32px;
+  border-radius: 999px;
+  overflow: hidden;
+  border: 1px solid rgba(255, 255, 255, 0.2);
+  background: rgba(15, 23, 42, 0.4);
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  color: rgba(255, 255, 255, 0.85);
+  font-weight: 600;
+}
+.user-button__initials { font-size: 0.85rem; }
+.user-button__meta {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+}
+.user-button__name {
+  font-size: 0.85rem;
+  font-weight: 600;
+  color: rgba(255, 255, 255, 0.92);
+  white-space: nowrap;
+  max-width: 140px;
+  text-overflow: ellipsis;
+  overflow: hidden;
+}
+.user-button__role {
+  font-size: 0.7rem;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: rgba(255, 255, 255, 0.58);
+}
+.user-button__chevron {
+  height: 14px;
+  width: 14px;
+  color: rgba(255, 255, 255, 0.6);
+  transition: transform .15s ease;
+}
+.user-button__chevron--open { transform: rotate(-180deg); }
+
+.user-menu {
+  position: absolute;
+  right: 0;
+  top: calc(100% + 12px);
+  min-width: 220px;
+  border-radius: 1rem;
+  border: 1px solid color-mix(in oklab, var(--color-border) 45%, rgba(255,255,255,.28));
+  background: color-mix(in oklab, var(--color-surface) 94%, rgba(15,23,42,0.88));
+  box-shadow: 0 26px 60px rgba(8, 15, 40, 0.38);
+  padding: 0.6rem;
+  backdrop-filter: blur(16px);
+  color: var(--color-text);
+  z-index: 10;
+}
+.user-menu__header {
+  padding: 0.5rem 0.5rem 0.75rem;
+  border-bottom: 1px solid color-mix(in oklab, var(--color-border) 55%, transparent);
+  margin-bottom: 0.4rem;
+}
+.user-menu__name {
+  font-size: 0.95rem;
+  font-weight: 600;
+  color: color-mix(in oklab, var(--color-text) 92%, #0f172a);
+}
+.user-menu__email {
+  font-size: 0.75rem;
+  color: color-mix(in oklab, var(--color-text) 70%, #0f172a);
+  word-break: break-all;
+}
+.user-menu__item {
+  width: 100%;
+  text-align: left;
+  padding: 0.55rem 0.65rem;
+  border-radius: 0.75rem;
+  font-size: 0.85rem;
+  font-weight: 500;
+  color: color-mix(in oklab, var(--color-text) 90%, #0f172a);
+  transition: background .15s ease, color .15s ease;
+}
+.user-menu__item:hover {
+  background: color-mix(in oklab, var(--color-primary) 16%, transparent);
+  color: color-mix(in oklab, var(--color-text) 100%, #0f172a);
+}
+.user-menu__item--danger:hover {
+  background: color-mix(in oklab, var(--color-accent) 28%, transparent);
+  color: color-mix(in oklab, var(--color-text) 100%, #0f172a);
+}
+
+.header-actions {
+  color: inherit;
+}
+
+@media (max-width: 768px) {
+  .user-button__meta {
+    display: none;
+  }
 }
 
 /* Espaciado vertical consistente para el módulo de filtros */
@@ -972,7 +1172,10 @@ form[data-highcontrast='true'] .badge-field {
 
 /* utilidad: añade espacio inferior al contenido para no taparlo */
 .with-app-footer{
+  min-height: 100vh;
+  padding-top: calc(var(--header-h) + 0.5rem + max(0px, env(safe-area-inset-top)));
   padding-bottom: calc(var(--footer-h) + max(0px, env(safe-area-inset-bottom)));
+  background: var(--color-bg-outer);
 }
 
 /* --- GEO flag badge --- */

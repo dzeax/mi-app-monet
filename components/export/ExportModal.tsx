@@ -1,7 +1,7 @@
 // components/export/ExportModal.tsx
 'use client';
 
-import { useMemo, useState } from 'react';
+import { useState } from 'react';
 import MiniModal from '@/components/ui/MiniModal';
 import { useAuth } from '@/context/AuthContext'; // 🆕 admin guard
 import type { CampaignRow } from '@/types/campaign';

@@ -1,11 +1,12 @@
 // components/import/ImportCsvModal.tsx
 'use client';
 
-import { useEffect, useMemo, useRef, useState } from 'react';
-import { useAuth } from '@/context/AuthContext';                 // 🆕 admin guard
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { useAuth } from '@/context/AuthContext';                 // ðŸ†• admin guard
 import MiniModal from '@/components/ui/MiniModal';
 import { useCampaignData } from '@/context/CampaignDataContext';
 import { useCatalogOverrides } from '@/context/CatalogOverridesContext';
+import type { CampaignRef, PartnerRef, DatabaseRef } from '@/data/reference';
 import type { CampaignRow } from '@/types/campaign';
 
 type Draft = Omit<CampaignRow, 'id'>;
@@ -16,13 +17,25 @@ type RowIssue = { level: RowState; msg: string };
 const REQUIRED_HEADERS = [
   'date','campaign','partner','theme','price','type','vSent','qty','database'
 ] as const;
-type RequiredHeader = typeof REQUIRED_HEADERS[number];
 
 const OPTIONAL_HEADERS = ['priceCurrency'] as const;
 
 const fmtEUR = new Intl.NumberFormat('es-ES', { style: 'currency', currency: 'EUR' });
 
 type ToastVariant = 'success' | 'error';
+
+const EMPTY_CAMPAIGNS: CampaignRef[] = [];
+const EMPTY_PARTNERS: PartnerRef[] = [];
+const EMPTY_DATABASES: DatabaseRef[] = [];
+const EMPTY_THEMES: string[] = [];
+const DEFAULT_TYPES = ['CPL', 'CPM', 'CPC', 'CPA'] as const;
+const INVOICE_OFFICES = ['DAT', 'CAR', 'INT'] as const;
+type InvoiceOfficeOption = typeof INVOICE_OFFICES[number];
+
+const toInvoiceOffice = (value: string): InvoiceOfficeOption =>
+  (INVOICE_OFFICES as readonly string[]).includes(value)
+    ? (value as InvoiceOfficeOption)
+    : 'DAT';
 
 function showToast(message: string, opts?: { variant?: ToastVariant; duration?: number }) {
   if (typeof document === 'undefined') return;
@@ -82,7 +95,7 @@ function showToast(message: string, opts?: { variant?: ToastVariant; duration?: 
    Utils
    ======================= */
 
-function parseNum(v: any): number {
+function parseNum(v: unknown): number {
   if (v === '' || v == null) return 0;
   if (typeof v === 'number') return Number.isFinite(v) ? v : 0;
 
@@ -125,7 +138,7 @@ function normalizeDate(d: string): string | null {
   return t.toISOString().slice(0, 10);
 }
 
-// CSV parser con autodetección de delimitador
+// CSV parser con autodetecciÃ³n de delimitador
 function parseCSV(text: string): { headers: string[]; rows: Record<string, string>[] } {
   const lines = text.replace(/\r/g, '\n').split('\n').filter(l => l.trim() !== '');
   if (lines.length === 0) return { headers: [], rows: [] };
@@ -200,31 +213,18 @@ function getCI(obj: Record<string, string>, key: string): string {
    Componente
    ======================= */
 export default function ImportCsvModal({ onClose }: { onClose: () => void }) {
-  const { isAdmin } = useAuth();                                  // 🆕
+  const { isAdmin } = useAuth();                                  // ðŸ†•
   const { refresh } = useCampaignData();
 
   const catalogs = useCatalogOverrides();
-  const {
-    CAMPAIGNS = [], PARTNERS = [], DATABASES = [], THEMES = [], TYPES = ['CPL','CPM','CPC','CPA'],
-    resolveInvoiceOfficeMerged = () => 'DAT',
-  } = catalogs || {};
+  const CAMPAIGNS = catalogs?.CAMPAIGNS ?? EMPTY_CAMPAIGNS;
+  const PARTNERS = catalogs?.PARTNERS ?? EMPTY_PARTNERS;
+  const DATABASES = catalogs?.DATABASES ?? EMPTY_DATABASES;
+  const THEMES = catalogs?.THEMES ?? EMPTY_THEMES;
+  const TYPES = catalogs?.TYPES ?? [...DEFAULT_TYPES];
+  const resolveInvoiceOfficeMerged = catalogs?.resolveInvoiceOfficeMerged ?? (() => 'DAT');
 
-  // 🔒 Guard: solo admins pueden importar
-  if (!isAdmin) {
-    return (
-      <MiniModal
-        title="Import from CSV"
-        onClose={onClose}
-        solid={false}
-        footer={<button className="btn-primary" onClick={onClose}>Close</button>}
-      >
-        <div className="p-2 text-sm">
-          This action is restricted to <strong>admins</strong>. If you think this is a mistake, please contact an administrator.
-        </div>
-      </MiniModal>
-    );
-  }
-
+  // ðŸ”’ Guard: solo admins pueden importar
   // archivo + datos parseados
   const [fileName, setFileName] = useState('');
   const [rawHeaders, setRawHeaders] = useState<string[]>([]);
@@ -242,20 +242,26 @@ export default function ImportCsvModal({ onClose }: { onClose: () => void }) {
     return REQUIRED_HEADERS.every(h => hset.has(h.toLowerCase()));
   }, [rawHeaders]);
 
-  // Helpers de catálogo
+  // Helpers de catÃ¡logo
+  const normalizeKey = (value: string) => value.trim().toLowerCase();
   const findCampaign = (name: string) =>
-    CAMPAIGNS.find((c: any) => (c?.name || '').trim().toLowerCase() === (name||'').trim().toLowerCase());
+    CAMPAIGNS.find((campaign) => normalizeKey(campaign.name) === normalizeKey(name));
   const partnerExists = (name: string) =>
-    PARTNERS.some((p: any) => (p?.name || '').trim().toLowerCase() === (name||'').trim().toLowerCase());
+    PARTNERS.some((partner) => normalizeKey(partner.name) === normalizeKey(name));
   const findDatabase = (name: string) =>
-    DATABASES.find((d: any) => (d?.name || '').trim().toLowerCase() === (name||'').trim().toLowerCase());
+    DATABASES.find((db) => normalizeKey(db.name) === normalizeKey(name));
   const themeExists = (name: string) =>
-    THEMES.some((t: string) => t.trim().toLowerCase() === (name||'').trim().toLowerCase());
+    THEMES.some((theme) => normalizeKey(theme) === normalizeKey(name));
   const typeExists = (name: string) =>
-    TYPES.some((t: string) => t.trim().toLowerCase() === (name||'').trim().toLowerCase());
+    TYPES.some((type) => normalizeKey(type) === normalizeKey(name));
 
   // Parse + validar
   useEffect(() => {
+    if (!isAdmin) {
+      setIssues([]);
+      setDrafts([]);
+      return;
+    }
     if (!rawRows.length || !headerOk) { setIssues([]); setDrafts([]); return; }
 
     const nextDrafts: Draft[] = [];
@@ -265,25 +271,25 @@ export default function ImportCsvModal({ onClose }: { onClose: () => void }) {
       const rowIssues: RowIssue[] = [];
 
       const date = normalizeDate(getCI(row, 'date'));
-      if (!date) rowIssues.push({ level: 'ERROR', msg: 'Fecha inválida' });
+      if (!date) rowIssues.push({ level: 'ERROR', msg: 'Fecha invÃ¡lida' });
 
       const campaign = (getCI(row, 'campaign') || '').trim();
       if (!campaign) rowIssues.push({ level: 'ERROR', msg: 'Campaign requerida' });
       const cRef = findCampaign(campaign);
-      if (!cRef) rowIssues.push({ level: 'ERROR', msg: 'Campaign no existe en catálogo' });
+      if (!cRef) rowIssues.push({ level: 'ERROR', msg: 'Campaign no existe en catÃ¡logo' });
       const advertiser = cRef?.advertiser || '';
 
       const partner = (getCI(row, 'partner') || '').trim();
       if (!partner) rowIssues.push({ level: 'ERROR', msg: 'Partner requerido' });
-      if (partner && !partnerExists(partner)) rowIssues.push({ level: 'ERROR', msg: 'Partner no existe en catálogo' });
+      if (partner && !partnerExists(partner)) rowIssues.push({ level: 'ERROR', msg: 'Partner no existe en catÃ¡logo' });
 
       const theme = (getCI(row, 'theme') || '').trim();
       if (!theme) rowIssues.push({ level: 'ERROR', msg: 'Theme requerido' });
-      if (theme && !themeExists(theme)) rowIssues.push({ level: 'ERROR', msg: 'Theme no existe en catálogo' });
+      if (theme && !themeExists(theme)) rowIssues.push({ level: 'ERROR', msg: 'Theme no existe en catÃ¡logo' });
 
       const type = (getCI(row, 'type') || '').trim();
       if (!type) rowIssues.push({ level: 'ERROR', msg: 'Type requerido' });
-      if (type && !typeExists(type)) rowIssues.push({ level: 'ERROR', msg: 'Type no existe en catálogo' });
+      if (type && !typeExists(type)) rowIssues.push({ level: 'ERROR', msg: 'Type no existe en catÃ¡logo' });
 
       const price = parseNum(getCI(row, 'price'));
       if (price < 0) rowIssues.push({ level: 'ERROR', msg: 'Price < 0' });
@@ -298,13 +304,14 @@ export default function ImportCsvModal({ onClose }: { onClose: () => void }) {
       const database = (getCI(row, 'database') || '').trim();
       if (!database) rowIssues.push({ level: 'ERROR', msg: 'Database requerida' });
       const dbRef = findDatabase(database);
-      if (!dbRef) rowIssues.push({ level: 'ERROR', msg: 'Database no existe en catálogo' });
+      if (!dbRef) rowIssues.push({ level: 'ERROR', msg: 'Database no existe en catÃ¡logo' });
 
       const priceCurrency = (getCI(row, 'priceCurrency') || 'EUR').trim() || 'EUR';
 
-      const geo = dbRef?.geo || '';
-      const databaseType = (dbRef?.dbType || '') as CampaignRow['databaseType'];
-      const invoiceOffice = resolveInvoiceOfficeMerged(geo || undefined, partner || undefined) as CampaignRow['invoiceOffice'];
+      const geo = dbRef?.geo ?? '';
+      const databaseType: CampaignRow['databaseType'] = dbRef?.dbType ?? 'B2C';
+      const invoiceOfficeValue = resolveInvoiceOfficeMerged(geo || undefined, partner || undefined);
+      const invoiceOffice: CampaignRow['invoiceOffice'] = toInvoiceOffice(invoiceOfficeValue);
 
       const routingCosts = Number(((vSent / 1000) * 0.18).toFixed(2));
       const turnover = Number((qty * price).toFixed(2));
@@ -329,7 +336,7 @@ export default function ImportCsvModal({ onClose }: { onClose: () => void }) {
         ecpm,
         database,
         geo,
-        databaseType: (databaseType || '') as CampaignRow['databaseType'],
+        databaseType,
       };
 
       nextDrafts.push(draft);
@@ -338,7 +345,7 @@ export default function ImportCsvModal({ onClose }: { onClose: () => void }) {
 
     setDrafts(nextDrafts);
     setIssues(nextIssues);
-  }, [rawRows, headerOk]); // eslint-disable-line
+  }, [isAdmin, rawRows, headerOk]); // eslint-disable-line
 
   const totals = useMemo(() => {
     let ok = 0, warn = 0, err = 0;
@@ -358,30 +365,33 @@ export default function ImportCsvModal({ onClose }: { onClose: () => void }) {
 
   const canImport = drafts.length > 0 && totals.err === 0;
 
-  function onPickFile() { inputRef.current?.click(); }
-  async function onFileChange(e: React.ChangeEvent<HTMLInputElement>) {
-    const f = e.target.files?.[0];
-    e.currentTarget.value = '';
-    if (!f) return;
+  const handleFile = useCallback(async (file: File) => {
     setParsing(true);
-    setFileName(f.name);
+    setFileName(file.name);
     try {
-      const text = await f.text();
+      const text = await file.text();
       const parsed = parseCSV(text);
       setRawHeaders(parsed.headers);
       setRawRows(parsed.rows);
     } finally {
       setParsing(false);
     }
+  }, []);
+
+  function onPickFile() { inputRef.current?.click(); }
+  async function onFileChange(e: React.ChangeEvent<HTMLInputElement>) {
+    const file = e.target.files?.[0];
+    e.currentTarget.value = '';
+    if (!file) return;
+    await handleFile(file);
   }
 
   // Dropzone
   function onDropFile(e: React.DragEvent<HTMLDivElement>) {
     e.preventDefault();
-    const f = e.dataTransfer.files?.[0];
-    if (!f) return;
-    const fakeEvt = { target: { files: [f] }, currentTarget: { value: '' } } as any;
-    onFileChange(fakeEvt);
+    const file = e.dataTransfer.files?.[0];
+    if (!file) return;
+    void handleFile(file);
   }
   function onDragOver(e: React.DragEvent<HTMLDivElement>) { e.preventDefault(); }
 
@@ -398,17 +408,20 @@ export default function ImportCsvModal({ onClose }: { onClose: () => void }) {
         }),
       });
 
-      const payload = await response.json().catch(() => ({}));
+      const raw = await response.json().catch(() => ({}));
+      const payload: Record<string, unknown> =
+        raw && typeof raw === 'object' ? (raw as Record<string, unknown>) : {};
 
       if (!response.ok) {
-        const message = payload?.error || 'Import failed.';
+        const errorMsg = payload['error'];
+        const message = typeof errorMsg === 'string' ? errorMsg : 'Import failed.';
         showToast(message, { variant: 'error' });
         return;
       }
 
-      const processed = payload.total ?? drafts.length;
-      const duplicates = payload.duplicates ?? 0;
-      showToast(`Import done · Processed: ${processed} · Duplicates skipped: ${duplicates}`, {
+      const processed = typeof payload['total'] === 'number' ? (payload['total'] as number) : drafts.length;
+      const duplicates = typeof payload['duplicates'] === 'number' ? (payload['duplicates'] as number) : 0;
+      showToast(`Import done Â· Processed: ${processed} Â· Duplicates skipped: ${duplicates}`, {
         variant: 'success',
       });
       await refresh();
@@ -440,7 +453,7 @@ export default function ImportCsvModal({ onClose }: { onClose: () => void }) {
     ? 'w-full max-w-[min(95vw,1400px)]'
     : 'w-full max-w-[720px]';
 
-  // === Fades locales para overflow-x del área de tabla ===
+  // === Fades locales para overflow-x del Ã¡rea de tabla ===
   const hWrapRef = useRef<HTMLDivElement>(null);
   const [showLeftFade, setShowLeftFade] = useState(false);
   const [showRightFade, setShowRightFade] = useState(false);
@@ -453,6 +466,7 @@ export default function ImportCsvModal({ onClose }: { onClose: () => void }) {
     setShowRightFade(scrollLeft + clientWidth < scrollWidth - 1);
   }
   useEffect(() => {
+    if (!isAdmin) return;
     const el = hWrapRef.current;
     if (!el) return;
     updateHFades();
@@ -462,11 +476,26 @@ export default function ImportCsvModal({ onClose }: { onClose: () => void }) {
       el.removeEventListener('scroll', updateHFades);
       window.removeEventListener('resize', updateHFades);
     };
-  }, [preview]);
+  }, [isAdmin, preview]);
 
   /* =======================
      UI
      ======================= */
+  if (!isAdmin) {
+    return (
+      <MiniModal
+        title="Import from CSV"
+        onClose={onClose}
+        solid={false}
+        footer={<button className="btn-primary" onClick={onClose}>Close</button>}
+      >
+        <div className="p-2 text-sm">
+          This action is restricted to <strong>admins</strong>. If you think this is a mistake, please contact an administrator.
+        </div>
+      </MiniModal>
+    );
+  }
+
   return (
     <MiniModal
       title="Import from CSV"
@@ -476,7 +505,7 @@ export default function ImportCsvModal({ onClose }: { onClose: () => void }) {
       headerClassName="modal-chrome py-2.5"
       footerClassName="modal-chrome py-2.5"
       accentStrip
-      /* edgeFades quitado aquí para que no oscurezca todo el body */
+      /* edgeFades quitado aquÃ­ para que no oscurezca todo el body */
       footer={(
         <>
           <button className="btn-ghost" onClick={downloadTemplate}>Download template</button>
@@ -487,7 +516,7 @@ export default function ImportCsvModal({ onClose }: { onClose: () => void }) {
             onClick={doImport}
             style={{ fontVariantNumeric: 'tabular-nums' }}
           >
-            {importing ? 'Importing…' : `Import ${totals.ok + totals.warn} rows`}
+            {importing ? 'Importingâ€¦' : `Import ${totals.ok + totals.warn} rows`}
           </button>
         </>
       )}
@@ -519,11 +548,11 @@ export default function ImportCsvModal({ onClose }: { onClose: () => void }) {
           <div className="text-sm">
             <div className="font-medium">CSV file</div>
             <div className="opacity-70" style={{ fontVariantNumeric: 'tabular-nums' }}>
-              {fileName || (parsing ? 'Parsing…' : 'No file selected')}
+              {fileName || (parsing ? 'Parsingâ€¦' : 'No file selected')}
             </div>
           </div>
           <button className="btn-ghost" onClick={onPickFile} disabled={parsing}>
-            {parsing ? 'Parsing…' : 'Select CSV'}
+            {parsing ? 'Parsingâ€¦' : 'Select CSV'}
           </button>
         </div>
 
@@ -617,7 +646,7 @@ export default function ImportCsvModal({ onClose }: { onClose: () => void }) {
                             <Cell className="text-right">{d.vSent}</Cell>
                             <Cell>{d.database}</Cell>
                             <Cell>{d.geo}</Cell>
-                            <Cell>{d.databaseType || '—'}</Cell>
+                            <Cell>{d.databaseType || 'â€”'}</Cell>
                             <Cell className="text-right">{d.turnover.toFixed(2)}</Cell>
                             <Cell
                               className={`text-right ${

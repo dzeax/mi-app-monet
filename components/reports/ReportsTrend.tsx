@@ -8,9 +8,15 @@ import {
   LineChart, Line,
   CartesianGrid, XAxis, YAxis, Tooltip, Legend,
 } from 'recharts';
+import type { ValueType } from 'recharts/types/component/DefaultTooltipContent';
 
 export default function ReportsTrend({ data }: { data: TrendPoint[] }) {
   const hasData = Array.isArray(data) && data.length > 0;
+
+  const formatValue = (value: ValueType) => {
+    const numeric = typeof value === 'number' ? value : Number(value ?? 0);
+    return fmtEUR2.format(Number.isFinite(numeric) ? numeric : 0);
+  };
 
   return (
     <div className="rounded-xl border border-[--color-border] bg-[color:var(--color-surface)] p-3">
@@ -45,7 +51,7 @@ export default function ReportsTrend({ data }: { data: TrendPoint[] }) {
                 }}
                 itemStyle={{ color: 'var(--color-text)' }}
                 labelStyle={{ color: 'var(--color-text)' }}
-                formatter={(value: any) => [fmtEUR2.format(Number(value || 0)), 'eCPM']}
+                formatter={(value: ValueType) => [formatValue(value), 'eCPM'] as const}
               />
               <Legend />
               <Line

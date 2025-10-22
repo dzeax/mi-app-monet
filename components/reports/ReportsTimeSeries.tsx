@@ -7,8 +7,9 @@ import { fmtEUR2, fmtINT } from '@/utils/format';
 import {
   ResponsiveContainer, LineChart, Line, CartesianGrid, XAxis, YAxis, Tooltip, Legend,
 } from 'recharts';
+import type { ValueType } from 'recharts/types/component/DefaultTooltipContent';
 
-type MetricOpt = 'ecpm' | 'turnover' | 'margin' | 'marginPct' | 'vSent';
+type MetricOpt = 'ecpm' | 'turnover' | 'margin' | 'marginPct' | 'routingCosts' | 'vSent';
 type GroupOpt = 'none' | 'database' | 'partner' | 'geo';
 
 const fmtPCT1 = new Intl.NumberFormat('es-ES', { style: 'percent', maximumFractionDigits: 1 });
@@ -35,21 +36,23 @@ export default function ReportsTimeSeries({
 
   const visibleKeys = focus ? keys.filter(k => k === focus) : keys;
 
-  const tickFormatter = (v: any) =>
-    metric === 'marginPct'
-      ? fmtPCT1.format(Number(v || 0))
-      : metric === 'vSent'
-      ? fmtINT.format(Number(v || 0))
-      : fmtEUR2.format(Number(v || 0));
+  const toNumber = (value: ValueType): number => {
+    if (typeof value === 'number') {
+      return Number.isFinite(value) ? value : 0;
+    }
+    const parsed = Number(value);
+    return Number.isFinite(parsed) ? parsed : 0;
+  };
 
-  const tooltipFormatter = (value: any) => [
-    metric === 'marginPct'
-      ? fmtPCT1.format(Number(value || 0))
-      : metric === 'vSent'
-      ? fmtINT.format(Number(value || 0))
-      : fmtEUR2.format(Number(value || 0)),
-    labelOf(metric),
-  ];
+  const formatMetricValue = (value: ValueType) => {
+    const numeric = toNumber(value);
+    if (metric === 'marginPct') return fmtPCT1.format(numeric);
+    if (metric === 'vSent') return fmtINT.format(numeric);
+    return fmtEUR2.format(numeric);
+  };
+
+  const tickFormatter = (value: ValueType) => formatMetricValue(value);
+  const tooltipFormatter = (value: ValueType) => [formatMetricValue(value), labelOf(metric)] as const;
 
   return (
     <div className="rounded-xl border border-[--color-border] bg-[color:var(--color-surface)] p-3">
@@ -74,6 +77,7 @@ export default function ReportsTimeSeries({
               <option value="turnover">Turnover</option>
               <option value="margin">Margin</option>
               <option value="marginPct">Margin %</option>
+              <option value="routingCosts">Routing costs</option>
               <option value="vSent">V Sent</option>
             </select>
           </label>
@@ -112,7 +116,7 @@ export default function ReportsTimeSeries({
         </div>
       </div>
 
-      <div className="h-[--h]" style={{ ['--h' as any]: `${height}px` }}>
+      <div style={{ height: `${height}px` }}>
         {data.length === 0 ? (
           <div className="h-full flex items-center justify-center text-sm opacity-70">No data for current filters</div>
         ) : (
@@ -170,5 +174,9 @@ function colorFor(key: string) {
   return palette[h % palette.length];
 }
 function labelOf(m: MetricOpt) {
-  return m === 'ecpm' ? 'eCPM' : m === 'marginPct' ? 'Margin %' : m === 'vSent' ? 'V Sent' : m[0].toUpperCase() + m.slice(1);
+  if (m === 'ecpm') return 'eCPM';
+  if (m === 'marginPct') return 'Margin %';
+  if (m === 'routingCosts') return 'Routing costs';
+  if (m === 'vSent') return 'V Sent';
+  return m[0].toUpperCase() + m.slice(1);
 }

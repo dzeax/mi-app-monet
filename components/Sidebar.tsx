@@ -1,13 +1,14 @@
-'use client';
+"use client";
 
-import { useState } from 'react';
-import { useRouter } from 'next/navigation';
-import { useAuth } from '@/context/AuthContext';            // 🆕
-import CreateCampaignModal from './create-campaign/CreateCampaignModal';
-import ManageCatalogsModal from './catalogs/ManageCatalogsModal';
-import ImportCsvModal from './import/ImportCsvModal';
-import RoutingSettingsModal from '@/components/admin/RoutingSettingsModal';
-import ManageUsersModal from '@/components/admin/ManageUsersModal'; // 🆕
+import Image from "next/image";
+import { useEffect, useState } from "react";
+import { usePathname, useRouter } from "next/navigation";
+import { useAuth } from "@/context/AuthContext";
+import CreateCampaignModal from "./create-campaign/CreateCampaignModal";
+import ManageCatalogsModal from "./catalogs/ManageCatalogsModal";
+import ImportCsvModal from "./import/ImportCsvModal";
+import RoutingSettingsModal from "@/components/admin/RoutingSettingsModal";
+import ManageUsersModal from "@/components/admin/ManageUsersModal";
 
 type Props = {
   collapsed: boolean;
@@ -23,30 +24,52 @@ export default function Sidebar({
   onActionDone,
 }: Props) {
   const router = useRouter();
-  const { isAdmin, isEditor } = useAuth();                  // 🆕
+  const pathname = usePathname();
+  const { isAdmin, isEditor } = useAuth();
 
   const [openCreate, setOpenCreate] = useState(false);
   const [openManage, setOpenManage] = useState(false);
   const [openImport, setOpenImport] = useState(false);
-  const [openUsers, setOpenUsers]   = useState(false);      // 🆕
+  const [openUsers, setOpenUsers] = useState(false);
   const [openRouting, setOpenRouting] = useState(false);
 
-  const btnBase = (extra = '') =>
+  // Density (comfy|compact) persisted
+  const [density, setDensity] = useState<"comfy" | "compact">("comfy");
+  useEffect(() => {
+    try {
+      const stored = typeof window !== "undefined" ? localStorage.getItem("sidebarDensity") : null;
+      if (stored === "compact" || stored === "comfy") setDensity(stored as "comfy" | "compact");
+    } catch {}
+  }, []);
+  const toggleDensity = () => {
+    setDensity((d) => {
+      const next = d === "comfy" ? "compact" : "comfy";
+      try {
+        localStorage.setItem("sidebarDensity", next);
+      } catch {}
+      return next;
+    });
+  };
+
+  const padExpanded = density === "compact" ? "px-2.5 py-1.5" : "px-3 py-2";
+  const padCollapsed = density === "compact" ? "px-2 py-1.5" : "px-2 py-2";
+
+  const btnBase = (extra = "") =>
     collapsed
-      ? `flex justify-center items-center rounded-xl border border-[--color-border] px-2 py-2 hover:bg-black/5 transition-colors ${extra}`
-      : `w-full rounded-xl border border-[--color-border] px-3 py-2 text-left hover:bg-black/5 transition-colors ${extra}`;
+      ? `sidebar-btn flex justify-center items-center gap-2 rounded-xl border ${padCollapsed} ${extra}`
+      : `sidebar-btn w-full flex items-center gap-3 rounded-xl border ${padExpanded} text-left ${extra}`;
 
   const BtnCreate = (
     <button
       onClick={() => isEditor && setOpenCreate(true)}
       disabled={!isEditor}
       aria-disabled={!isEditor}
-      className={btnBase('disabled:opacity-50 disabled:pointer-events-none')}
-      title={isEditor ? 'Create campaign' : 'Editors/Admins only'}
+      className={btnBase("disabled:opacity-50 disabled:pointer-events-none")}
+      title={isEditor ? "Create Campaign" : "Editors/Admins only"}
       aria-label="Create campaign"
     >
-      <span className="text-lg leading-none">+</span>
-      {!collapsed && <span className="ml-2">Create campaign{!isEditor ? ' (locked)' : ''}</span>}
+      <Image src="/icons/sidebar/create-campaign.svg" alt="" aria-hidden width={24} height={24} className="h-5 w-5" />
+      {!collapsed && <span>Create Campaign{!isEditor ? " (locked)" : ""}</span>}
     </button>
   );
 
@@ -55,12 +78,12 @@ export default function Sidebar({
       onClick={() => isAdmin && setOpenImport(true)}
       disabled={!isAdmin}
       aria-disabled={!isAdmin}
-      className={btnBase('mt-2 disabled:opacity-50 disabled:pointer-events-none')}
-      title={isAdmin ? 'Import from CSV' : 'Admins only'}
+      className={btnBase("mt-2 disabled:opacity-50 disabled:pointer-events-none")}
+      title={isAdmin ? "Imports" : "Admins only"}
       aria-label="Import from CSV"
     >
-      <span className="text-lg leading-none">I</span>
-      {!collapsed && <span className="ml-2">Import from CSV{!isAdmin ? ' (admin)' : ''}</span>}
+      <Image src="/icons/sidebar/import-csv.svg" alt="" aria-hidden width={24} height={24} className="h-5 w-5" />
+      {!collapsed && <span>Imports{!isAdmin ? " (admin)" : ""}</span>}
     </button>
   );
 
@@ -69,12 +92,12 @@ export default function Sidebar({
       onClick={() => isEditor && setOpenManage(true)}
       disabled={!isEditor}
       aria-disabled={!isEditor}
-      className={btnBase('mt-2 disabled:opacity-50 disabled:pointer-events-none')}
-      title={isEditor ? 'Manage catalogs' : 'Editors/Admins only'}
+      className={btnBase("mt-2 disabled:opacity-50 disabled:pointer-events-none")}
+      title={isEditor ? "Manage Catalogs" : "Editors/Admins only"}
       aria-label="Manage catalogs"
     >
-      <span className="text-lg leading-none">C</span>
-      {!collapsed && <span className="ml-2">Manage catalogs{!isEditor ? ' (locked)' : ''}</span>}
+      <Image src="/icons/sidebar/manage-catalogs.svg" alt="" aria-hidden width={24} height={24} className="h-5 w-5" />
+      {!collapsed && <span>Manage Catalogs{!isEditor ? " (locked)" : ""}</span>}
     </button>
   );
 
@@ -83,12 +106,12 @@ export default function Sidebar({
       onClick={() => isAdmin && setOpenUsers(true)}
       disabled={!isAdmin}
       aria-disabled={!isAdmin}
-      className={btnBase('mt-2 disabled:opacity-50 disabled:pointer-events-none')}
-      title={isAdmin ? 'Manage users' : 'Admins only'}
+      className={btnBase("mt-2 disabled:opacity-50 disabled:pointer-events-none")}
+      title={isAdmin ? "Manage Users" : "Admins only"}
       aria-label="Manage users"
     >
-      <span className="text-lg leading-none">U</span>
-      {!collapsed && <span className="ml-2">Manage users{!isAdmin ? ' (admin)' : ''}</span>}
+      <Image src="/icons/sidebar/manage-users.svg" alt="" aria-hidden width={24} height={24} className="h-5 w-5" />
+      {!collapsed && <span>Manage Users{!isAdmin ? " (admin)" : ""}</span>}
     </button>
   );
 
@@ -97,32 +120,33 @@ export default function Sidebar({
       onClick={() => isAdmin && setOpenRouting(true)}
       disabled={!isAdmin}
       aria-disabled={!isAdmin}
-      className={btnBase('mt-2 disabled:opacity-50 disabled:pointer-events-none')}
-      title={isAdmin ? 'Routing settings' : 'Admins only'}
+      className={btnBase("mt-2 disabled:opacity-50 disabled:pointer-events-none")}
+      title={isAdmin ? "Routing Settings" : "Admins only"}
       aria-label="Routing settings"
     >
-      <span className="text-lg leading-none">RC</span>
-      {!collapsed && <span className="ml-2">Routing settings{!isAdmin ? ' (admin)' : ''}</span>}
+      <Image src="/icons/sidebar/routing-settings.svg" alt="" aria-hidden width={24} height={24} className="h-5 w-5" />
+      {!collapsed && <span>Routing Settings{!isAdmin ? " (admin)" : ""}</span>}
     </button>
   );
 
   const BtnReports = (
     <button
-      onClick={() => router.push('/reports')}
-      className={btnBase()}
+      onClick={() => router.push("/reports")}
+      className={btnBase(pathname?.startsWith("/reports") ? "sidebar-btn--active" : "")}
       title="Reports"
       aria-label="Reports"
     >
-      <span className="text-lg leading-none">R</span>
-      {!collapsed && <span className="ml-2">Reports</span>}
+      <Image src="/icons/sidebar/reports.svg" alt="" aria-hidden width={24} height={24} className="h-5 w-5" />
+      {!collapsed && <span>Reports</span>}
+      {!collapsed && <span className="sidebar-badge ml-auto">Analytics</span>}
     </button>
   );
 
   return (
-    <div className={collapsed ? 'shrink-0 self-start w-[56px]' : 'shrink-0 self-start w-full md:w-full'}>
+    <div className={collapsed ? "shrink-0 self-start w-[56px]" : "shrink-0 self-start w-full md:w-full"}>
       <div className="grid gap-3">
-        <div className={collapsed ? 'card p-2' : 'card p-4'}>
-          <div className={['flex items-center mb-2', collapsed ? 'justify-center' : 'justify-between'].join(' ')}>
+        <div className={collapsed ? "sidebar-card p-2" : "sidebar-card p-4"}>
+          <div className={["flex items-center mb-2", collapsed ? "justify-center" : "justify-between"].join(" ")}>
             {!collapsed && (
               <div>
                 <h2 className="text-base font-semibold">Actions</h2>
@@ -130,14 +154,39 @@ export default function Sidebar({
               </div>
             )}
             {!hideCollapseToggle && (
-              <button
-                onClick={onToggleCollapse}
-                className="rounded-lg border border-[--color-border] px-2 py-1 text-xs hover:bg-black/5 transition-colors"
-                aria-label={collapsed ? 'Expand sidebar' : 'Collapse sidebar'}
-                title={collapsed ? 'Expand' : 'Collapse'}
-              >
-                {collapsed ? '<<' : '>>'}
-              </button>
+              <div className="flex items-center gap-2">
+                <button
+                  onClick={onToggleCollapse}
+                  className="icon-btn"
+                  aria-label={collapsed ? 'Expand sidebar' : 'Collapse sidebar'}
+                  title={collapsed ? 'Expand' : 'Collapse'}
+                >
+                  <Image
+                    src={collapsed ? '/icons/ui/sidebar-expand.svg' : '/icons/ui/sidebar-collapse.svg'}
+                    alt=""
+                    aria-hidden
+                    width={20}
+                    height={20}
+                  />
+                </button>
+                {!collapsed && (
+                  <button
+                    onClick={toggleDensity}
+                    className="icon-btn"
+                    aria-label="Toggle sidebar density"
+                    aria-pressed={density === 'compact'}
+                    title={`Density: ${density}`}
+                  >
+                    <Image
+                      src={density === 'compact' ? '/icons/ui/density-compact.svg' : '/icons/ui/density-comfy.svg'}
+                      alt=""
+                      aria-hidden
+                      width={20}
+                      height={20}
+                    />
+                  </button>
+                )}
+              </div>
             )}
           </div>
 
@@ -160,8 +209,8 @@ export default function Sidebar({
           )}
         </div>
 
-        <div className={collapsed ? 'card p-2' : 'card p-4'}>
-          <div className={['flex items-center mb-2', collapsed ? 'justify-center' : 'justify-between'].join(' ')}>
+        <div className={collapsed ? "sidebar-card p-2" : "sidebar-card p-4"}>
+          <div className={["flex items-center mb-2", collapsed ? "justify-center" : "justify-between"].join(" ")}>
             {!collapsed && (
               <div>
                 <h2 className="text-base font-semibold">Analytics</h2>

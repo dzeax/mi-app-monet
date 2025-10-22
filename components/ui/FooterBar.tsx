@@ -1,4 +1,5 @@
 'use client';
+import Image from 'next/image';
 
 export default function FooterBar() {
   return (
@@ -14,10 +15,9 @@ export default function FooterBar() {
 
         <span className="text-[11px] sm:text-xs opacity-80 flex items-center whitespace-nowrap select-none">
           Crafted with
-          <img
-            src="/love1.png"        
-            alt=""                      /* decorativo */
-            aria-hidden="true"
+          <Image
+            src="/love1.png"
+            alt=""
             width={14}
             height={14}
             className="inline-block h-3 w-3 mx-1 align-[-2px]"

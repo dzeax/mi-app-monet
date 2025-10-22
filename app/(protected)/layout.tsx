@@ -17,13 +17,12 @@ export default async function ProtectedLayout({ children }: { children: React.Re
 
   return (
     <AuthProvider>
+      <AppHeader />
+
       <div className="with-app-footer">
-        <AppHeader />
-        {/* El contenido del app privado va aquí */}
         <div>{children}</div>
       </div>
 
-      {/* Barra fija inferior */}
       <FooterBar />
     </AuthProvider>
   );

@@ -6,6 +6,7 @@ type Kpis = {
   vSent: number;
   turnover: number;
   margin: number;
+  routingCosts: number;
   ecpm: number;
   marginPct: number | null;
 };
@@ -16,6 +17,11 @@ type Props = {
   filteredRows?: number;
   groupCount?: number;
   className?: string;
+  scope: 'all' | 'focus';
+  onScopeChange: (scope: 'all' | 'focus') => void;
+  focusAvailable?: boolean;
+  focusLabel?: string | null;
+  focusDimensionLabel?: string | null;
 };
 
 type MarginTier = 'green' | 'amber' | 'red' | null;
@@ -31,6 +37,11 @@ export default function ReportsKpis({
   filteredRows,
   groupCount,
   className = '',
+  scope,
+  onScopeChange,
+  focusAvailable = false,
+  focusLabel = null,
+  focusDimensionLabel = null,
 }: Props) {
   const marginTier = getMarginTier(kpis.marginPct);
 
@@ -43,6 +54,14 @@ export default function ReportsKpis({
   const rowsLabel = filteredRows == null ? '--' : fmtINT.format(filteredRows);
   const groupsLabel = groupCount == null ? '--' : fmtINT.format(groupCount);
   const containerClass = ['relative h-full', className].filter(Boolean).join(' ');
+  const focusDisabled = !focusAvailable;
+  const focusSummary = focusLabel
+    ? `${focusDimensionLabel ? `${focusDimensionLabel}: ` : ''}${focusLabel}`
+    : 'Select a focus in the filters';
+  const scopeSummary =
+    scope === 'focus'
+      ? focusSummary
+      : 'All filtered data';
 
   return (
     <aside className={containerClass}>
@@ -73,6 +92,28 @@ export default function ReportsKpis({
             {periodLabel}
           </span>
         </header>
+
+        <div className="flex flex-wrap items-center gap-3 text-xs md:text-sm text-[color:var(--color-text)]/70">
+          <span className="text-[11px] uppercase tracking-[0.16em] text-[color:var(--color-text)]/55">
+            Scope
+          </span>
+          <div className="inline-flex overflow-hidden rounded-full border border-[color-mix(in_oklab,var(--color-border)_65%,transparent)] bg-white/60 shadow-[0_4px_12px_rgba(15,23,42,0.08)]">
+            <ScopeButton
+              label="All data"
+              active={scope === 'all'}
+              onClick={() => onScopeChange('all')}
+            />
+            <ScopeButton
+              label="Focus"
+              active={scope === 'focus'}
+              onClick={() => onScopeChange('focus')}
+              disabled={focusDisabled}
+            />
+          </div>
+          <span className="text-[color:var(--color-text)]/60">
+            {focusDisabled && scope !== 'focus' ? 'Select a focus option to enable' : scopeSummary}
+          </span>
+        </div>
 
         <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 md:gap-4">
           <KpiHighlight label="Turnover" value={turnover} />
@@ -145,5 +186,37 @@ function KpiHighlight({
         </div>
       ) : null}
     </div>
+  );
+}
+
+function ScopeButton({
+  label,
+  active,
+  onClick,
+  disabled = false,
+}: {
+  label: string;
+  active: boolean;
+  onClick: () => void;
+  disabled?: boolean;
+}) {
+  const base =
+    'px-3 py-1 text-xs font-medium transition-colors focus:outline-none focus-visible:ring-2 focus-visible:ring-offset-1 focus-visible:ring-[color:var(--color-primary)]';
+  const activeClass =
+    'bg-[color:var(--color-primary)] text-white shadow-[0_8px_16px_rgba(15,23,42,0.18)]';
+  const inactiveClass =
+    'text-[color:var(--color-text)]/70 hover:bg-white/70';
+  const disabledClass = 'opacity-50 cursor-not-allowed hover:bg-transparent';
+
+  return (
+    <button
+      type="button"
+      className={[base, active ? activeClass : inactiveClass, disabled ? disabledClass : ''].join(' ')}
+      onClick={disabled ? undefined : onClick}
+      aria-pressed={active}
+      disabled={disabled}
+    >
+      {label}
+    </button>
   );
 }

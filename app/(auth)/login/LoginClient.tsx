@@ -2,7 +2,6 @@
 
 import { useState } from 'react';
 import Image from 'next/image';
-import Link from 'next/link';
 import { useRouter, useSearchParams } from 'next/navigation';
 import { useAuth } from '@/context/AuthContext';
 
@@ -30,8 +29,9 @@ export default function LoginClient() {
         router.push(redirect);
         router.refresh();
       }
-    } catch (e: any) {
-      setErr(e?.message ?? 'Unexpected error');
+    } catch (e: unknown) {
+      const msg = e instanceof Error ? e.message : 'Unexpected error';
+      setErr(msg);
     } finally {
       setLoading(false);
     }
@@ -154,9 +154,21 @@ export default function LoginClient() {
             <button
               type="submit"
               disabled={loading}
-              className="w-full rounded-xl bg-neutral-900 text-white py-2.5 font-medium hover:bg-neutral-800 disabled:opacity-60"
+              className="w-full rounded-xl bg-neutral-900 text-white py-2.5 font-medium hover:bg-neutral-800 disabled:opacity-60 disabled:cursor-not-allowed"
             >
-              {loading ? 'Signing in...' : 'Sign in'}
+              {loading ? (
+                <span className="flex items-center justify-center gap-2">
+                  <Image
+                    src="/animations/login-spinner.gif"
+                    alt="Signing in"
+                    width={24}
+                    height={24}
+                  />
+                  Signing in...
+                </span>
+              ) : (
+                'Sign in'
+              )}
             </button>
 
             <div className="flex items-center justify-start text-sm text-neutral-500">

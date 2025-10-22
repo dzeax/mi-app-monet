@@ -11,7 +11,10 @@ const payloadSchema = z.object({
   deleteAuth: z.boolean().optional(),
 });
 
-export async function POST(req: Request) {
+type ErrorRes = { error: string };
+type OkRes = { ok: true; deletedAuth: boolean };
+
+export async function POST(req: Request): Promise<NextResponse<ErrorRes | OkRes>> {
   const supabase = await createServerSupabase();
   const {
     data: { session },
@@ -39,7 +42,7 @@ export async function POST(req: Request) {
   try {
     const body = await req.json();
     parsed = payloadSchema.parse(body);
-  } catch (error: any) {
+  } catch (error: unknown) {
     const message =
       error instanceof z.ZodError
         ? error.errors.map((err) => err.message).join(', ') || 'Invalid payload'

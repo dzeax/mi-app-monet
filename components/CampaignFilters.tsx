@@ -155,7 +155,6 @@ export default function CampaignFilters({
   const databaseValue = filters.databases?.[0] ?? ALL;
   const themeValue = filters.themes?.[0] ?? ALL;
   const dbTypeValue = filters.dbTypes?.[0] ?? ALL;
-  const databaseGeoMap = options.databaseGeoMap ?? {};
 
   const geoSelectOptions = useMemo(() => {
     return options.geos.map((geo) => {
@@ -169,14 +168,14 @@ export default function CampaignFilters({
 
   const databaseSelectOptions = useMemo(() => {
     return options.databases.map((name) => {
-      const geo = databaseGeoMap[name];
+      const geo = (options.databaseGeoMap ?? {})[name];
       const geoCanonical = canonicalGeo(geo);
       const readable = geoCanonical ? geoLabel(geoCanonical) : undefined;
       const codeNote = geoCanonical && readable ? ` (${geoCanonical})` : '';
       const title = readable ? `${name} — ${readable}${codeNote}` : name;
       return { value: name, label: name, geo, title };
     });
-  }, [options.databases, databaseGeoMap]);
+  }, [options.databases, options.databaseGeoMap]);
 
   const setTypes = useCallback((value: string) => {
     updateFilters({ types: value === ALL ? [] : [value] });

@@ -7,6 +7,22 @@ import RowActions from '@/components/table/RowActions';
 import { useAuth } from '@/context/AuthContext'; // 🆕 roles
 import { normalizeGeoStrict } from '@/utils/geo'; // 🆕 GEO strict
 
+const PARTNER_OFFICES = ['DAT', 'CAR', 'INT'] as const;
+type PartnerOffice = typeof PARTNER_OFFICES[number];
+
+const DB_TYPE_OPTIONS = ['B2B', 'B2C', 'Mixed'] as const;
+type DatabaseTypeOption = typeof DB_TYPE_OPTIONS[number];
+
+const toPartnerOffice = (value: string): PartnerOffice =>
+  (PARTNER_OFFICES as readonly string[]).includes(value)
+    ? (value as PartnerOffice)
+    : 'DAT';
+
+const toDatabaseType = (value: string): DatabaseTypeOption =>
+  (DB_TYPE_OPTIONS as readonly string[]).includes(value)
+    ? (value as DatabaseTypeOption)
+    : 'B2C';
+
 type TabKey = 'campaigns' | 'partners' | 'databases' | 'themes' | 'types';
 
 export default function ManageCatalogsModal({ onClose }: { onClose: () => void }) {
@@ -346,7 +362,7 @@ function PartnersPanel(props: {
   const { items, onAdd, onUpdate, onRemove, disabled } = props;
   const [q, setQ] = useState('');
   const [name, setName] = useState('');
-  const [office, setOffice] = useState<'DAT'|'CAR'|'INT'>('DAT');
+  const [office, setOffice] = useState<PartnerOffice>('DAT');
 
   const list = useMemo(() => {
     const s = q.trim().toLowerCase();
@@ -363,7 +379,7 @@ function PartnersPanel(props: {
           disabled ? null : (
             <>
               <input value={name} onChange={(e)=>setName(e.target.value)} placeholder="Partner name" className="input" />
-              <select className="input" value={office} onChange={(e)=>setOffice(e.target.value as any)}>
+              <select className="input" value={office} onChange={(e)=>setOffice(toPartnerOffice(e.target.value))}>
                 <option value="DAT">DAT</option><option value="CAR">CAR</option><option value="INT">INT</option>
               </select>
               <button className="btn-primary" onClick={()=>{ if (name.trim()) { onAdd(name, office); setName(''); setOffice('DAT'); }}}>Add</button>
@@ -411,7 +427,7 @@ function DatabasesPanel(props: {
   const [q, setQ] = useState('');
   const [name, setName] = useState('');
   const [geo, setGeo] = useState('');
-  const [dbType, setDbType] = useState<'B2B'|'B2C'|'Mixed'>('B2C');
+  const [dbType, setDbType] = useState<DatabaseTypeOption>('B2C');
 
   const geoStrict = normalizeGeoStrict(geo);
 
@@ -437,7 +453,7 @@ function DatabasesPanel(props: {
                 className={`input ${geo && !geoStrict ? 'input-error' : ''}`}
                 aria-invalid={geo && !geoStrict || undefined}
               />
-              <select className="input" value={dbType} onChange={(e)=>setDbType(e.target.value as any)}>
+              <select className="input" value={dbType} onChange={(e)=>setDbType(toDatabaseType(e.target.value))}>
                 <option value="B2C">B2C</option>
                 <option value="B2B">B2B</option>
                 <option value="Mixed">Mixed</option>
@@ -476,7 +492,7 @@ function DatabasesPanel(props: {
                 <RowActions
                   onEdit={() => {}}
                   onDuplicate={() =>
-                    onAdd({ name: `${i.name} (copy)`, geo: i.geo, dbType: (i.dbType as any) || 'B2C' })
+                  onAdd({ name: `${i.name} (copy)`, geo: i.geo, dbType: toDatabaseType(String(i.dbType)) })
                   }
                   onDelete={() => onRemove(i.name)}
                 />

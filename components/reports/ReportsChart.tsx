@@ -9,7 +9,9 @@ import {
   Tooltip,
   LabelList,
 } from 'recharts';
+import type { NameType, ValueType } from 'recharts/types/component/DefaultTooltipContent';
 import type { AggregateRow, Metric } from '@/types/reports';
+import { METRIC_LABELS } from '@/types/reports';
 import { fmtEUR2, fmtINT, formatByMetric, makeYAxisTick } from '@/utils/format';
 
 type Props = {
@@ -38,6 +40,14 @@ const chartTheme = {
   },
 };
 
+const toNumber = (value: ValueType): number => {
+  if (typeof value === 'number') {
+    return Number.isFinite(value) ? value : 0;
+  }
+  const parsed = Number(value);
+  return Number.isFinite(parsed) ? parsed : 0;
+};
+
 export default function ReportsChart({
   data,
   metric,
@@ -47,13 +57,20 @@ export default function ReportsChart({
   groupLabel = 'Group',
 }: Props) {
   const yTick = makeYAxisTick(metric);
-  const hStyle = { height: `${height}px` }; // ⬅️ altura explícita para el contenedor
+  const hStyle = { height: `${height}px` };
+
+  const tooltipFormatter = (value: ValueType, name: NameType) => [
+    formatByMetric(metric, toNumber(value)),
+    String(name ?? ''),
+  ] as const;
+
+  const tooltipLabelFormatter = (label: ValueType) => String(label ?? '');
 
   return (
     <div className="rounded-xl border border-[--color-border] bg-[color:var(--color-surface)] p-3">
       <div className="flex items-center justify-between px-1 pb-2">
         <div className="text-sm opacity-80">{title}</div>
-        <div className="text-xs opacity-60">Right click → “Save image”</div>
+        <div className="text-xs opacity-60">Right click &gt; &quot;Save image&quot;</div>
       </div>
 
       {/* ⬇️ altura fija en inline-style (nada de variables CSS) */}
@@ -87,13 +104,8 @@ export default function ReportsChart({
                 contentStyle={chartTheme.tooltip.contentStyle}
                 itemStyle={chartTheme.tooltip.itemStyle}
                 labelStyle={chartTheme.tooltip.labelStyle}
-                formatter={(v: any, name: any) => {
-                  const val = Number(v || 0);
-                  if (metric === 'ecpm') return [fmtEUR2.format(val), 'eCPM'];
-                  if (metric === 'turnover' || metric === 'margin') return [fmtEUR2.format(val), name];
-                  return [fmtINT.format(val), name];
-                }}
-                labelFormatter={(label: any) => String(label)}
+                formatter={tooltipFormatter}
+                labelFormatter={tooltipLabelFormatter}
               />
               <Bar dataKey={metric} name={legendName(metric)} radius={[6, 6, 0, 0]} fill="var(--chart-1)">
                 <LabelList
@@ -140,6 +152,7 @@ export default function ReportsChart({
   );
 }
 
-function legendName(m: Metric) {
-  return m === 'turnover' ? 'Turnover' : m === 'margin' ? 'Margin' : m === 'ecpm' ? 'eCPM' : 'V Sent';
+function legendName(metric: Metric) {
+  return METRIC_LABELS[metric] ?? metric;
 }
+

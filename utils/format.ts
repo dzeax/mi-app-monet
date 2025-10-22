@@ -1,4 +1,3 @@
-// utils/format.ts
 import type { Metric } from '@/types/reports';
 
 /** Formateadores base */
@@ -18,19 +17,40 @@ export const fmtINT = new Intl.NumberFormat('es-ES', {
   maximumFractionDigits: 0,
 });
 
+const fmtPCT = new Intl.NumberFormat('es-ES', {
+  style: 'percent',
+  maximumFractionDigits: 2,
+});
+
 /** Formatea un valor en función de la métrica seleccionada */
 export function formatByMetric(metric: Metric, value: number): string {
-  if (metric === 'turnover' || metric === 'margin') return fmtEUR2.format(value || 0);
-  if (metric === 'ecpm') return fmtEUR2.format(value || 0);
-  return fmtINT.format(value || 0);
+  const n = Number(value || 0);
+  if (metric === 'turnover' || metric === 'margin' || metric === 'routingCosts') {
+    return fmtEUR2.format(n);
+  }
+  if (metric === 'ecpm') {
+    return fmtEUR2.format(n);
+  }
+  if (metric === 'marginPct') {
+    return fmtPCT.format(n);
+  }
+  return fmtINT.format(n);
 }
 
 /** Y-axis tick formatter para Recharts según métrica */
 export function makeYAxisTick(metric: Metric) {
   return (v: number) => {
-    if (metric === 'turnover' || metric === 'margin') return compactEuro(v);
-    if (metric === 'ecpm') return fmtEUR2.format(v || 0);
-    return fmtINT.format(v || 0);
+    const n = Number(v || 0);
+    if (metric === 'marginPct') {
+      return `${(n * 100).toFixed(0)}%`;
+    }
+    if (metric === 'turnover' || metric === 'margin' || metric === 'routingCosts') {
+      return compactEuro(n);
+    }
+    if (metric === 'ecpm') {
+      return fmtEUR2.format(n);
+    }
+    return fmtINT.format(n);
   };
 }
 
@@ -51,6 +71,7 @@ type FmtNum = ((n: number) => string) & { format: (n: number) => string };
 
 export const fmtNum: FmtNum = Object.assign(
   (n: number) => fmtINT.format(n),
-  { format: (n: number) => fmtINT.format(n) }
+  { format: (n: number) => fmtINT.format(n) },
 );
+
 

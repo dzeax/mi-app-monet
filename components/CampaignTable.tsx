@@ -1,20 +1,21 @@
 'use client';
 
 import { useEffect, useMemo, useRef, useState } from 'react';
+import type { CSSProperties } from 'react';
 import { CampaignRow } from '@/types/campaign';
 import { useCampaignData } from '@/context/CampaignDataContext';
-import { useAuth } from '@/context/AuthContext';
-import { useRoutingSettings } from '@/context/RoutingSettingsContext';
+// import { useAuth } from '@/context/AuthContext';
+// import { useRoutingSettings } from '@/context/RoutingSettingsContext';
 import CampaignFilters from './CampaignFilters';
 import { useCampaignFilterEngine } from '@/hooks/useCampaignFilterEngine';
 
 import ColumnPicker from '@/components/ui/ColumnPicker';
-import BulkRoutingOverrideModal, { type BulkRoutingOverridePayload } from '@/components/admin/BulkRoutingOverrideModal';
+// import BulkRoutingOverrideModal, { type BulkRoutingOverridePayload } from '@/components/admin/BulkRoutingOverrideModal';
 import RowActions from '@/components/table/RowActions';
 import CreateCampaignModal from './create-campaign/CreateCampaignModal';
 import type { DBType } from '@/data/reference';
 import { useCatalogOverrides } from '@/context/CatalogOverridesContext';
-import { DEFAULT_ROUTING_RATE } from '@/lib/campaign-calcs';
+// import { DEFAULT_ROUTING_RATE } from '@/lib/campaign-calcs';
 import GeoFlag from '@/components/GeoFlag';
 import { normalizeGeo } from '@/lib/geoFlags';
 
@@ -233,7 +234,7 @@ function activePresetLabelFromRange(range?: [string|null,string|null] | null) {
     ['thisMonth','This month'],['lastMonth','Last month'],['last7','Last 7'],['last30','Last 30'],
   ] as const;
   for (const [k,label] of entries) {
-    const [s,e] = rangeForPresetKey(k as any);
+    const [s,e] = rangeForPresetKey(k);
     if (s===start && e===end) return label;
   }
   return `${start}  to  ${end}`;
@@ -432,10 +433,8 @@ function MenuItem({ label, onClick, onClose }: { label: string; onClick: () => v
 }
 
 export default function CampaignTable() {
-  const { rows, removeCampaign, setRoutingRateOverride } = useCampaignData();
-  const { isAdmin } = useAuth();
-  const { settings } = useRoutingSettings();
-  const defaultRoutingRate = settings.defaultRate ?? DEFAULT_ROUTING_RATE;
+  const { rows, removeCampaign /*, setRoutingRateOverride */ } = useCampaignData();
+  // const { isAdmin } = useAuth();
 
   /* ====== CatÃ¡logos canÃ³nicos ====== */
   const catalogs = useCatalogOverrides();
@@ -531,7 +530,7 @@ export default function CampaignTable() {
 
   // [EXPORT]
   const [openExport, setOpenExport] = useState(false);
-  const [openRoutingOverride, setOpenRoutingOverride] = useState(false);
+  // const [openRoutingOverride, setOpenRoutingOverride] = useState(false);
 
   /* ====== Column visibility persistente ====== */
   const defaults = useMemo(
@@ -588,9 +587,19 @@ export default function CampaignTable() {
     const arr = [...dataSource];
     if (sortKey === 'none') return arr;
     return arr.sort((a, b) => {
-      let va: any, vb: any;
-      if (sortKey === 'marginPct') { va = marginPctOf(a); vb = marginPctOf(b); }
-      else { va = (a as any)[sortKey]; vb = (b as any)[sortKey]; }
+      let va: number | string | null | undefined;
+      let vb: number | string | null | undefined;
+      if (sortKey === 'marginPct') {
+        va = marginPctOf(a);
+        vb = marginPctOf(b);
+      } else if (sortKey === '_idx') {
+        va = a._idx;
+        vb = b._idx;
+      } else {
+        const key = sortKey as keyof CampaignRow;
+        va = a[key] as unknown as number | string | null | undefined;
+        vb = b[key] as unknown as number | string | null | undefined;
+      }
 
       if (va == null && vb == null) return a._idx - b._idx;
       if (va == null) return 1;
@@ -629,17 +638,17 @@ export default function CampaignTable() {
   const periodLabel = activePresetLabelFromRange(engine.filters.dateRange ?? null) || 'All data';
   const marginTier = marginPctTier(summary.marginPct);
 
-  const handleRoutingOverride = ({ scope, mode, rate }: BulkRoutingOverridePayload) => {
-    const target = scope === 'all' ? sortedAll : pageRows;
-    if (!target.length) {
-      setOpenRoutingOverride(false);
-      return;
-    }
-    const ids = target.map(r => r.id);
-    const value = mode === 'clear' ? null : (rate ?? null);
-        void setRoutingRateOverride(ids, value);
-    setOpenRoutingOverride(false);
-  };
+  // const handleRoutingOverride = ({ scope, mode, rate }: { scope: 'page' | 'all'; mode: 'set' | 'clear'; rate?: number }) => {
+  //   const target = scope === 'all' ? sortedAll : pageRows;
+  //   if (!target.length) {
+  //     setOpenRoutingOverride(false);
+  //     return;
+  //   }
+  //   const ids = target.map(r => r.id);
+  //   const value = mode === 'clear' ? null : (rate ?? null);
+  //   void setRoutingRateOverride(ids, value);
+  //   setOpenRoutingOverride(false);
+  // };
 
   function setSortBy(k: SortKey) {
     if (sortKey !== k) { setSortKey(k); setSortDir('asc'); }
@@ -679,7 +688,7 @@ export default function CampaignTable() {
     return (
       <th
         onClick={col.sortable ? () => setSortBy(col.sortKey ?? (col.id as SortKey)) : undefined}
-        aria-sort={ariaSort as any}
+        aria-sort={ariaSort as 'ascending' | 'descending' | 'none' | undefined}
         className={`${col.numeric ? 'text-right whitespace-nowrap' : 'text-left'} ${col.sortable ? 'cursor-pointer select-none' : ''}`}
       >
         <div className="flex items-center gap-1 justify-between">
@@ -714,7 +723,7 @@ export default function CampaignTable() {
       {/* ===== Sticky stack: filtros + KPIs ===== */}
       <div
         className="-mx-2 md:-mx-3 lg:-mx-4 px-2 md:px-3 lg:px-4"
-        style={{ ['--band-gap-y' as any]: `${bandGapPx}px` }}
+        style={{ ['--band-gap-y']: `${bandGapPx}px` } as CSSProperties}
       >
         <div
           ref={refSticky}
@@ -768,8 +777,8 @@ export default function CampaignTable() {
         className="table-wrap mt-6"
         style={{
           // por si en CSS usas la var para el offset
-          ['--table-sticky-offset' as any]: stackedBottom,
-        }}
+          ['--table-sticky-offset']: stackedBottom,
+        } as CSSProperties}
       >
         <table className="table min-w-[1280px] tabular-nums">
           <thead>
@@ -780,7 +789,7 @@ export default function CampaignTable() {
               <th className="w-[1%] text-right pr-2">
                 <TableActions
                   onOpenColumns={() => setPickerOpen(true)}
-                  onOpenRouting={isAdmin ? () => setOpenRoutingOverride(true) : undefined}
+                  // onOpenRouting={isAdmin ? () => setOpenRoutingOverride(true) : undefined}
                   onOpenExport={() => setOpenExport(true)}
                   countLabel={formatInt(sortedAll.length)}
                 />

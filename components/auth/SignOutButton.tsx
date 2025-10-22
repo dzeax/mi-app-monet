@@ -1,10 +1,22 @@
 'use client';
 
+import type { ButtonHTMLAttributes, ReactNode } from 'react';
 import { useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { createClientComponentClient } from '@supabase/auth-helpers-nextjs';
 
-export default function SignOutButton() {
+type Props = {
+  variant?: 'text' | 'icon' | 'unstyled';
+  className?: string;
+  children?: ReactNode;
+} & Omit<ButtonHTMLAttributes<HTMLButtonElement>, 'type' | 'className' | 'children'>;
+
+export default function SignOutButton({
+  variant = 'text',
+  className = '',
+  children,
+  ...rest
+}: Props) {
   const router = useRouter();
   const supabase = createClientComponentClient();
   const [loading, setLoading] = useState(false);
@@ -12,20 +24,31 @@ export default function SignOutButton() {
   const onClick = () => {
     setLoading(true);
 
-    // Lanzamos el signOut en segundo plano (sin bloquear la UI)
     const p = supabase.auth.signOut().catch(console.error);
 
-    // Redirigimos ya — así no dependemos de la red
     const fallback = setTimeout(() => {
       router.replace('/login');
-    }, 200); // pequeño delay para que el click se vea “respondido”
+    }, 200);
 
-    // Si el signOut termina antes/ después, volvemos a asegurar la redirección
     p.finally(() => {
       clearTimeout(fallback);
       router.replace('/login');
     });
   };
+
+  const baseClasses =
+    variant === 'icon'
+      ? `icon-btn ${className}`.trim()
+      : variant === 'text'
+        ? `btn-ghost h-9 px-3 ${className}`.trim()
+        : className;
+
+  const content =
+    loading && variant === 'icon'
+      ? <span className="spinner-dot" aria-hidden="true" />
+      : loading
+        ? 'Signing out…'
+        : children ?? 'Sign out';
 
   return (
     <button
@@ -33,11 +56,13 @@ export default function SignOutButton() {
       onClick={onClick}
       disabled={loading}
       aria-busy={loading}
-      aria-label="Sign out"
-      title="Sign out"
-      className="btn-ghost h-9 px-3"
+      aria-label={rest['aria-label'] ?? 'Sign out'}
+      title={rest.title ?? 'Sign out'}
+      className={baseClasses}
+      {...rest}
     >
-      {loading ? 'Signing out…' : 'Sign out'}
+      {content}
+      {variant === 'icon' ? <span className="sr-only">Sign out</span> : null}
     </button>
   );
 }

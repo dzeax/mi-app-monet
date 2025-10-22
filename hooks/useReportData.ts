@@ -21,7 +21,7 @@ type UseReportParams = {
   filters?: ReportFilters;
 };
 
-type TrendMetric = 'ecpm' | 'turnover' | 'margin' | 'marginPct' | 'vSent';
+type TrendMetric = 'ecpm' | 'turnover' | 'margin' | 'marginPct' | 'routingCosts' | 'vSent';
 
 /** Serie para charts de líneas */
 type TrendSeries = {
@@ -31,12 +31,12 @@ type TrendSeries = {
 
 /** Args del generador de series unificado */
 type MakeTrendArgs = {
-  metric?: TrendMetric;                            // métrica a graficar
-  by?: 'none' | 'database' | 'partner' | 'geo';    // agrupación por línea
-  topN?: number;                                   // nº de líneas Top
-  includeOthers?: boolean;                         // incluir "Others"
-  only?: string[];                                 // foco: restringe a estas claves
-  bucket?: 'auto' | 'day' | 'month';               // agrupación temporal
+  metric?: TrendMetric;                                      // métrica a graficar
+  by?: 'none' | 'database' | 'partner' | 'geo' | 'type' | 'databaseType'; // agrupación por línea
+  topN?: number;                                             // nº de líneas Top
+  includeOthers?: boolean;                                   // incluir "Others"
+  only?: string[];                                           // foco: restringe a estas claves
+  bucket?: 'auto' | 'day' | 'month';                         // agrupación temporal
 };
 
 /** Resultado del hook */
@@ -60,7 +60,14 @@ export type UseReportDataResult = {
   ecpmTrend: TrendPoint[];      // serie temporal eCPM ponderado
 
   summary: {
-    totals: { vSent: number; turnover: number; margin: number; ecpm: number; marginPct: number | null };
+    totals: {
+      vSent: number;
+      turnover: number;
+      margin: number;
+      routingCosts: number;
+      ecpm: number;
+      marginPct: number | null;
+    };
     filteredRows: number; // nº filas tras filtro
     groups: number;       // nº grupos tras agregación (antes de cortar TopN)
   };
@@ -73,11 +80,17 @@ export type UseReportDataResult = {
   makeTurnoverSeries: (opts?: Omit<MakeTrendArgs, 'metric'>) => TrendSeries;
 
   // utilidades
-  listAvailableKeys: (by: 'database' | 'partner' | 'geo') => string[];
+  listAvailableKeys: (by: 'database' | 'partner' | 'geo' | 'type' | 'databaseType') => string[];
 
   // NUEVO: agregador genérico de totales sobre el dataset filtrado (con predicado opcional)
   computeTotals: (predicate?: (row: any) => boolean) => {
-    vSent: number; turnover: number; margin: number; ecpm: number; marginPct: number | null; count: number;
+    vSent: number;
+    turnover: number;
+    margin: number;
+    routingCosts: number;
+    ecpm: number;
+    marginPct: number | null;
+    count: number;
   };
 };
 
@@ -98,8 +111,8 @@ export function useReportData(params: UseReportParams = {}): UseReportDataResult
 
   // -------- iniciales seguros
   const initialGroupBy: GroupBy = params.groupBy ?? 'database';
-  const initialMetric:  Metric  = params.metric  ?? 'margin';
-  const initialTopN             = Math.max(1, Math.min(50, params.topN ?? 10));
+  const initialMetric:  Metric  = params.metric  ?? 'turnover';
+  const initialTopN             = Math.max(1, Math.min(50, params.topN ?? 5));
   const initialFilters: ReportFilters = params.filters ?? {};
 
   // -------- estado controlado
@@ -126,6 +139,7 @@ export function useReportData(params: UseReportParams = {}): UseReportDataResult
       databases: toSetLC(filters.databases),
       types: new Set(filters.types ?? []),               // union ya válida
       dbTypes: new Set(filters.databaseTypes ?? []),     // union ya válida
+      includeInternalInvoiceOffice: filters.includeInternalInvoiceOffice !== false,
       onlyInternalPartners: !!filters.onlyInternalPartners,
       internalPartnerNamesLC,
     };
@@ -158,24 +172,27 @@ export function useReportData(params: UseReportParams = {}): UseReportDataResult
       if (s.types.size && !s.types.has(r.type)) return false;
       if (s.dbTypes.size && !s.dbTypes.has(r.databaseType)) return false;
 
+      if (!s.includeInternalInvoiceOffice && (r.invoiceOffice || '').toUpperCase() === 'INT') return false;
+
       return true;
     });
   }, [rows, filters, sets]);
 
   // -------- 2) KPIs globales
   const totals = useMemo(() => {
-    let vSent = 0, turnover = 0, margin = 0, wEcpm = 0;
+    let vSent = 0, turnover = 0, margin = 0, routing = 0, wEcpm = 0;
 
     for (const r of filtered) {
       vSent     += r.vSent || 0;
       turnover  += r.turnover || 0;
       margin    += r.margin || 0;
+      routing   += r.routingCosts || 0;
       wEcpm     += (r.ecpm || 0) * (r.vSent || 0);
     }
     const ecpm = vSent > 0 ? wEcpm / vSent : 0;
     const marginPct = turnover > 0 ? margin / turnover : null;
 
-    return { vSent, turnover, margin, ecpm, marginPct };
+    return { vSent, turnover, margin, routingCosts: routing, ecpm, marginPct };
   }, [filtered]);
 
   // -------- 3) Agregación por dimensión (groupBy)
@@ -186,6 +203,7 @@ export function useReportData(params: UseReportParams = {}): UseReportDataResult
       vSent: number;
       turnover: number;
       margin: number;
+      routing: number;
       qty: number;
       _w: number; // peso vSent
       count: number;
@@ -208,32 +226,48 @@ export function useReportData(params: UseReportParams = {}): UseReportDataResult
     for (const r of filtered) {
       const key = keyOf(r);
       const curr = map.get(key) ?? {
-        key, label: key, vSent: 0, turnover: 0, margin: 0, qty: 0, _w: 0, count: 0,
+        key,
+        label: key,
+        vSent: 0,
+        turnover: 0,
+        margin: 0,
+        routing: 0,
+        qty: 0,
+        _w: 0,
+        count: 0,
       };
       curr.vSent     += r.vSent || 0;
       curr.turnover  += r.turnover || 0;
       curr.margin    += r.margin || 0;
+      curr.routing   += r.routingCosts || 0;
       curr.qty       += r.qty || 0;
       curr._w        += r.vSent || 0;
       curr.count     += 1;
       map.set(key, curr);
     }
 
-    const arr: AggregateRow[] = Array.from(map.values()).map(a => ({
-      key: a.key,
-      label: a.label,
-      vSent: a.vSent,
-      turnover: +a.turnover.toFixed(2),
-      margin: +a.margin.toFixed(2),
-      ecpm: a._w > 0 ? +((a.turnover / a._w) * 1000).toFixed(2) : 0,
-      qty: a.qty,
-      count: a.count,
+    const arr: AggregateRow[] = Array.from(map.values()).map((acc) => ({
+      key: acc.key,
+      label: acc.label,
+      vSent: acc.vSent,
+      turnover: +acc.turnover.toFixed(2),
+      margin: +acc.margin.toFixed(2),
+      routingCosts: +acc.routing.toFixed(2),
+      marginPct: acc.turnover > 0 ? +(acc.margin / acc.turnover).toFixed(6) : null,
+      ecpm: acc._w > 0 ? +((acc.turnover / acc._w) * 1000).toFixed(2) : 0,
+      qty: acc.qty,
+      count: acc.count,
     }));
 
+    const valueOf = (row: AggregateRow) => {
+      if (metric === 'marginPct') return row.marginPct ?? -Infinity;
+      return (row as any)[metric] ?? 0;
+    };
+
     // ordenar por métrica y por label como desempate estable
-    arr.sort((x, y) => {
-      const d = (y as any)[metric] - (x as any)[metric];
-      return d !== 0 ? d : x.label.localeCompare(y.label, 'es');
+    arr.sort((a, b) => {
+      const diff = valueOf(b) - valueOf(a);
+      return diff !== 0 ? diff : a.label.localeCompare(b.label, 'es');
     });
 
     return { fullRanking: arr, groupCount: arr.length };
@@ -263,12 +297,14 @@ export function useReportData(params: UseReportParams = {}): UseReportDataResult
   }, [filtered]);
 
   // -------- Lista de claves disponibles para un agrupador (para Focus)
-  const listAvailableKeys = useCallback((by: 'database' | 'partner' | 'geo'): string[] => {
+  const listAvailableKeys = useCallback((by: 'database' | 'partner' | 'geo' | 'type' | 'databaseType'): string[] => {
     const s = new Set<string>();
     for (const r of filtered) {
       if (by === 'database') s.add((r.database || '(unknown)').trim());
       else if (by === 'partner') s.add((r.partner || '(unknown)').trim());
       else if (by === 'geo') s.add((r.geo || '(unknown)').toUpperCase());
+      else if (by === 'type') s.add((r.type || '(unknown)').trim());
+      else if (by === 'databaseType') s.add((r.databaseType || '(unknown)').trim());
     }
     return Array.from(s).sort((a, b) => a.localeCompare(b, 'es'));
   }, [filtered]);
@@ -278,109 +314,110 @@ export function useReportData(params: UseReportParams = {}): UseReportDataResult
     const metric: TrendMetric = opts?.metric ?? 'turnover';
     const by = opts?.by ?? 'none';
     const includeOthers = opts?.includeOthers ?? true;
-    const only = (opts?.only ?? []).map(s => s.trim()).filter(Boolean);
+    const only = (opts?.only ?? []).map((s) => s.trim()).filter(Boolean);
     const top = Math.max(1, Math.min(20, opts?.topN ?? 5));
 
-    // bucket temporal: auto => month si rango > 45 días
     let bucket: 'day' | 'month' = 'day';
     if (opts?.bucket === 'month') bucket = 'month';
     else if (opts?.bucket === 'day') bucket = 'day';
-    else {
-      // auto
-      if (filtered.length > 1) {
-        const min = filtered.reduce((m, r) => (r.date < m ? r.date : m), filtered[0].date);
-        const max = filtered.reduce((m, r) => (r.date > m ? r.date : m), filtered[0].date);
-        const days = differenceInDays(parseISO(max), parseISO(min));
-        if (days > 45) bucket = 'month';
-      }
+    else if (filtered.length > 1) {
+      const min = filtered.reduce((m, r) => (r.date < m ? r.date : m), filtered[0].date);
+      const max = filtered.reduce((m, r) => (r.date > m ? r.date : m), filtered[0].date);
+      const days = differenceInDays(parseISO(max), parseISO(min));
+      if (days > 45) bucket = 'month';
     }
 
-    const bucketKey = (d: string) => bucket === 'month'
-      ? format(parseISO(d), 'yyyy-MM')
-      : d;
+    const bucketKey = (d: string) => (bucket === 'month' ? format(parseISO(d), 'yyyy-MM') : d);
 
-    type Sum = { v: number; t: number; m: number };
-    const keyOf = (r: typeof filtered[number]) => {
+    type Sum = { v: number; t: number; m: number; r: number };
+
+    const keyOf = (r: typeof filtered[number]): string => {
       if (by === 'database') return (r.database || '(unknown)').trim();
-      if (by === 'partner')  return (r.partner || '(unknown)').trim();
-      if (by === 'geo')      return (r.geo || '(unknown)').toUpperCase();
+      if (by === 'partner') return (r.partner || '(unknown)').trim();
+      if (by === 'geo') return (r.geo || '(unknown)').toUpperCase();
+      if (by === 'type') return (r.type || '(unknown)').trim();
+      if (by === 'databaseType') return (r.databaseType || '(unknown)').trim();
       return 'total';
     };
 
+    const computeMetric = (sum: Sum): number => {
+      if (metric === 'vSent') return sum.v;
+      if (metric === 'turnover') return +sum.t.toFixed(2);
+      if (metric === 'margin') return +sum.m.toFixed(2);
+      if (metric === 'routingCosts') return +sum.r.toFixed(2);
+      if (metric === 'ecpm') return sum.v > 0 ? +((sum.t / sum.v) * 1000).toFixed(2) : 0;
+      if (metric === 'marginPct') return sum.t > 0 ? +(sum.m / sum.t).toFixed(6) : 0;
+      return 0;
+    };
+
     if (by === 'none') {
-      // una sola serie "total"
-      const map = new Map<string, Sum>();
+      const totalMap = new Map<string, Sum>();
       for (const r of filtered) {
-        const b = bucketKey(r.date);
-        const s = map.get(b) ?? { v: 0, t: 0, m: 0 };
-        s.v += r.vSent || 0;
-        s.t += r.turnover || 0;
-        s.m += r.margin || 0;
-        map.set(b, s);
+        const bucket = bucketKey(r.date);
+        const sum = totalMap.get(bucket) ?? { v: 0, t: 0, m: 0, r: 0 };
+        sum.v += r.vSent || 0;
+        sum.t += r.turnover || 0;
+        sum.m += r.margin || 0;
+        sum.r += r.routingCosts || 0;
+        totalMap.set(bucket, sum);
       }
-      const data = Array.from(map.entries())
+
+      const data = Array.from(totalMap.entries())
         .sort(([a], [b]) => a.localeCompare(b))
-        .map(([date, s]) => {
-          const row: Record<string, number | string> = { date };
-          let val = 0;
-          if (metric === 'vSent') val = s.v;
-          else if (metric === 'turnover') val = +s.t.toFixed(2);
-          else if (metric === 'margin') val = +s.m.toFixed(2);
-          else if (metric === 'ecpm') val = s.v > 0 ? +((s.t / s.v) * 1000).toFixed(2) : 0;
-          else if (metric === 'marginPct') val = s.t > 0 ? +(s.m / s.t).toFixed(6) : 0; // 0..1
-          row['total'] = val;
-          return row;
-        });
+        .map(([date, sum]) => ({ date, total: computeMetric(sum) }));
+
       return { data, keys: ['total'] };
     }
 
-    // Totales por clave (para Top-N si no hay "only")
     const totals = new Map<string, Sum>();
     for (const r of filtered) {
-      const k = keyOf(r);
-      const s = totals.get(k) ?? { v: 0, t: 0, m: 0 };
-      s.v += r.vSent || 0;
-      s.t += r.turnover || 0;
-      s.m += r.margin || 0;
-      totals.set(k, s);
+      const key = keyOf(r);
+      const sum = totals.get(key) ?? { v: 0, t: 0, m: 0, r: 0 };
+      sum.v += r.vSent || 0;
+      sum.t += r.turnover || 0;
+      sum.m += r.margin || 0;
+      sum.r += r.routingCosts || 0;
+      totals.set(key, sum);
     }
 
     const useOnly = only.length > 0;
     let keys: string[];
     if (useOnly) {
       const onlySet = new Set(only);
-      keys = Array.from(totals.keys()).filter(k => onlySet.has(k));
+      keys = Array.from(totals.keys()).filter((key) => onlySet.has(key));
       if (keys.length === 0) return { data: [], keys: [] };
     } else {
-      // rankeamos por turnover acumulado
       const topKeys = Array.from(totals.entries())
         .sort((a, b) => b[1].t - a[1].t)
         .slice(0, top)
-        .map(([k]) => k);
+        .map(([key]) => key);
       keys = includeOthers ? [...topKeys, 'Others'] : topKeys;
     }
-    const topSet = new Set(keys);
 
-    // Agregación por fecha y clave (con Others si aplica)
+    const selected = new Set(keys);
     const dateMap = new Map<string, Map<string, Sum>>();
-    const push = (d: string, k: string, add: Sum) => {
-      const inner = dateMap.get(d) ?? new Map<string, Sum>();
-      const s = inner.get(k) ?? { v: 0, t: 0, m: 0 };
-      s.v += add.v; s.t += add.t; s.m += add.m;
-      inner.set(k, s);
-      dateMap.set(d, inner);
+
+    const push = (bucket: string, key: string, add: Sum) => {
+      const inner = dateMap.get(bucket) ?? new Map<string, Sum>();
+      const sum = inner.get(key) ?? { v: 0, t: 0, m: 0, r: 0 };
+      sum.v += add.v;
+      sum.t += add.t;
+      sum.m += add.m;
+      sum.r += add.r;
+      inner.set(key, sum);
+      dateMap.set(bucket, inner);
     };
 
     for (const r of filtered) {
-      const d = bucketKey(r.date);
-      const k = keyOf(r);
-      const add: Sum = { v: r.vSent || 0, t: r.turnover || 0, m: r.margin || 0 };
+      const bucket = bucketKey(r.date);
+      const key = keyOf(r);
+      const add: Sum = { v: r.vSent || 0, t: r.turnover || 0, m: r.margin || 0, r: r.routingCosts || 0 };
 
       if (useOnly) {
-        if (topSet.has(k)) push(d, k, add);
+        if (selected.has(key)) push(bucket, key, add);
       } else {
-        const seriesKey = topSet.has(k) ? k : (includeOthers ? 'Others' : null);
-        if (seriesKey) push(d, seriesKey, add);
+        const seriesKey = selected.has(key) ? key : includeOthers ? 'Others' : null;
+        if (seriesKey) push(bucket, seriesKey, add);
       }
     }
 
@@ -388,15 +425,8 @@ export function useReportData(params: UseReportParams = {}): UseReportDataResult
       .sort(([a], [b]) => a.localeCompare(b))
       .map(([date, inner]) => {
         const row: Record<string, number | string> = { date };
-        for (const k of keys) {
-          const s = inner.get(k) ?? { v: 0, t: 0, m: 0 };
-          let val = 0;
-          if (metric === 'vSent') val = s.v;
-          else if (metric === 'turnover') val = +s.t.toFixed(2);
-          else if (metric === 'margin') val = +s.m.toFixed(2);
-          else if (metric === 'ecpm') val = s.v > 0 ? +((s.t / s.v) * 1000).toFixed(2) : 0;
-          else if (metric === 'marginPct') val = s.t > 0 ? +(s.m / s.t).toFixed(6) : 0; // 0..1
-          row[k] = val;
+        for (const key of keys) {
+          row[key] = computeMetric(inner.get(key) ?? { v: 0, t: 0, m: 0, r: 0 });
         }
         return row;
       });
@@ -415,18 +445,19 @@ export function useReportData(params: UseReportParams = {}): UseReportDataResult
   const computeTotals = useCallback((
     predicate?: (row: typeof filtered[number]) => boolean
   ) => {
-    let vSent = 0, turnover = 0, margin = 0, wEcpm = 0, count = 0;
+    let vSent = 0, turnover = 0, margin = 0, routing = 0, wEcpm = 0, count = 0;
     for (const r of filtered) {
       if (predicate && !predicate(r)) continue;
       vSent    += r.vSent || 0;
       turnover += r.turnover || 0;
       margin   += r.margin || 0;
+      routing  += r.routingCosts || 0;
       wEcpm    += (r.ecpm || 0) * (r.vSent || 0);
       count++;
     }
     const ecpm = vSent > 0 ? wEcpm / vSent : 0;
     const marginPct = turnover > 0 ? margin / turnover : null;
-    return { vSent, turnover, margin, ecpm, marginPct, count };
+    return { vSent, turnover, margin, routingCosts: routing, ecpm, marginPct, count };
   }, [filtered]);
 
   // -------- helper: últimos 30 días respecto al máximo disponible

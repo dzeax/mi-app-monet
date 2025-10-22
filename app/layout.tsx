@@ -1,8 +1,13 @@
 // app/layout.tsx
+import type { CSSProperties } from 'react';
 import type { Metadata } from 'next';
 import './globals.css';
 // Extra input styles were moved into globals; omit secondary CSS import to simplify Tailwind build
 import AppProviders from './providers';
+
+const rootStyle: CSSProperties = {
+  '--content-sticky-top': '4.5rem',
+} as CSSProperties;
 
 export const metadata: Metadata = {
   title: 'Monet Email Dashboard',
@@ -18,7 +23,7 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
       <body
         className="min-h-dvh font-sans antialiased bg-[color:var(--color-bg)] text-[color:var(--color-text)]"
         // La dejamos en root por compat: los sticky del app pueden leerla
-        style={{ ['--content-sticky-top' as any]: '5.5rem' }}
+        style={rootStyle}
         suppressHydrationWarning
       >
         <AppProviders>

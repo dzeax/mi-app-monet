@@ -10,9 +10,17 @@ import ReportsChart from '@/components/reports/ReportsChart';
 import ReportsTopTable from '@/components/reports/ReportsTopTable';
 
 import { useReportData } from '@/hooks/useReportData';
-import type { Metric } from '@/types/reports';
+import { GROUP_LABELS, METRIC_LABELS, type GroupBy, type Metric } from '@/types/reports';
 
-type TrendGroupBy = 'none' | 'database' | 'partner' | 'geo';
+type TrendGroupBy = 'none' | 'database' | 'partner' | 'geo' | 'type' | 'databaseType';
+
+type FocusableRow = {
+  database?: string | null;
+  partner?: string | null;
+  geo?: string | null;
+  type?: string | null;
+  databaseType?: string | null;
+};
 
 const fmtEUR = new Intl.NumberFormat('es-ES', { style: 'currency', currency: 'EUR' });
 const fmtInt = new Intl.NumberFormat('es-ES');
@@ -171,9 +179,10 @@ export default function ReportsView() {
   } = useReportData();
 
   const [trendFocusKey, setTrendFocusKey] = useState<string | null>(null);
+  const [kpiScope, setKpiScope] = useState<'all' | 'focus'>('all');
 
   const derivedTrendBy: TrendGroupBy = useMemo(() => {
-    const allowed = new Set<TrendGroupBy>(['none', 'database', 'partner', 'geo']);
+    const allowed = new Set<TrendGroupBy>(['none', 'database', 'partner', 'geo', 'type', 'databaseType']);
     if (allowed.has(groupBy as TrendGroupBy)) {
       return groupBy as TrendGroupBy;
     }
@@ -197,6 +206,14 @@ export default function ReportsView() {
     }
   }, [trendFocusKey, focusOptions]);
 
+  const focusScopeAvailable = derivedTrendBy !== 'none' && !!trendFocusKey;
+
+  useEffect(() => {
+    if (!focusScopeAvailable && kpiScope === 'focus') {
+      setKpiScope('all');
+    }
+  }, [focusScopeAvailable, kpiScope]);
+
   const trendSeries = useMemo(
     () => makeTrendSeries({
       metric,
@@ -209,11 +226,20 @@ export default function ReportsView() {
   );
 
   const exportCsv = () => {
-    const header = ['group', 'vSent', 'turnover', 'margin', 'ecpm'];
+    const header = ['group', 'vSent', 'turnover', 'margin', 'routingCosts', 'ecpm', 'marginPct'];
     const lines = [header.join(',')];
     fullRanking.forEach((row) => {
       const label = `"${String(row.label).replaceAll('"', '""')}"`;
-      lines.push([label, row.vSent, row.turnover.toFixed(2), row.margin.toFixed(2), row.ecpm.toFixed(2)].join(','));
+      const marginPct = row.marginPct == null ? '' : row.marginPct.toFixed(4);
+      lines.push([
+        label,
+        row.vSent,
+        row.turnover.toFixed(2),
+        row.margin.toFixed(2),
+        row.routingCosts.toFixed(2),
+        row.ecpm.toFixed(2),
+        marginPct,
+      ].join(','));
     });
     const blob = new Blob([lines.join('\n')], { type: 'text/csv;charset=utf-8' });
     const url = URL.createObjectURL(blob);
@@ -240,6 +266,55 @@ export default function ReportsView() {
     [filters.from, filters.to]
   );
 
+  const kpiTotals = useMemo(() => {
+    if (kpiScope !== 'focus' || !focusScopeAvailable || !trendFocusKey) {
+      return summary.totals;
+    }
+
+    const targetKey =
+      derivedTrendBy === 'geo'
+        ? trendFocusKey.toUpperCase()
+        : trendFocusKey.trim();
+
+    const matchesFocus = (row: unknown) => {
+      if (!row || typeof row !== 'object') return false;
+      const record = row as FocusableRow;
+      switch (derivedTrendBy) {
+        case 'database':
+          return (record.database || '(unknown)').trim() === targetKey;
+        case 'partner':
+          return (record.partner || '(unknown)').trim() === targetKey;
+        case 'geo':
+          return (record.geo || '(unknown)').toUpperCase() === targetKey;
+        case 'type':
+          return (record.type || '(unknown)').trim() === targetKey;
+        case 'databaseType':
+          return (record.databaseType || '(unknown)').trim() === targetKey;
+        default:
+          return false;
+      }
+    };
+
+    const totals = computeTotals(matchesFocus);
+    return {
+      vSent: totals.vSent,
+      turnover: totals.turnover,
+      margin: totals.margin,
+      routingCosts: totals.routingCosts,
+      ecpm: totals.ecpm,
+      marginPct: totals.marginPct,
+    };
+  }, [
+    computeTotals,
+    derivedTrendBy,
+    focusScopeAvailable,
+    kpiScope,
+    summary.totals,
+    trendFocusKey,
+  ]);
+
+  const focusDimensionLabel = trendGroupLabel(derivedTrendBy);
+
   return (
     <div className="grid gap-6">
       <div className="grid grid-cols-1 items-stretch gap-4 lg:grid-cols-[minmax(0,1.85fr)_minmax(0,1fr)] lg:gap-5">
@@ -264,26 +339,44 @@ export default function ReportsView() {
 
         <ReportsKpis
           className="h-full"
-          kpis={summary.totals}
+          kpis={kpiTotals}
           periodLabel={periodLabel}
           filteredRows={summary.filteredRows}
           groupCount={summary.groups}
+          scope={kpiScope}
+          onScopeChange={setKpiScope}
+          focusAvailable={focusScopeAvailable}
+          focusLabel={trendFocusKey}
+          focusDimensionLabel={focusDimensionLabel}
         />
       </div>
 
-      <Card>
-        <ReportsUnifiedTrend
-          data={trendSeries.data}
-          keys={trendSeries.keys}
-          metric={metric}
-          by={derivedTrendBy}
-          topN={topN}
-          includeOthers={!trendFocusKey}
-          focusKey={trendFocusKey}
-          focusOptions={focusOptions}
-          showControls={false}
-        />
-      </Card>
+      <div className="grid grid-cols-1 gap-4 xl:grid-cols-2">
+        <Card className="h-full">
+          <ReportsUnifiedTrend
+            data={trendSeries.data}
+            keys={trendSeries.keys}
+            metric={metric}
+            by={derivedTrendBy}
+            topN={topN}
+            includeOthers={!trendFocusKey}
+            focusKey={trendFocusKey}
+            focusOptions={focusOptions}
+            showControls={false}
+          />
+        </Card>
+
+        <Card className="h-full">
+          <ReportsChart
+            data={ranking}
+            metric={metric}
+            title={`Top ${topN} by ${legendName(metric)}`}
+            height={320}
+            showTable={false}
+            groupLabel={groupLabel(groupBy)}
+          />
+        </Card>
+      </div>
 
       <Card>
         <div className="mb-3 text-sm font-medium">Geo mix</div>
@@ -302,17 +395,6 @@ export default function ReportsView() {
           </span>
           <span><strong>V Sent:</strong> {fmtInt.format(subtotal.vSent)}</span>
         </div>
-      </Card>
-
-      <Card>
-        <ReportsChart
-          data={ranking}
-          metric={metric}
-          title={`Top ${topN} by ${legendName(metric)}`}
-          height={360}
-          showTable={false}
-          groupLabel={groupLabel(groupBy)}
-        />
       </Card>
 
       <Card>
@@ -337,7 +419,7 @@ function GeoTile({ title, v }: {
         <div>
           <span className="opacity-70">Margin (%)</span><br />
           <strong>{v.marginPct == null ? '--' : fmtPct.format(v.marginPct)}</strong>
-          <span className="opacity-70"> · {fmtEUR.format(v.margin)}</span>
+          <span className="opacity-70"> - {fmtEUR.format(v.margin)}</span>
         </div>
         <div><span className="opacity-70">V Sent</span><br /><strong>{fmtInt.format(v.vSent)}</strong></div>
         <div><span className="opacity-70">eCPM</span><br /><strong>{fmtEUR.format(v.ecpm)}</strong></div>
@@ -347,19 +429,14 @@ function GeoTile({ title, v }: {
 }
 
 function legendName(metric: Metric) {
-  return metric === 'turnover' ? 'Turnover' : metric === 'margin' ? 'Margin' : metric === 'ecpm' ? 'eCPM' : 'V Sent';
+  return METRIC_LABELS[metric] ?? metric;
 }
 
-function groupLabel(groupBy: string) {
-  switch (groupBy) {
-    case 'database': return 'Database';
-    case 'partner': return 'Partner';
-    case 'campaign': return 'Campaign';
-    case 'advertiser': return 'Advertiser';
-    case 'theme': return 'Theme';
-    case 'geo': return 'GEO';
-    case 'type': return 'Type';
-    case 'databaseType': return 'DB Type';
-    default: return 'Group';
-  }
+function groupLabel(groupBy: GroupBy) {
+  return GROUP_LABELS[groupBy] ?? 'Group';
+}
+
+function trendGroupLabel(groupBy: TrendGroupBy) {
+  if (groupBy === 'none') return null;
+  return GROUP_LABELS[groupBy as GroupBy] ?? null;
 }

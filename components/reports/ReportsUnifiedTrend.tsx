@@ -9,8 +9,8 @@ import {
 } from 'recharts';
 import { fmtEUR2, fmtINT } from '@/utils/format';
 
-type TrendMetric = 'ecpm' | 'turnover' | 'margin' | 'marginPct' | 'vSent';
-type GroupBy = 'none' | 'database' | 'partner' | 'geo';
+type TrendMetric = 'ecpm' | 'turnover' | 'margin' | 'marginPct' | 'routingCosts' | 'vSent';
+type GroupBy = 'none' | 'database' | 'partner' | 'geo' | 'type' | 'databaseType';
 
 type Props = {
   data: Array<Record<string, number | string>>;
@@ -52,7 +52,7 @@ function colorAt(index: number) {
 
 function formatByMetric(metric: TrendMetric, value: number): string {
   const numberValue = Number(value || 0);
-  if (metric === 'ecpm' || metric === 'turnover' || metric === 'margin') {
+  if (metric === 'ecpm' || metric === 'turnover' || metric === 'margin' || metric === 'routingCosts') {
     return fmtEUR2.format(numberValue);
   }
   if (metric === 'marginPct') {
@@ -66,7 +66,7 @@ function yTickFormatter(metric: TrendMetric) {
     if (metric === 'marginPct') {
       return `${(Number(value || 0) * 100).toFixed(0)}%`;
     }
-    if (metric === 'ecpm' || metric === 'turnover' || metric === 'margin') {
+    if (metric === 'ecpm' || metric === 'turnover' || metric === 'margin' || metric === 'routingCosts') {
       return fmtEUR2.format(Number(value || 0));
     }
     return fmtINT.format(Number(value || 0));
@@ -159,7 +159,7 @@ export default function ReportsUnifiedTrend({
 
       {showControls ? (
         <div className="text-xs opacity-60 mt-2 text-right">
-          Focus options: {focusOptions.length || '0'} · Include &quot;Others&quot;: {includeOthers ? 'yes' : 'no'}
+          Focus options: {focusOptions.length || '0'} - Include &quot;Others&quot;: {includeOthers ? 'yes' : 'no'}
         </div>
       ) : null}
     </div>
@@ -171,6 +171,7 @@ function metricLabel(metric: TrendMetric) {
     case 'turnover': return 'Turnover';
     case 'margin': return 'Margin';
     case 'marginPct': return 'Margin %';
+    case 'routingCosts': return 'Routing costs';
     case 'ecpm': return 'eCPM';
     case 'vSent': return 'V Sent';
   }

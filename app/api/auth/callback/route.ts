@@ -1,6 +1,7 @@
 import { NextResponse } from 'next/server';
 import { cookies } from 'next/headers';
 import { createRouteHandlerClient } from '@supabase/auth-helpers-nextjs';
+import type { Session } from '@supabase/supabase-js';
 
 export const dynamic = 'force-dynamic';
 export const runtime = 'nodejs';
@@ -16,8 +17,14 @@ type SupabaseAuthEvent =
   | 'MFA_CHALLENGE_FAILED';
 
 export async function POST(request: Request) {
-  const supabase = createRouteHandlerClient({ cookies });
-  const { event, session }: { event: SupabaseAuthEvent; session: any } = await request.json();
+  const cookieStore = await cookies();
+  const supabase = createRouteHandlerClient({
+    cookies: () => cookieStore,
+  });
+  const {
+    event,
+    session,
+  }: { event: SupabaseAuthEvent; session: Session | null } = await request.json();
 
   if (session && ['SIGNED_IN', 'TOKEN_REFRESHED', 'USER_UPDATED'].includes(event)) {
     await supabase.auth.setSession(session);

@@ -8,18 +8,23 @@ import { trimCollapse, type DBType } from '@/data/reference';
 const norm = (s: string) => trimCollapse(s).toLowerCase();
 
 /** --- ISO-3166 validator (estricto) con compat UK→GB + MULTI --- */
+let regionDisplayNames: Intl.DisplayNames | null = null;
 function isIsoCountry(code: string): boolean {
   const c = code.toUpperCase();
   if (!/^[A-Z]{2}$/.test(c)) return false;
+  if (typeof Intl.DisplayNames !== 'function') {
+    return true;
+  }
   try {
-    // Si el código es válido, devuelve un nombre localizado distinto al propio código
-    const dn = new (Intl as any).DisplayNames(['en'], { type: 'region' });
-    const name = dn?.of?.(c);
+    regionDisplayNames =
+      regionDisplayNames ?? new Intl.DisplayNames(['en'], { type: 'region' });
+    const name = regionDisplayNames.of(c);
     return typeof name === 'string' && name && name !== c;
   } catch {
     return false;
   }
 }
+
 function normalizeGeoStrict(raw: string): string | null {
   const g = trimCollapse(raw).toUpperCase();
   if (!g) return null;
@@ -151,3 +156,4 @@ export default function QuickAddDatabaseModal({
     </MiniModal>
   );
 }
+

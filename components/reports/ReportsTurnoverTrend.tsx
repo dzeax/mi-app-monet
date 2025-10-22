@@ -6,11 +6,12 @@ import {
   LineChart, Line,
   CartesianGrid, XAxis, YAxis, Tooltip, Legend,
 } from 'recharts';
+import type { NameType, ValueType } from 'recharts/types/component/DefaultTooltipContent';
 
 type By = 'none' | 'database' | 'partner' | 'geo';
 
 export default function ReportsTurnoverTrend(props: {
-  data: Array<Record<string, any>>;
+  data: Array<Record<string, number | string>>;
   keys: string[];
   by: By;
   onChangeBy: (v: By) => void;
@@ -30,6 +31,16 @@ export default function ReportsTurnoverTrend(props: {
     includeOthers, onToggleOthers,
     focusKey, focusOptions, onChangeFocus,
   } = props;
+
+  const toNumber = (value: ValueType): number => {
+    if (typeof value === 'number') {
+      return Number.isFinite(value) ? value : 0;
+    }
+    const parsed = Number(value);
+    return Number.isFinite(parsed) ? parsed : 0;
+  };
+
+  const formatTooltipValue = (value: ValueType) => fmtEUR2.format(toNumber(value));
 
   const disabledByFocus = !!focusKey;
 
@@ -124,7 +135,10 @@ export default function ReportsTurnoverTrend(props: {
                 }}
                 itemStyle={{ color: 'var(--color-text)' }}
                 labelStyle={{ color: 'var(--color-text)' }}
-                formatter={(value: any, name: any) => [fmtEUR2.format(Number(value || 0)), String(name)]}
+                formatter={(value: ValueType, name: NameType) => [
+                  formatTooltipValue(value),
+                  String(name ?? ''),
+                ] as const}
               />
               <Legend />
               {keys.map((k) => (

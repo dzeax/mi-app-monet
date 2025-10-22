@@ -51,15 +51,15 @@ export function buildIndexes(rows: NormalizedCampaignRow[]): CampaignIndexes {
   const byMonth: ColumnIndex = new Map();
 
   rows.forEach((row, i) => {
-    // leemos normalizados si existen, si no normalizamos on the fly
-    const partner = (row as any).nPartner ?? row.partner;
-    const theme = (row as any).nTheme ?? row.theme;
-    const database = (row as any).nDatabase ?? row.database;
-    const type = (row as any).nType ?? row.type;
-    const geo = (row as any).nGeo ?? row.geo;
-    const dbType = (row as any).nDbType ?? row.databaseType;
-    const invoiceOffice = (row as any).nInvoiceOffice ?? row.invoiceOffice;
-    const month = (row as any).monthKey ?? toMonthKey(row.date);
+    // use normalized fields from hook to avoid re-normalizing here
+    const partner = row.norm.partner || row.partner;
+    const theme = row.norm.theme || row.theme;
+    const database = row.norm.database || row.database;
+    const type = row.norm.type || row.type;
+    const geo = row.norm.geo || row.geo;
+    const dbType = row.norm.databaseType || row.databaseType;
+    const invoiceOffice = row.norm.invoiceOffice || row.invoiceOffice;
+    const month = row.norm.month || toMonthKey(row.date);
 
     addToIndex(byPartner, partner, i);
     addToIndex(byTheme, theme, i);

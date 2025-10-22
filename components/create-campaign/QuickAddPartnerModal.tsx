@@ -3,7 +3,7 @@
 import { useEffect, useRef, useState } from 'react';
 import MiniModal from '@/components/ui/MiniModal';
 import { useCatalogOverrides } from '@/context/CatalogOverridesContext';
-import { toSlug, trimCollapse, type InvoiceOffice } from '@/data/reference';
+import { trimCollapse, type InvoiceOffice } from '@/data/reference';
 
 const norm = (s: string) => trimCollapse(s).toLowerCase();
 
@@ -38,28 +38,7 @@ export default function QuickAddPartnerModal({
     const existsByName = PARTNERS.some(p => norm(p.name) === norm(n));
     if (existsByName) { setErr('Partner already exists'); return; }
 
-    // 2) Generar id único (slug) a partir del nombre
-    const base = toSlug(n) || 'partner';
-    // Algunos overrides podrían no tener id; fallback al slug del nombre
-    const usedIds = new Set(
-      PARTNERS.map(p => (p.id ? p.id : toSlug(p.name))).filter(Boolean).map(x => x.toLowerCase())
-    );
-
-    let finalId = base;
-    let k = 2;
-    while (usedIds.has(finalId.toLowerCase())) {
-      finalId = `${base}-${k++}`;
-    }
-
-    const payload: any = {
-      id: finalId,
-      name: n,
-      invoiceOffice: office,
-      // marcar interno si procede (útil para mostrar "(INT)" en selects)
-      ...(office === 'INT' ? { isInternal: true } : {}),
-    };
-
-    addPartnerRef(payload);
+    addPartnerRef({ name: n, invoiceOffice: office });
     onCreated(n);
     onClose();
   };
@@ -119,3 +98,5 @@ export default function QuickAddPartnerModal({
     </MiniModal>
   );
 }
+
+

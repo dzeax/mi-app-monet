@@ -21,7 +21,10 @@ const payloadSchema = z.object({
     .optional(),
 });
 
-export async function POST(req: Request) {
+type ErrorRes = { error: string };
+type OkRes = { ok: true; email: string; displayName: string | null; avatarUrl: string | null };
+
+export async function POST(req: Request): Promise<NextResponse<ErrorRes | OkRes>> {
   const supabase = await createServerSupabase();
   const {
     data: { session },
@@ -83,7 +86,7 @@ export async function POST(req: Request) {
     return NextResponse.json({ error: 'User not found.' }, { status: 404 });
   }
 
-  const updatePayload: Record<string, any> = {
+  const updatePayload: { display_name: string | null; avatar_url: string | null } = {
     display_name: displayName,
     avatar_url: avatarUrl,
   };
@@ -111,10 +114,5 @@ export async function POST(req: Request) {
     }
   }
 
-  return NextResponse.json({
-    ok: true,
-    email,
-    displayName,
-    avatarUrl,
-  });
+  return NextResponse.json({ ok: true, email, displayName, avatarUrl });
 }
