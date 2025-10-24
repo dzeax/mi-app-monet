@@ -2,7 +2,7 @@
 'use client';
 
 import { useMemo, useState, useTransition, useCallback } from 'react';
-import type { CampaignRow } from '@/types/campaign';
+import type { RowWithIdx } from '@/types/campaign';
 import { useDebouncedValue } from '@/hooks/useDebouncedValue';
 import { useNormalizedCampaignRows, type NormalizedCampaignRow } from '@/hooks/useNormalizedCampaignRows';
 import { buildIndexes, type CampaignIndexes } from '@/lib/indexes';
@@ -52,7 +52,7 @@ export type UseCampaignFilterEngineResult = {
 };
 
 export function useCampaignFilterEngine(
-  rows: CampaignRow[],
+  rows: RowWithIdx[],
   opts?: {
     initial?: Partial<Filters>;
     debounceMs?: number;

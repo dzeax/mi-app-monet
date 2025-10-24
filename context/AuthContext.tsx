@@ -72,7 +72,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   const [loading, setLoading] = useState(true);
 
   // Cliente único y estable para todo el provider
-  const supabase = useMemo(() => createClientComponentClient(), []);
+  const supabase = useMemo(() => createClientComponentClient<any, 'public'>(), []);
 
   // Carga inicial de sesión + perfil y suscripción a cambios
   useEffect(() => {
@@ -86,7 +86,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         if (!mounted) return;
         setUser({
           id: authUser.id,
-          email: authUser.email,
+          email: authUser.email ?? null,
           role: profile.role,
           displayName: profile.displayName,
           avatarUrl: profile.avatarUrl,

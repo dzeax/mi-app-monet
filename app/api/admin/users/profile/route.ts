@@ -55,7 +55,7 @@ export async function POST(req: Request): Promise<NextResponse<ErrorRes | OkRes>
   } catch (error) {
     if (error instanceof z.ZodError) {
       return NextResponse.json(
-        { error: error.errors.map((item) => item.message).join(', ') || 'Invalid payload' },
+        { error: error.issues.map((item) => item.message).join(', ') || 'Invalid payload' },
         { status: 400 }
       );
     }

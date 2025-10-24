@@ -306,7 +306,11 @@ export default function ImportCsvModal({ onClose }: { onClose: () => void }) {
       const dbRef = findDatabase(database);
       if (!dbRef) rowIssues.push({ level: 'ERROR', msg: 'Database no existe en catÃ¡logo' });
 
-      const priceCurrency = (getCI(row, 'priceCurrency') || 'EUR').trim() || 'EUR';
+      const rawCurrency = (getCI(row, 'priceCurrency') || 'EUR').trim().toUpperCase() || 'EUR';
+      const priceCurrency: CampaignRow['priceCurrency'] = rawCurrency === 'EUR' ? 'EUR' : 'EUR';
+      if (rawCurrency !== 'EUR') {
+        rowIssues.push({ level: 'WARN', msg: `priceCurrency "${rawCurrency}" no soportado. Se forzará a EUR.` });
+      }
 
       const geo = dbRef?.geo ?? '';
       const databaseType: CampaignRow['databaseType'] = dbRef?.dbType ?? 'B2C';

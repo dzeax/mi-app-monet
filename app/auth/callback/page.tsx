@@ -3,7 +3,7 @@
 import { Suspense, useEffect, useMemo, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { createClientComponentClient } from '@supabase/auth-helpers-nextjs';
-import type { VerifyOtpParams } from '@supabase/supabase-js';
+import type { VerifyEmailOtpParams, VerifyMobileOtpParams, VerifyOtpParams } from '@supabase/supabase-js';
 
 type Status = 'checking' | 'ok' | 'error';
 
@@ -21,6 +21,24 @@ function AuthCallbackContent() {
 
   const [status, setStatus] = useState<Status>('checking');
   const [message, setMessage] = useState('Checking link...');
+
+  const isEmailOtpType = (value: VerifyOtpParams['type']): value is VerifyEmailOtpParams['type'] => {
+    switch (value) {
+      case 'magiclink':
+      case 'recovery':
+      case 'signup':
+      case 'invite':
+      case 'email_change':
+      case 'email':
+        return true;
+      default:
+        return false;
+    }
+  };
+
+  const isMobileOtpType = (value: VerifyOtpParams['type']): value is VerifyMobileOtpParams['type'] => {
+    return value === 'sms' || value === 'phone_change';
+  };
 
   useEffect(() => {
     if (typeof window === 'undefined') return;
@@ -65,23 +83,25 @@ function AuthCallbackContent() {
           if (error) throw error;
         } else if (token && flow) {
           setMessage('Detected token + type. Verifying...');
-          const allowedTypes: VerifyOtpParams['type'][] = [
-            'magiclink',
-            'recovery',
-            'signup',
-            'email_change',
-            'invite',
-            'sms',
-          ];
-          if (!allowedTypes.includes(flow as VerifyOtpParams['type'])) {
+          const type = flow as VerifyOtpParams['type'];
+          if (isEmailOtpType(type)) {
+            if (!email) {
+              throw new Error('Missing email for verification.');
+            }
+            const payload: VerifyEmailOtpParams = { type, token, email };
+            const { error } = await supabase.auth.verifyOtp(payload);
+            if (error) throw error;
+          } else if (isMobileOtpType(type)) {
+            const phone = get('phone') ?? get('phone_number');
+            if (!phone) {
+              throw new Error('Missing phone number for verification.');
+            }
+            const payload: VerifyMobileOtpParams = { type, token, phone };
+            const { error } = await supabase.auth.verifyOtp(payload);
+            if (error) throw error;
+          } else {
             throw new Error('Unsupported verification flow.');
           }
-          const otpPayload: VerifyOtpParams = { token, type: flow as VerifyOtpParams['type'] };
-          if (email) {
-            otpPayload.email = email;
-          }
-          const { error } = await supabase.auth.verifyOtp(otpPayload);
-          if (error) throw error;
         } else if (accessToken && refreshToken) {
           setMessage('Detected access+refresh tokens. Setting session...');
           const { error } = await supabase.auth.setSession({

@@ -1,21 +1,34 @@
 'use client';
 
-import { useEffect, useState } from 'react';
-import { supabase } from '@/lib/supabase/client';
+import { useEffect, useMemo, useState } from 'react';
 import { useRouter } from 'next/navigation';
+import { createClientComponentClient } from '@supabase/auth-helpers-nextjs';
+import type { Session } from '@supabase/supabase-js';
 
 export default function UserMenu() {
   const router = useRouter();
   const [email, setEmail] = useState<string | null>(null);
+  const supabase = useMemo(() => createClientComponentClient(), []);
 
   useEffect(() => {
-    supabase.auth.getUser().then(({ data }) => setEmail(data.user?.email ?? null));
-    const { data: sub } = supabase.auth.onAuthStateChange(async () => {
+    let mounted = true;
+
+    const syncUser = async () => {
       const { data } = await supabase.auth.getUser();
-      setEmail(data.user?.email ?? null);
+      if (mounted) setEmail(data.user?.email ?? null);
+    };
+
+    void syncUser();
+    const { data: listener } = supabase.auth.onAuthStateChange(async (_event, session: Session | null) => {
+      if (!mounted) return;
+      setEmail(session?.user?.email ?? null);
     });
-    return () => sub.subscription.unsubscribe();
-  }, []);
+
+    return () => {
+      mounted = false;
+      listener?.subscription.unsubscribe();
+    };
+  }, [supabase]);
 
   const logout = async () => {
     await supabase.auth.signOut();

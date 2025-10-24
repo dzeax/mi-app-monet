@@ -39,7 +39,7 @@ type OverridesShape = {
   campaigns?: CampaignIn[];
   partners?: PartnerIn[];
   databases?: DatabaseIn[];
-  themes?: string[] | { label: string }[];
+  themes?: string[];
   types?: string[];
 };
 
@@ -74,7 +74,7 @@ function isIsoCountry(code: string): boolean {
   try {
     const dn = new (Intl as any).DisplayNames(['en'], { type: 'region' });
     const name = dn?.of?.(c);
-    return typeof name === 'string' && name && name !== c;
+    return typeof name === 'string' && name.length > 0 && name !== c;
   } catch {
     return false;
   }
@@ -121,7 +121,7 @@ function normalizeOverrides(raw: any): OverridesShape {
   }
   if (Array.isArray(raw?.themes)) {
     out.themes = raw.themes
-      .map((t: any) => (typeof t === 'string' ? trimCollapse(t) : trimCollapse(t?.label || '')))
+      .map((t: any) => trimCollapse(typeof t === 'string' ? t : t?.label || ''))
       .filter((t: string) => !!t);
   }
   if (Array.isArray(raw?.types)) {
@@ -355,7 +355,7 @@ export function CatalogOverridesProvider({ children }: { children: React.ReactNo
   const { user, isAdmin, isEditor } = useAuth();
   const canWriteShared = Boolean(isAdmin || isEditor);
 
-  const supabase = useMemo(() => createClientComponentClient(), []);
+  const supabase = useMemo(() => createClientComponentClient<any, 'public'>(), []);
 
   const [overrides, setOverrides] = useState<OverridesShape>({});
   const [syncing, setSyncing] = useState(false);
@@ -416,7 +416,7 @@ export function CatalogOverridesProvider({ children }: { children: React.ReactNo
         'postgres_changes',
         { event: '*', schema: 'public', table: S_TABLE, filter: `key=eq.${S_KEY}` },
         (payload) => {
-          const row: any = payload.new || payload.record || null;
+          const row: any = payload.new || payload.old || (payload as any).record || null;
           if (!row || !row.data) return;
           const remote = normalizeOverrides(row.data);
           if (!hasAnyOverrides(remote)) return; // ignora vacíos para no borrar local
@@ -596,12 +596,9 @@ export function CatalogOverridesProvider({ children }: { children: React.ReactNo
       const list = Array.isArray(prev.themes) ? [...prev.themes] : [];
       const label = trimCollapse(t);
       if (!label) return prev;
-      const exists =
-        (list as any[]).some(
-          (x) => trimCollapse(typeof x === 'string' ? x : x?.label) === label,
-        ) || THEMES.some((v) => v === label);
-      if (!exists) (list as any[]).push(label);
-      return { ...prev, themes: list as any };
+      const exists = list.some((x) => trimCollapse(x) === label) || THEMES.includes(label);
+      if (!exists) list.push(label);
+      return { ...prev, themes: list };
     });
   }, [THEMES, setLocal]);
 
@@ -732,9 +729,7 @@ export function CatalogOverridesProvider({ children }: { children: React.ReactNo
     const lbl = trimCollapse(t);
     setLocal(prev => ({
       ...prev,
-      themes: (prev.themes || []).filter((x: any) =>
-        trimCollapse(typeof x === 'string' ? x : x?.label) !== lbl,
-      ),
+      themes: (prev.themes || []).filter((x) => trimCollapse(x) !== lbl),
     }));
   }, [setLocal]);
 

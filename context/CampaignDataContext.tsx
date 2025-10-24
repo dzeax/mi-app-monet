@@ -85,7 +85,7 @@ function logError(scope: string, error: unknown | PostgrestError) {
 }
 
 export function CampaignDataProvider({ children }: { children: React.ReactNode }) {
-  const supabase = useMemo(() => createClientComponentClient(), []);
+  const supabase = useMemo(() => createClientComponentClient<any, 'public'>(), []);
   const { user, loading: authLoading } = useAuth();
   const { resolveRate, settings } = useRoutingSettings();
   const fallbackRate = settings.defaultRate ?? DEFAULT_ROUTING_RATE;
@@ -123,7 +123,7 @@ export function CampaignDataProvider({ children }: { children: React.ReactNode }
 
     while (true) {
       const { data, error } = await supabase
-        .from<CampaignDbRow>('campaigns')
+        .from('campaigns')
         .select('*')
         .order('date', { ascending: false })
         .order('created_at', { ascending: false })
@@ -149,7 +149,7 @@ export function CampaignDataProvider({ children }: { children: React.ReactNode }
       }
 
       if (!data?.length) break;
-      aggregated.push(...data);
+      aggregated.push(...(data as CampaignDbRow[]));
       if (data.length < pageSize) break;
       offset += pageSize;
     }

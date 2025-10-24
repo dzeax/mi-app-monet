@@ -1,5 +1,6 @@
 'use client';
 import { useEffect, useMemo, useRef, useState, useId } from 'react';
+import type { JSX } from 'react';
 
 type Option = { id?: string; value: string; label?: string };
 

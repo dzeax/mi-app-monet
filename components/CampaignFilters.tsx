@@ -1,6 +1,6 @@
 'use client';
 
-import { useCallback, useEffect, useMemo, useRef, useState, useId } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState, useId, type RefObject } from 'react';
 import type { CSSProperties } from 'react';
 import Chip from '@/components/ui/Chip';
 import type { Filters } from '@/hooks/useCampaignFilterEngine';
@@ -197,10 +197,18 @@ export default function CampaignFilters({
     updateFilters({ themes: value === ALL ? [] : [value] });
   }, [updateFilters]);
 
+  type DbTypeOption = 'B2B' | 'B2C' | 'Mixed';
+
+  const isDbType = (value: string): value is DbTypeOption =>
+    value === 'B2B' || value === 'B2C' || value === 'Mixed';
+
   const setDbType = useCallback((value: string) => {
-    updateFilters({
-      dbTypes: value === ALL ? [] : [value as Filters['dbTypes'][number]],
-    });
+    if (value === ALL) {
+      updateFilters({ dbTypes: [] });
+      return;
+    }
+    const normalized = isDbType(value) ? value : null;
+    updateFilters({ dbTypes: normalized ? [normalized] : [] });
   }, [updateFilters]);
 
   const clearSearch = useCallback(() => {
@@ -259,11 +267,14 @@ export default function CampaignFilters({
     return () => el.removeEventListener('keydown', handle);
   }, [applyDisabled, clearSearch, commitSearch]);
 
-  const openPicker = (ref: React.RefObject<HTMLInputElement>) => {
+  const openPicker = (ref: RefObject<HTMLInputElement | null>) => {
     const el = ref.current;
     if (!el) return;
-    // @ts-expect-error showPicker no est?? tipado en Safari
-    if (el.showPicker) el.showPicker(); else el.focus();
+    if ('showPicker' in el && typeof (el as HTMLInputElement & { showPicker?: () => void }).showPicker === 'function') {
+      (el as HTMLInputElement & { showPicker: () => void }).showPicker();
+    } else {
+      el.focus();
+    }
   };
 
   const activeStyle = (active: boolean): CSSProperties | undefined =>
@@ -591,7 +602,7 @@ function FlagSelect({
   widthClass = 'min-w-[150px]',
 }: FlagSelectProps) {
   const [open, setOpen] = useState(false);
-  const containerRef = useRef<HTMLElement | null>(null);
+  const containerRef = useRef<HTMLLabelElement | null>(null);
   const listId = useId();
   const disabled = options.length === 0;
 

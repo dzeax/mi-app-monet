@@ -119,7 +119,7 @@ function inRange(dateIso: string, { from, to }: RoutingRatePeriod) {
 }
 
 export function RoutingSettingsProvider({ children }: { children: React.ReactNode }) {
-  const supabase = useMemo(() => createClientComponentClient(), []);
+  const supabase = useMemo(() => createClientComponentClient<any, 'public'>(), []);
   const { isAdmin, user } = useAuth();
 
   const [settings, setSettings] = useState<RoutingSettings>(DEFAULT_SETTINGS);
@@ -132,7 +132,7 @@ export function RoutingSettingsProvider({ children }: { children: React.ReactNod
     try {
       setLoading(true);
       const { data, error: err } = await supabase
-        .from<DbRow>(TABLE)
+        .from(TABLE)
         .select('key,data,updated_at,updated_by')
         .eq('key', ROW_KEY)
         .maybeSingle();

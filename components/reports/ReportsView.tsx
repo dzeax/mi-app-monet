@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useState } from 'react';
 
 import Card from '@/components/ui/Card';
 import ReportsHeader from '@/components/reports/ReportsHeader';
@@ -11,6 +11,7 @@ import ReportsTopTable from '@/components/reports/ReportsTopTable';
 
 import { useReportData } from '@/hooks/useReportData';
 import { GROUP_LABELS, METRIC_LABELS, type GroupBy, type Metric } from '@/types/reports';
+import { flagInfoForDatabase, flagInfoFromGeo, type FlagInfo } from '@/utils/flags';
 
 type TrendGroupBy = 'none' | 'database' | 'partner' | 'geo' | 'type' | 'databaseType';
 
@@ -180,6 +181,7 @@ export default function ReportsView() {
 
   const [trendFocusKey, setTrendFocusKey] = useState<string | null>(null);
   const [kpiScope, setKpiScope] = useState<'all' | 'focus'>('all');
+  const [activeRankingKey, setActiveRankingKey] = useState<string | null>(null);
 
   const derivedTrendBy: TrendGroupBy = useMemo(() => {
     const allowed = new Set<TrendGroupBy>(['none', 'database', 'partner', 'geo', 'type', 'databaseType']);
@@ -207,6 +209,32 @@ export default function ReportsView() {
   }, [trendFocusKey, focusOptions]);
 
   const focusScopeAvailable = derivedTrendBy !== 'none' && !!trendFocusKey;
+
+  // Resolver de iconos por etiqueta según agrupación actual
+  const flagForLabel = useMemo<((label: string) => FlagInfo) | undefined>(() => {
+    if (groupBy === 'database') {
+      return (label: string) => flagInfoForDatabase(label);
+    }
+    if (groupBy === 'geo') {
+      return (label: string) => flagInfoFromGeo(label);
+    }
+    return undefined;
+  }, [groupBy]);
+
+  useEffect(() => {
+    if (!activeRankingKey) return;
+    if (!ranking.some((row) => row.key === activeRankingKey)) {
+      setActiveRankingKey(null);
+    }
+  }, [activeRankingKey, ranking]);
+
+  const handleRankingSelect = useCallback((key: string | null) => {
+    if (!key) {
+      setActiveRankingKey(null);
+      return;
+    }
+    setActiveRankingKey((prev) => (prev === key ? null : key));
+  }, []);
 
   useEffect(() => {
     if (!focusScopeAvailable && kpiScope === 'focus') {
@@ -371,9 +399,12 @@ export default function ReportsView() {
             data={ranking}
             metric={metric}
             title={`Top ${topN} by ${legendName(metric)}`}
-            height={320}
+            height={360}
             showTable={false}
             groupLabel={groupLabel(groupBy)}
+            flagForLabel={flagForLabel}
+            activeKey={activeRankingKey}
+            onActiveChange={handleRankingSelect}
           />
         </Card>
       </div>
@@ -401,6 +432,9 @@ export default function ReportsView() {
         <ReportsTopTable
           data={ranking}
           groupLabel={groupLabel(groupBy)}
+          flagForLabel={flagForLabel}
+          activeKey={activeRankingKey}
+          onRowClick={handleRankingSelect}
         />
       </Card>
     </div>

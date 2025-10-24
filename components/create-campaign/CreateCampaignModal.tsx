@@ -3,6 +3,7 @@
 import { createPortal } from 'react-dom';
 import { Children, isValidElement, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useForm } from 'react-hook-form';
+import type { Resolver } from 'react-hook-form';
 import { z } from 'zod';
 import { zodResolver } from '@hookform/resolvers/zod';
 import { useCampaignData } from '@/context/CampaignDataContext';
@@ -25,6 +26,7 @@ const fmtNum = new Intl.NumberFormat('es-ES', { maximumFractionDigits: 2 });
 
 const SYMBOL_MULTIPLY = '\u00D7';
 const SYMBOL_MINUS = '\u2212';
+const CURRENCY_EUR = 'EUR' as const;
 
 function parseNum(v: unknown): number {
   if (v === '' || v == null) return 0;
@@ -201,7 +203,7 @@ export default function CreateCampaignModal({
     partner: z.string().min(1, 'Required'),
     theme: z.string().min(1, 'Required'),
     price: z.coerce.number().nonnegative(),
-    priceCurrency: z.string().default('EUR'),
+    priceCurrency: z.literal(CURRENCY_EUR),
     type: ZDealType, // <- enum fuerte
     vSent: z.coerce.number().int().nonnegative(),
     routingCosts: z.coerce.number().nonnegative(),
@@ -222,58 +224,67 @@ export default function CreateCampaignModal({
     typeof value === 'string' && (DEAL_TYPES as readonly string[]).includes(value) ? (value as DealType) : 'CPL';
 
   // RHF
+  const defaultValues: FormValues = useMemo(() => {
+    if (mode === 'edit' && initialRow) {
+      return {
+        date: initialRow.date,
+        campaign: initialRow.campaign,
+        advertiser: initialRow.advertiser,
+        invoiceOffice: isInvoiceOffice(initialRow.invoiceOffice)
+          ? initialRow.invoiceOffice
+          : resolveOffice(initialRow.geo, initialRow.partner),
+        partner: initialRow.partner || '',
+        theme: initialRow.theme || '',
+        price: initialRow.price,
+        priceCurrency: CURRENCY_EUR,
+        type: safeDealType(initialRow.type),
+        vSent: initialRow.vSent,
+        routingCosts: initialRow.routingCosts,
+        qty: initialRow.qty,
+        turnover: initialRow.turnover,
+        margin: initialRow.margin,
+        marginPct: initialRow.turnover > 0 ? initialRow.margin / initialRow.turnover : null,
+        ecpm: initialRow.ecpm,
+        database: initialRow.database ?? '',
+        geo: initialRow.geo ?? '',
+        databaseType: isDBType(initialRow.databaseType) ? initialRow.databaseType : 'B2B',
+      };
+    }
+
+    const seedInvoice = isInvoiceOffice(seed?.invoiceOffice) ? seed?.invoiceOffice : null;
+    const seedDbType = isDBType(seed?.databaseType) ? seed?.databaseType : 'B2B';
+
+    return {
+      date: seed?.date ?? new Date().toISOString().slice(0, 10),
+      campaign: seed?.campaign ?? '',
+      advertiser: seed?.advertiser ?? '',
+      invoiceOffice: seedInvoice ?? resolveOffice(undefined, undefined),
+      partner: seed?.partner ?? '',
+      theme: seed?.theme ?? '',
+      price: seed?.price ?? 0,
+      priceCurrency: CURRENCY_EUR,
+      type: safeDealType(seed?.type ?? TYPES[0] ?? 'CPL'),
+      vSent: seed?.vSent ?? 0,
+      routingCosts: seed?.routingCosts ?? 0,
+      qty: seed?.qty ?? 0,
+      turnover: seed?.turnover ?? 0,
+      margin: seed?.margin ?? 0,
+      marginPct:
+        seed?.turnover && seed.turnover > 0
+          ? (seed.margin ?? 0) / seed.turnover
+          : null,
+      ecpm: seed?.ecpm ?? 0,
+      database: seed?.database ?? '',
+      geo: seed?.geo ?? '',
+      databaseType: seedDbType,
+    };
+  }, [initialRow, mode, resolveOffice, seed]);
+
   const { register, handleSubmit, formState, reset, watch, setValue, getValues } =
-    useForm<FormValues>({
-      resolver: zodResolver(schema),
+    useForm<FormValues, undefined, FormValues>({
+      resolver: zodResolver(schema) as Resolver<FormValues>,
       mode: 'onSubmit',
-      defaultValues:
-        mode === 'edit' && initialRow
-          ? {
-              date: initialRow.date,
-              campaign: initialRow.campaign,
-              advertiser: initialRow.advertiser,
-              invoiceOffice: isInvoiceOffice(initialRow.invoiceOffice)
-                ? initialRow.invoiceOffice
-                : resolveOffice(initialRow.geo, initialRow.partner),
-              partner: initialRow.partner || '',
-              theme: initialRow.theme || '',
-              price: initialRow.price,
-              priceCurrency: initialRow.priceCurrency || 'EUR',
-              type: safeDealType(initialRow.type),
-              vSent: initialRow.vSent,
-              routingCosts: initialRow.routingCosts,
-              qty: initialRow.qty,
-              turnover: initialRow.turnover,
-              margin: initialRow.margin,
-              marginPct:
-                initialRow.turnover > 0 ? initialRow.margin / initialRow.turnover : null,
-              ecpm: initialRow.ecpm,
-              database: initialRow.database,
-              geo: initialRow.geo,
-              databaseType: isDBType(initialRow.databaseType) ? initialRow.databaseType : 'B2B',
-            }
-          : {
-              date: seed?.date ?? new Date().toISOString().slice(0, 10),
-              campaign: seed?.campaign ?? '',
-              advertiser: seed?.advertiser ?? '',
-              invoiceOffice: isInvoiceOffice(seed?.invoiceOffice)
-                ? seed!.invoiceOffice!
-                : resolveOffice(undefined, undefined),
-              partner: seed?.partner ?? '',
-              theme: seed?.theme ?? '',
-              price: seed?.price ?? 0,
-              priceCurrency: seed?.priceCurrency ?? 'EUR',
-              type: safeDealType(seed?.type ?? TYPES[0] ?? 'CPL'),
-              vSent: seed?.vSent ?? 0,
-              routingCosts: seed?.routingCosts ?? 0,
-              qty: seed?.qty ?? 0,
-              turnover: seed?.turnover ?? 0,
-              margin: seed?.margin ?? 0,
-              marginPct: seed?.turnover ? (seed.margin ?? 0) / (seed.turnover ?? 1) : null,
-              ecpm: seed?.ecpm ?? 0,
-              database: seed?.database ?? '',
-              // geo y databaseType se autocompletan tras escoger DB
-            } as Partial<FormValues>,
+      defaultValues,
     });
   const { ref: dateInputRef, ...dateField } = register('date');
 
@@ -401,7 +412,7 @@ export default function CreateCampaignModal({
           partner: data.partner,
           theme: data.theme,
           price: _price,
-          priceCurrency: data.priceCurrency || 'EUR',
+          priceCurrency: CURRENCY_EUR,
           type: data.type,
           vSent: _vSent,
           routingCosts,

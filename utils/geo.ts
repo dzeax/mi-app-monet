@@ -9,7 +9,7 @@ export function isIsoCountry(code: string): boolean {
   try {
     const dn = new (Intl as any).DisplayNames(['en'], { type: 'region' });
     const name = dn?.of?.(c);
-    return typeof name === 'string' && name && name !== c;
+    return typeof name === 'string' && name.length > 0 && name !== c;
   } catch {
     return false;
   }

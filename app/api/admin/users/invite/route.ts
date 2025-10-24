@@ -27,7 +27,7 @@ type InvitePayload = z.infer<typeof payloadSchema>;
 
 function formatValidationError(error: unknown): string {
   if (error instanceof z.ZodError) {
-    return error.errors.map((err) => err.message).join(', ') || 'Invalid payload';
+    return error.issues.map((issue) => issue.message).join(', ') || 'Invalid payload';
   }
   if (error instanceof Error) return error.message;
   return 'Invalid payload';

@@ -226,7 +226,7 @@ function rangeForPresetKey(
   const b=new Date(now.getFullYear(),now.getMonth(),now.getDate());
   return [fmtLocal(a),fmtLocal(b)];
 }
-function activePresetLabelFromRange(range?: [string|null,string|null] | null) {
+function activePresetLabelFromRange(range?: [string | null | undefined, string | null | undefined] | null) {
   const start = range?.[0], end = range?.[1];
   if (!start || !end) return null;
   const entries = [
@@ -438,9 +438,12 @@ export default function CampaignTable() {
 
   /* ====== CatÃ¡logos canÃ³nicos ====== */
   const catalogs = useCatalogOverrides();
-  const PARTNERS = catalogs?.PARTNERS ?? [];
-  const THEMES = (catalogs?.THEMES ?? []) as string[];
-  const TYPES = (catalogs?.TYPES ?? ['CPL', 'CPM', 'CPC', 'CPA']).slice();
+  const PARTNERS = useMemo(() => catalogs?.PARTNERS ?? [], [catalogs?.PARTNERS]);
+  const THEMES = useMemo(() => (catalogs?.THEMES ?? []) as string[], [catalogs?.THEMES]);
+  const TYPES = useMemo(
+    () => (catalogs?.TYPES ? [...catalogs.TYPES] : ['CPL', 'CPM', 'CPC', 'CPA']),
+    [catalogs?.TYPES],
+  );
 
   /* ====== Filtros ====== */
   const engine = useCampaignFilterEngine(rows);
@@ -707,8 +710,8 @@ export default function CampaignTable() {
 
   // [EXPORT] columnas visibles para export, en el mismo orden actual
   const exportVisibleCols: ColumnSpec[] = useMemo(() => {
-    const ids = visibleCols.map(c => c.id);
-    return EXPORT_COLS_ALL.filter(c => ids.includes(c.id));
+    const ids = new Set<ColumnDef['id']>(visibleCols.map(c => c.id));
+    return EXPORT_COLS_ALL.filter((col) => ids.has(col.id as ColumnDef['id']));
   }, [visibleCols]);
 
   // [EXPORT] nombre sugerido de archivo con periodo + timestamp corto

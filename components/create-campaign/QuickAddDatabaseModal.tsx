@@ -19,7 +19,7 @@ function isIsoCountry(code: string): boolean {
     regionDisplayNames =
       regionDisplayNames ?? new Intl.DisplayNames(['en'], { type: 'region' });
     const name = regionDisplayNames.of(c);
-    return typeof name === 'string' && name && name !== c;
+    return typeof name === 'string' && name.length > 0 && name !== c;
   } catch {
     return false;
   }

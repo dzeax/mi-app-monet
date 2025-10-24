@@ -417,9 +417,9 @@ function PartnersPanel(props: {
 }
 
 function DatabasesPanel(props: {
-  items: { id: string; name: string; geo: string; dbType: 'B2B'|'B2C'|'Mixed'|string }[];
-  onAdd: (d: { name: string; id?: string; geo: string; dbType: 'B2B'|'B2C'|'Mixed'|string }) => void;
-  onUpdate: (oldName: string, patch: Partial<{ name: string; id?: string; geo: string; dbType: 'B2B'|'B2C'|'Mixed'|string }>) => void;
+  items: { id: string; name: string; geo: string; dbType: DatabaseTypeOption }[];
+  onAdd: (d: { name: string; id?: string; geo: string; dbType: DatabaseTypeOption }) => void;
+  onUpdate: (oldName: string, patch: Partial<{ name: string; id?: string; geo: string; dbType: DatabaseTypeOption }>) => void;
   onRemove: (name: string) => void;
   disabled?: boolean;
 }) {
@@ -484,7 +484,7 @@ function DatabasesPanel(props: {
               key="t"
               value={i.dbType}
               options={['B2C','B2B','Mixed']}
-              onSave={(v)=> onUpdate(i.name,{dbType:v})}
+              onSave={(v)=> onUpdate(i.name,{dbType: toDatabaseType(v)})}
               disabled={disabled}
             />,
             <div key="act" className="shrink-0">

@@ -49,7 +49,7 @@ function SetPasswordContent() {
   type SetSessionResult = Awaited<ReturnType<typeof supabase.auth.setSession>>;
 
   const withTimeout = async <T,>(promise: Promise<T>, ms: number): Promise<T | 'timeout'> => {
-    let timer: ReturnType<typeof setTimeout> | undefined;
+    let timer: number | undefined;
     const timeoutPromise = new Promise<'timeout'>((resolve) => {
       timer = window.setTimeout(() => resolve('timeout'), ms);
     });

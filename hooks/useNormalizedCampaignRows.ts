@@ -28,11 +28,12 @@ export type NormalizedCampaignRow = RowWithIdx & {
  * Devuelve las filas con campos ya normalizados para filtros/búsqueda.
  * Se recalcula SOLO cuando cambian las `rows` del store.
  */
-export function useNormalizedCampaignRows(): NormalizedCampaignRow[] {
+export function useNormalizedCampaignRows(rowsOverride?: RowWithIdx[]): NormalizedCampaignRow[] {
   const { rows } = useCampaignData();
+  const source = rowsOverride ?? rows;
 
   const normalized = useMemo<NormalizedCampaignRow[]>(() => {
-    return rows.map((r) => {
+    return source.map((r) => {
       const nCampaign      = normalizeStr(r.campaign);
       const nAdvertiser    = normalizeStr(r.advertiser);
       const nPartner       = normalizeStr(r.partner);
@@ -78,7 +79,7 @@ export function useNormalizedCampaignRows(): NormalizedCampaignRow[] {
         },
       };
     });
-  }, [rows]);
+  }, [source]);
 
   return normalized;
 }
