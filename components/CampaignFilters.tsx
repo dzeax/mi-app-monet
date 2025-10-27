@@ -28,6 +28,12 @@ const DATE_PRESETS: [DatePreset, string][] = [
 
 const ALL = 'ALL';
 
+type DbTypeOption = 'B2B' | 'B2C' | 'Mixed';
+
+function isDbType(value: string): value is DbTypeOption {
+  return value === 'B2B' || value === 'B2C' || value === 'Mixed';
+}
+
 function fmtLocal(d: Date): string {
   const y = d.getFullYear();
   const m = String(d.getMonth() + 1).padStart(2, '0');
@@ -196,11 +202,6 @@ export default function CampaignFilters({
   const setTheme = useCallback((value: string) => {
     updateFilters({ themes: value === ALL ? [] : [value] });
   }, [updateFilters]);
-
-  type DbTypeOption = 'B2B' | 'B2C' | 'Mixed';
-
-  const isDbType = (value: string): value is DbTypeOption =>
-    value === 'B2B' || value === 'B2C' || value === 'Mixed';
 
   const setDbType = useCallback((value: string) => {
     if (value === ALL) {

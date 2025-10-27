@@ -129,16 +129,39 @@ export default function Sidebar({
     </button>
   );
 
+  const BtnCampaignReporting = (
+    <button
+      onClick={() => router.push("/analytics/campaign-reporting")}
+      className={btnBase(pathname?.startsWith("/analytics/campaign-reporting") ? "sidebar-btn--active" : "")}
+      title="Campaign Reporting"
+      aria-label="Campaign Reporting"
+    >
+      <Image src="/icons/sidebar/campaign-reporting.svg" alt="" aria-hidden width={24} height={24} className="h-5 w-5" />
+      {!collapsed && <span>Campaign Reporting</span>}
+    </button>
+  );
+
   const BtnReports = (
     <button
-      onClick={() => router.push("/reports")}
-      className={btnBase(pathname?.startsWith("/reports") ? "sidebar-btn--active" : "")}
-      title="Reports"
-      aria-label="Reports"
+      onClick={() => router.push("/analytics/reports")}
+      className={btnBase(pathname?.startsWith("/analytics/reports") ? "sidebar-btn--active" : "")}
+      title="Global Reports"
+      aria-label="Global Reports"
     >
       <Image src="/icons/sidebar/reports.svg" alt="" aria-hidden width={24} height={24} className="h-5 w-5" />
-      {!collapsed && <span>Reports</span>}
-      {!collapsed && <span className="sidebar-badge ml-auto">Analytics</span>}
+      {!collapsed && <span>Global Reports</span>}
+    </button>
+  );
+
+  const BtnDbsPerformance = (
+    <button
+      onClick={() => router.push("/analytics/dbs-performance")}
+      className={btnBase(pathname?.startsWith("/analytics/dbs-performance") ? "sidebar-btn--active" : "")}
+      title="DBs Performance"
+      aria-label="DBs Performance"
+    >
+      <Image src="/icons/sidebar/dbsperf.svg" alt="" aria-hidden width={24} height={24} className="h-5 w-5" />
+      {!collapsed && <span>DBs Performance</span>}
     </button>
   );
 
@@ -218,7 +241,19 @@ export default function Sidebar({
               </div>
             )}
           </div>
-          {!collapsed ? <div className="space-y-3">{BtnReports}</div> : <>{BtnReports}</>}
+          {!collapsed ? (
+            <div className="space-y-3">
+              {BtnCampaignReporting}
+              {BtnReports}
+              {BtnDbsPerformance}
+            </div>
+          ) : (
+            <>
+              {BtnCampaignReporting}
+              {BtnReports}
+              {BtnDbsPerformance}
+            </>
+          )}
         </div>
       </div>
 

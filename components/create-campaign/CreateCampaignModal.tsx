@@ -278,7 +278,7 @@ export default function CreateCampaignModal({
       geo: seed?.geo ?? '',
       databaseType: seedDbType,
     };
-  }, [initialRow, mode, resolveOffice, seed]);
+  }, [initialRow, mode, resolveOffice, seed, TYPES]);
 
   const { register, handleSubmit, formState, reset, watch, setValue, getValues } =
     useForm<FormValues, undefined, FormValues>({

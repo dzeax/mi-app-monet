@@ -1,7 +1,6 @@
 'use client';
 
 import { useEffect, useRef, useState } from 'react';
-import Link from 'next/link';
 import Chip from '@/components/ui/Chip';
 import type { GroupBy, Metric, ReportFilters } from '@/types/reports';
 
@@ -393,7 +392,7 @@ export default function ReportsHeader({
     <div className="grid gap-4">
       <div className="flex items-center justify-between gap-3">
         <div>
-          <h1 className="text-2xl font-semibold">Reports</h1>
+          <h1 className="text-2xl font-semibold">Global Reports</h1>
           <p className="muted">
             {groupByLabel(groupBy)} performance -{' '}
             <span className="opacity-80">
@@ -403,20 +402,13 @@ export default function ReportsHeader({
             </span>
           </p>
         </div>
-        <div className="flex items-center gap-2">
-          {onExportCsv && (
+        {onExportCsv ? (
+          <div className="flex items-center gap-2">
             <button className="btn-ghost" onClick={onExportCsv} type="button">
               Export CSV
             </button>
-          )}
-          <Link
-            href="/"
-            className="btn-primary flex items-center gap-2"
-          >
-            <span aria-hidden="true" className="text-base leading-none">&larr;</span>
-            <span>Back to campaigns</span>
-          </Link>
-        </div>
+          </div>
+        ) : null}
       </div>
 
       <div className="filters-stack">

@@ -115,51 +115,58 @@ export function CampaignDataProvider({ children }: { children: React.ReactNode }
 
   const refreshRetryRef = useRef<number | null>(null);
 
-  const refresh = useCallback(async (attempt = 0) => {
-    setLoading(true);
-    const pageSize = 1000;
-    const aggregated: CampaignDbRow[] = [];
-    let offset = 0;
+  const refresh = useCallback(
+    async (attempt = 0) => {
+      setLoading(true);
+      const pageSize = 1000;
+      const aggregated: CampaignDbRow[] = [];
+      let offset = 0;
 
-    while (true) {
-      const { data, error } = await supabase
-        .from('campaigns')
-        .select('*')
-        .order('date', { ascending: false })
-        .order('created_at', { ascending: false })
-        .range(offset, offset + pageSize - 1);
+      try {
+        while (true) {
+          const { data, error } = await supabase
+            .from('campaigns')
+            .select('*')
+            .order('date', { ascending: false })
+            .order('created_at', { ascending: false })
+            .range(offset, offset + pageSize - 1);
 
-      if (error) {
-        const status = (error as any)?.status ?? (error as any)?.code ?? null;
-        if (status === 401 || status === '401') {
-          if (attempt < 5) {
-            if (refreshRetryRef.current) window.clearTimeout(refreshRetryRef.current);
-            refreshRetryRef.current = window.setTimeout(() => {
-              void refresh(attempt + 1);
-            }, 200 * Math.pow(2, attempt));
+          if (error) {
+            const status = (error as any)?.status ?? (error as any)?.code ?? null;
+            if (status === 401 || status === '401') {
+              if (attempt < 5) {
+                if (refreshRetryRef.current) window.clearTimeout(refreshRetryRef.current);
+                refreshRetryRef.current = window.setTimeout(() => {
+                  void refresh(attempt + 1);
+                }, 200 * Math.pow(2, attempt));
+              }
+              return;
+            }
+            throw error;
           }
-          setLoading(false);
-          return;
+
+          if (!data?.length) break;
+          aggregated.push(...(data as CampaignDbRow[]));
+          if (data.length < pageSize) break;
+          offset += pageSize;
         }
-        logError('refresh', error);
-        setRows([]);
-        idxRef.current = 0;
+
+        const mapped = aggregated.map(mapFromDb).map(computeRow);
+        const withIdx = mapped.map((row, index) => stampRow(row, index));
+        idxRef.current = withIdx.length;
+        setRows(withIdx);
+      } catch (error) {
+        logError('refresh', error as PostgrestError);
+        if (aggregated.length === 0) {
+          setRows([]);
+          idxRef.current = 0;
+        }
+      } finally {
         setLoading(false);
-        return;
       }
-
-      if (!data?.length) break;
-      aggregated.push(...(data as CampaignDbRow[]));
-      if (data.length < pageSize) break;
-      offset += pageSize;
-    }
-
-    const mapped = aggregated.map(mapFromDb).map(computeRow);
-    const withIdx = mapped.map((row, index) => stampRow(row, index));
-    idxRef.current = withIdx.length;
-    setRows(withIdx);
-    setLoading(false);
-  }, [computeRow, stampRow, supabase]);
+    },
+    [computeRow, stampRow, supabase]
+  );
 
   useEffect(() => {
     if (authLoading) return;

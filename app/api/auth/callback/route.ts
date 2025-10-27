@@ -17,7 +17,7 @@ type SupabaseAuthEvent =
   | 'MFA_CHALLENGE_FAILED';
 
 export async function POST(request: Request) {
-  const cookieStore = cookies();
+  const cookieStore = await cookies();
   const supabase = createRouteHandlerClient({
     cookies: () => cookieStore,
   });

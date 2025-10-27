@@ -2,7 +2,7 @@
 'use client';
 
 import type { CSSProperties } from 'react';
-import { useId, useMemo } from 'react';
+import { useCallback, useId, useMemo } from 'react';
 
 import {
   ResponsiveContainer,
@@ -137,7 +137,7 @@ export default function ReportsChart({
   groupLabel = 'Group',
   flagForLabel,
   activeKey,
-  onActiveChange: _onActiveChange,
+  onActiveChange,
 }: Props) {
   const chartId = useId();
   const yTick = makeChartAxisTick(metric);
@@ -180,7 +180,6 @@ export default function ReportsChart({
     if (!entry) return null;
     const flagInfo = flagForLabel ? flagForLabel(entry.label) : null;
     const percentText = formatShare(entry._percent);
-    const isActive = effectiveActiveKey === entry.key;
 
     return (
       <div className="min-w-[14rem] space-y-2">
@@ -195,6 +194,22 @@ export default function ReportsChart({
       </div>
     );
   };
+
+  const handleActiveToggle = useCallback(
+    (entryKey: string) => {
+      if (!onActiveChange) return;
+      const nextKey = entryKey === effectiveActiveKey ? null : entryKey;
+      onActiveChange(nextKey);
+    },
+    [effectiveActiveKey, onActiveChange]
+  );
+
+  const handleBarClick = useCallback(
+    (entry: ChartEntry) => {
+      handleActiveToggle(entry.key);
+    },
+    [handleActiveToggle]
+  );
 
   const skeletonHeights = [92, 78, 66, 52, 40];
 
