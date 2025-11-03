@@ -396,11 +396,6 @@ export default function CampaignPlanningDrawer({ open, mode, item, context, onCl
     trackingDomainFromEmail(draft.fromEmail ?? availableFromEmails[0] ?? '', combinedDefaults.trackingDomain);
   const activeLanguageId = draft.languageId ?? combinedDefaults.languageId ?? null;
 
-  const languageLabel = useMemo(() => {
-    if (activeLanguageId == null) return null;
-    return DOCTOR_SENDER_LANGUAGES.find((language) => language.id === activeLanguageId)?.label ?? null;
-  }, [activeLanguageId]);
-
   const previewData = useMemo(() => {
     if (!combinedDefaults) return null;
     const listToken = selectedList || combinedDefaults.listName || availableLists[0] || '';
@@ -448,20 +443,6 @@ export default function CampaignPlanningDrawer({ open, mode, item, context, onCl
     { key: 'pricing', label: headerPricingLabel, type: 'text' as const },
     { key: 'date', label: headerDateLabel, type: 'text' as const },
     { key: 'status', label: headerStatusLabel, type: 'status' as const },
-  ];
-
-  const doctorSenderSummary = [
-    { key: 'from', label: 'From', value: draft.fromEmail || availableFromEmails[0] || 'Not set' },
-    { key: 'replyTo', label: 'Reply-to', value: activeReplyTo || 'Not set' },
-    { key: 'unsubscribe', label: 'Unsubscribe', value: draft.unsubscribeUrl || activeUnsubscribeUrl || 'Not set' },
-    { key: 'tracking', label: 'Tracking', value: activeTrackingDomain || 'Derived from sender' },
-    { key: 'list', label: 'List', value: selectedList || availableLists[0] || 'Not configured' },
-    { key: 'language', label: 'Language', value: languageLabel ?? 'Not configured' },
-  ];
-  const previewStatusLabel = draft.dsStatus ? draft.dsStatus : 'Not sent';
-  const deliverySummaryChips = [
-    ...doctorSenderSummary,
-    { key: 'preview', label: 'Preview', value: previewStatusLabel },
   ];
 
   const previewRequirements = [
@@ -925,13 +906,16 @@ export default function CampaignPlanningDrawer({ open, mode, item, context, onCl
                   </div>
                   <button
                     type="button"
-                    className="inline-flex items-center gap-2 rounded-full border border-dashed border-[color:var(--color-border)] bg-[color:var(--color-surface-2)]/60 px-3 py-1.5 text-xs font-semibold uppercase tracking-[0.16em] text-[color:var(--color-text)]/70 transition-colors hover:border-[color:var(--color-primary)]/40 hover:text-[color:var(--color-text)]"
+                    className="inline-flex items-center gap-2 rounded-full border border-[color:var(--color-primary)]/40 bg-[color:var(--color-primary)]/12 px-4 py-1.5 text-xs font-semibold uppercase tracking-[0.22em] text-[color:var(--color-primary)] shadow-[0_4px_12px_rgba(15,23,42,0.08)] transition-all hover:bg-[color:var(--color-primary)]/18 hover:border-[color:var(--color-primary)]/60 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[color:var(--color-primary)]/50"
                     onClick={handleDeliveryToggle}
                     aria-expanded={deliveryOpen}
                   >
                     {deliveryOpen ? 'Collapse delivery' : 'Open delivery'}
-                    <span className={`transition-transform ${deliveryOpen ? 'rotate-180' : ''}`} aria-hidden>
-                      v
+                    <span
+                      className={`inline-flex h-5 w-5 items-center justify-center rounded-full bg-[color:var(--color-primary)]/20 text-[color:var(--color-primary)] transition-transform ${deliveryOpen ? 'rotate-180' : ''}`}
+                      aria-hidden
+                    >
+                      <ChevronIcon className="h-3.5 w-3.5" />
                     </span>
                   </button>
                 </div>
@@ -1228,22 +1212,7 @@ export default function CampaignPlanningDrawer({ open, mode, item, context, onCl
                       ) : null}
                     </div>
                   </>
-                ) : (
-                  <div className="mt-4 space-y-3 text-xs text-[color:var(--color-text)]/70">
-                    <p>Delivery setup stays hidden during planning to keep focus on the essentials. Open it whenever you are ready to work on DoctorSender, email content, or BAT preview.</p>
-                    <div className="flex flex-wrap gap-2">
-                      {deliverySummaryChips.map((chip) => (
-                        <span
-                          key={chip.key}
-                          className="inline-flex items-center gap-2 rounded-full border border-[color:var(--color-border)] bg-[color:var(--color-surface-2)]/60 px-3 py-1 text-xs font-medium text-[color:var(--color-text)]/70"
-                        >
-                          <span className="text-[color:var(--color-text)]/50">{chip.label}</span>
-                          <strong className="text-[color:var(--color-text)]">{chip.value}</strong>
-                        </span>
-                      ))}
-                    </div>
-                  </div>
-                )}
+                ) : null}
               </section>
             </div>
           </div>
@@ -1327,6 +1296,25 @@ function CalendarIcon({ className }: { className?: string }) {
       />
       <path d="M3 8h14" stroke="currentColor" strokeWidth="1.5" />
       <path d="M7 2v4M13 2v4" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" />
+    </svg>
+  );
+}
+
+function ChevronIcon({ className }: { className?: string }) {
+  return (
+    <svg
+      className={className}
+      viewBox="0 0 20 20"
+      fill="none"
+      xmlns="http://www.w3.org/2000/svg"
+    >
+      <path
+        d="M6 8l4 4 4-4"
+        stroke="currentColor"
+        strokeWidth="1.6"
+        strokeLinecap="round"
+        strokeLinejoin="round"
+      />
     </svg>
   );
 }
