@@ -59,6 +59,30 @@ export default function Sidebar({
       ? `sidebar-btn flex justify-center items-center gap-2 rounded-xl border ${padCollapsed} ${extra}`
       : `sidebar-btn w-full flex items-center gap-3 rounded-xl border ${padExpanded} text-left ${extra}`;
 
+  const BtnCampaignPlanning = (
+    <button
+      onClick={() => router.push('/campaign-planning')}
+      className={btnBase(pathname?.startsWith('/campaign-planning') ? 'sidebar-btn--active' : '')}
+      title="Campaign Planning"
+      aria-label="Campaign Planning"
+    >
+      <Image src="/icons/sidebar/planning.svg" alt="" aria-hidden width={24} height={24} className="h-5 w-5" />
+      {!collapsed && <span>Campaign Planning</span>}
+    </button>
+  );
+
+  const BtnDatabaseRouting = (
+    <button
+      onClick={() => router.push('/dbs-routing')}
+      className={btnBase(pathname?.startsWith('/dbs-routing') ? 'sidebar-btn--active' : '')}
+      title="Database Routing"
+      aria-label="Database Routing"
+    >
+      <Image src="/icons/sidebar/dbs-routing.svg" alt="" aria-hidden width={24} height={24} className="h-5 w-5" />
+      {!collapsed && <span>Database Routing</span>}
+    </button>
+  );
+
   const BtnCreate = (
     <button
       onClick={() => isEditor && setOpenCreate(true)}
@@ -168,6 +192,28 @@ export default function Sidebar({
   return (
     <div className={collapsed ? "shrink-0 self-start w-[56px]" : "shrink-0 self-start w-full md:w-full"}>
       <div className="grid gap-3">
+        <div className={collapsed ? "sidebar-card p-2" : "sidebar-card p-4"}>
+          <div className={["flex items-center mb-2", collapsed ? "justify-center" : "justify-between"].join(" ")}>
+            {!collapsed && (
+              <div>
+                <h2 className="text-base font-semibold">Global Activation</h2>
+                <p className="muted text-xs">Production</p>
+              </div>
+            )}
+          </div>
+          {!collapsed ? (
+            <div className="space-y-3">
+              {BtnCampaignPlanning}
+              {BtnDatabaseRouting}
+            </div>
+          ) : (
+            <>
+              {BtnCampaignPlanning}
+              {BtnDatabaseRouting}
+            </>
+          )}
+        </div>
+
         <div className={collapsed ? "sidebar-card p-2" : "sidebar-card p-4"}>
           <div className={["flex items-center mb-2", collapsed ? "justify-center" : "justify-between"].join(" ")}>
             {!collapsed && (

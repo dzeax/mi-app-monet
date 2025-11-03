@@ -971,7 +971,7 @@ input[type="date"]:hover::-webkit-calendar-picker-indicator { opacity: 1; }
   display: grid;
   grid-template-columns: minmax(0, 1fr) auto;
   column-gap: .325rem;
-  align-items: stretch;
+  align-items: flex-end;
 }
 .field-addon-button {
   display: inline-flex;

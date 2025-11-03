@@ -1,13 +1,10 @@
-// utils/flags.ts
-// Utilidades para resolver banderas (emoji, clases CSS) a partir de GEO o nombre de base de datos
-
 import { findDatabaseByName } from '@/data/reference';
 
 export type FlagInfo = {
   emoji: string | null;
-  /** Código ISO-3166 alfa-2 en minúsculas para clases `fi fi-xx` (flag-icons). */
+  /** Lowercase ISO-3166 alpha-2 code for `flag-icons` (fi fi-xx). */
   code: string | null;
-  /** Texto en mayúsculas que podemos usar como fallback accesible. */
+  /** Uppercase fallback text when no emoji/class is available. */
   text: string | null;
 };
 
@@ -18,21 +15,21 @@ function emptyFlag(): FlagInfo {
 }
 
 function normalizeGeo(raw?: string | null): string | null {
-  const v = (raw ?? '').trim().toUpperCase();
-  if (!v) return null;
-  if (v === 'UK' || v === 'EN') return 'GB';
-  if (v === 'INT' || v === 'INTL' || v === 'MULTI' || v === 'GLOBAL' || v === 'WW') return 'WW';
-  return v;
+  const value = (raw ?? '').trim().toUpperCase();
+  if (!value) return null;
+  if (value === 'UK' || value === 'EN') return 'GB';
+  if (['INT', 'INTL', 'MULTI', 'GLOBAL', 'WW'].includes(value)) return 'WW';
+  return value;
 }
 
 function makeEmoji(iso: string): string | null {
   if (iso.length !== 2) return null;
   const base = 'A'.codePointAt(0) ?? 65;
-  const A = 0x1f1e6; // Regional Indicator Symbol Letter A
-  const c1 = iso.charCodeAt(0) - base + A;
-  const c2 = iso.charCodeAt(1) - base + A;
+  const start = 0x1f1e6; // Regional Indicator Symbol Letter A
+  const first = iso.charCodeAt(0) - base + start;
+  const second = iso.charCodeAt(1) - base + start;
   try {
-    return String.fromCodePoint(c1, c2);
+    return String.fromCodePoint(first, second);
   } catch {
     return null;
   }
@@ -41,12 +38,14 @@ function makeEmoji(iso: string): string | null {
 function infoFromNormalized(code: string | null): FlagInfo {
   if (!code) return emptyFlag();
   if (code === 'WW') {
-    return { emoji: '🌍', code: null, text: 'WW' };
+    return { emoji: null, code: null, text: 'WW' };
   }
+
   const upper = code.toUpperCase();
   if (upper.length !== 2) {
     return { emoji: null, code: null, text: upper };
   }
+
   const emoji = makeEmoji(upper);
   return {
     emoji,

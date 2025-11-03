@@ -25,7 +25,7 @@ export default function FieldWithAddon({
         'field-addon',
         'grid',
         'grid-cols-[minmax(0,1fr)_auto]',
-        'items-stretch',
+        'items-end',
         'gap-1',
         className,
       ]
