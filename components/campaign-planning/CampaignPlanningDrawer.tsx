@@ -478,12 +478,15 @@ export default function CampaignPlanningDrawer({ open, mode, item, context, onCl
   const dsStatusLabel = draft.dsStatus ?? 'Not sent';
 
   const doctorSenderReady =
-    Boolean(draft.subject?.trim()) &&
-    Boolean(draft.fromName?.trim()) &&
     Boolean(draft.fromEmail?.trim()) &&
     Boolean(activeReplyTo?.trim()) &&
-    Boolean(activeUnsubscribeUrl?.trim());
-  const emailContentReady = Boolean(draft.html?.trim()) && draft.previewRecipients.length > 0;
+    Boolean(activeUnsubscribeUrl?.trim()) &&
+    Boolean(draft.trackingDomain?.trim());
+  const emailContentReady =
+    Boolean(draft.fromName?.trim()) &&
+    Boolean(draft.subject?.trim()) &&
+    Boolean(draft.html?.trim()) &&
+    draft.previewRecipients.length > 0;
   const previewStepReady = isPreviewReady && Boolean(item);
 
   const deliverySteps: DeliveryStepMeta[] = [
@@ -956,27 +959,7 @@ export default function CampaignPlanningDrawer({ open, mode, item, context, onCl
                             <span>{defaultsLoading ? 'Syncing DoctorSender defaults...' : draft.database ? 'Defaults loaded from database routing' : 'Select a database to load defaults.'}</span>
                             <span className="font-semibold text-[color:var(--color-text)]">{doctorSenderReady ? 'Ready' : 'Incomplete'}</span>
                           </div>
-                          <label className="grid gap-2 text-sm">
-                            <span className="muted">Subject line</span>
-                            <input
-                              type="text"
-                              className="input h-10"
-                              value={draft.subject ?? ''}
-                              onChange={(event) => setDraft((prev) => ({ ...prev, subject: event.target.value }))}
-                              placeholder="Add the BAT subject"
-                            />
-                          </label>
                           <div className="grid gap-4 md:grid-cols-2">
-                            <label className="grid gap-2 text-sm">
-                              <span className="muted">From name</span>
-                              <input
-                                type="text"
-                                className="input h-10"
-                                value={draft.fromName ?? ''}
-                                onChange={(event) => setDraft((prev) => ({ ...prev, fromName: event.target.value }))}
-                                placeholder="Brand or partner"
-                              />
-                            </label>
                             <label className="grid gap-2 text-sm">
                               <span className="muted">From email</span>
                               <select
@@ -996,44 +979,10 @@ export default function CampaignPlanningDrawer({ open, mode, item, context, onCl
                                 ) : null}
                               </select>
                             </label>
-                          </div>
-                          <div className="grid gap-4 md:grid-cols-2">
-                            <label className="grid gap-2 text-sm">
-                              <span className="muted">Reply-to</span>
-                              <input
-                                type="email"
-                                className="input h-10"
-                                value={activeReplyTo}
-                                onChange={(event) => setDraft((prev) => ({ ...prev, replyTo: event.target.value }))}
-                                placeholder="reply@brand.com"
-                              />
-                            </label>
-                            <label className="grid gap-2 text-sm">
-                              <span className="muted">Unsubscribe URL</span>
-                              <input
-                                type="url"
-                                className="input h-10"
-                                value={draft.unsubscribeUrl ?? ''}
-                                onChange={(event) => setDraft((prev) => ({ ...prev, unsubscribeUrl: event.target.value }))}
-                                placeholder={activeUnsubscribeUrl || 'https://...'}
-                              />
-                            </label>
-                          </div>
-                          <div className="grid gap-4 md:grid-cols-2">
-                            <label className="grid gap-2 text-sm">
-                              <span className="muted">Tracking domain</span>
-                              <input
-                                type="text"
-                                className="input h-10"
-                                value={draft.trackingDomain ?? ''}
-                                onChange={(event) => setDraft((prev) => ({ ...prev, trackingDomain: event.target.value }))}
-                                placeholder={activeTrackingDomain || 'Derived from sender'}
-                              />
-                            </label>
                             <label className="grid gap-2 text-sm">
                               <span className="muted">Preview list</span>
                               <select
-                                className="input h-10"
+                                className="input h-10 w-full"
                                 value={selectedList}
                                 onChange={(event) => handleListSelect(event.target.value)}
                                 disabled={!availableLists.length}
@@ -1052,24 +1001,18 @@ export default function CampaignPlanningDrawer({ open, mode, item, context, onCl
                           </div>
                           <div className="grid gap-4 md:grid-cols-2">
                             <label className="grid gap-2 text-sm">
-                              <span className="muted">Category</span>
-                              <select
-                                className="input h-10"
-                                value={draft.categoryId ?? ''}
-                                onChange={(event) =>
-                                  setDraft((prev) => ({
-                                    ...prev,
-                                    categoryId: event.target.value ? Number(event.target.value) : null,
-                                  }))
-                                }
-                              >
-                                <option value="">-- Select --</option>
-                                {DOCTOR_SENDER_CATEGORIES.map((category) => (
-                                  <option key={category.id} value={category.id}>
-                                    {category.label}
-                                  </option>
-                                ))}
-                              </select>
+                              <span className="muted">Reply-to</span>
+                              <input type="email" className="input h-10" value={activeReplyTo} disabled readOnly />
+                            </label>
+                            <label className="grid gap-2 text-sm">
+                              <span className="muted">Unsubscribe URL</span>
+                              <input type="url" className="input h-10" value={draft.unsubscribeUrl ?? ''} disabled readOnly />
+                            </label>
+                          </div>
+                          <div className="grid gap-4 md:grid-cols-2">
+                            <label className="grid gap-2 text-sm">
+                              <span className="muted">Tracking domain</span>
+                              <input type="text" className="input h-10" value={draft.trackingDomain ?? ''} disabled readOnly />
                             </label>
                             <label className="grid gap-2 text-sm">
                               <span className="muted">Language</span>
@@ -1092,22 +1035,77 @@ export default function CampaignPlanningDrawer({ open, mode, item, context, onCl
                               </select>
                             </label>
                           </div>
-                          <div className="flex flex-wrap justify-end gap-2 pt-2 text-sm">
-                            <button type="button" className="btn-secondary" onClick={() => setActiveDeliveryStep('emailContent')}>
-                              Continue to email content
-                            </button>
-                          </div>
+                        <div className="mt-4 flex flex-wrap items-center justify-end gap-2 border-t border-[color:var(--color-border)] pt-3 text-sm">
+                          <button
+                            type="button"
+                            className="btn-primary inline-flex items-center gap-2"
+                            onClick={() => setActiveDeliveryStep('emailContent')}
+                          >
+                            Continue to Content
+                            <span className="inline-flex h-4 w-4 items-center justify-center rotate-90">
+                              <ChevronIcon />
+                            </span>
+                          </button>
                         </div>
-                      ) : null}
+                      </div>
+                    ) : null}
 
                       {activeDeliveryStep === 'emailContent' ? (
                         <div className="rounded-2xl border border-[color:var(--color-border)] bg-[color:var(--color-surface)] p-5 space-y-4">
                           <div className="flex flex-wrap items-center justify-between gap-2 text-xs text-[color:var(--color-text)]/60">
                             <span>Upload or paste the HTML template and define preview recipients.</span>
-                            <button type="button" className="btn-ghost text-xs" onClick={() => setPreviewOpen(true)} disabled={!previewData?.html}>
-                              View compiled HTML
+                            <button
+                              type="button"
+                              className="inline-flex h-9 w-9 items-center justify-center rounded-full border border-[color:var(--color-border)] bg-[color:var(--color-surface-2)] text-[color:var(--color-text)] transition hover:text-[color:var(--color-primary)] disabled:opacity-50"
+                              onClick={() => setPreviewOpen(true)}
+                              disabled={!previewData?.html}
+                              aria-label="View compiled HTML"
+                            >
+                              <PreviewIcon className="h-5 w-5" />
                             </button>
                           </div>
+                          <div className="grid gap-4 md:grid-cols-2">
+                            <label className="grid gap-2 text-sm">
+                              <span className="muted">Sender</span>
+                              <input
+                                type="text"
+                                className="input h-10"
+                                value={draft.fromName ?? ''}
+                                onChange={(event) => setDraft((prev) => ({ ...prev, fromName: event.target.value }))}
+                                placeholder="Brand or partner"
+                              />
+                            </label>
+                            <label className="grid gap-2 text-sm">
+                              <span className="muted">Subject line</span>
+                              <input
+                                type="text"
+                                className="input h-10"
+                                value={draft.subject ?? ''}
+                                onChange={(event) => setDraft((prev) => ({ ...prev, subject: event.target.value }))}
+                                placeholder="Add the BAT subject"
+                              />
+                            </label>
+                          </div>
+                          <label className="grid gap-2 text-sm">
+                            <span className="muted">Category</span>
+                            <select
+                              className="input h-10"
+                              value={draft.categoryId ?? ''}
+                              onChange={(event) =>
+                                setDraft((prev) => ({
+                                  ...prev,
+                                  categoryId: event.target.value ? Number(event.target.value) : null,
+                                }))
+                              }
+                            >
+                              <option value="">-- Select --</option>
+                              {DOCTOR_SENDER_CATEGORIES.map((category) => (
+                                <option key={category.id} value={category.id}>
+                                  {category.label}
+                                </option>
+                              ))}
+                            </select>
+                          </label>
                           <label className="grid gap-2 text-sm">
                             <span className="muted">HTML content</span>
                             <textarea
@@ -1147,15 +1145,53 @@ export default function CampaignPlanningDrawer({ open, mode, item, context, onCl
                             />
                             <span className="text-xs text-[color:var(--color-text)]/55">These contacts receive the BAT preview only.</span>
                           </label>
-                          <div className="flex flex-wrap justify-between gap-2 pt-2 text-sm">
-                            <button type="button" className="btn-ghost" onClick={() => setActiveDeliveryStep('doctorSender')}>
-                              Back to DoctorSender
+                        <div className="mt-4 flex flex-wrap items-center justify-between gap-3 border-t border-[color:var(--color-border)] pt-3 text-sm">
+                          <div className="flex items-center gap-2 text-xs text-[color:var(--color-text)]/60">
+                            {missingPreviewRequirements.length ? (
+                              <>
+                                <span className="inline-flex h-2 w-2 rounded-full bg-[color:var(--color-accent)]" aria-hidden />
+                                <span>
+                                  Complete before continuing:&nbsp;
+                                  <strong>{missingPreviewRequirements.join(', ')}</strong>
+                                </span>
+                              </>
+                            ) : (
+                              <>
+                                <span className="inline-flex h-2 w-2 rounded-full bg-emerald-500" aria-hidden />
+                                <span>All requirements met. Ready to preview.</span>
+                              </>
+                            )}
+                          </div>
+                          <div className="flex flex-wrap items-center gap-2">
+                            <button
+                              type="button"
+                              className="btn-ghost inline-flex items-center gap-2"
+                              onClick={() => setActiveDeliveryStep('doctorSender')}
+                            >
+                              <span className="inline-flex h-4 w-4 items-center justify-center -rotate-90">
+                                <ChevronIcon />
+                              </span>
+                              Back to DS Setup
                             </button>
-                            <button type="button" className="btn-secondary" onClick={() => setActiveDeliveryStep('previewSend')}>
+                            <button
+                              type="button"
+                              className="btn-primary inline-flex items-center gap-2 disabled:opacity-50"
+                              onClick={() => setActiveDeliveryStep('previewSend')}
+                              disabled={!isPreviewReady}
+                              title={
+                                isPreviewReady
+                                  ? undefined
+                                  : `Complete before continuing: ${missingPreviewRequirements.join(', ')}`
+                              }
+                            >
                               Continue to preview
+                              <span className="inline-flex h-4 w-4 items-center justify-center rotate-90">
+                                <ChevronIcon />
+                              </span>
                             </button>
                           </div>
                         </div>
+                      </div>
                       ) : null}
 
                       {activeDeliveryStep === 'previewSend' ? (
@@ -1235,7 +1271,7 @@ export default function CampaignPlanningDrawer({ open, mode, item, context, onCl
                 Cancel
               </button>
               <button type="submit" className="btn-primary disabled:opacity-50" disabled={saving}>
-                {saving ? 'Saving...' : mode === 'create' ? 'Schedule campaign' : 'Save changes'}
+                {saving ? 'Saving...' : mode === 'create' ? 'Create campaign' : 'Save changes'}
               </button>
             </div>
           </footer>
@@ -1318,6 +1354,21 @@ function ChevronIcon({ className }: { className?: string }) {
     </svg>
   );
 }
+
+function PreviewIcon({ className }: { className?: string }) {
+  return (
+    <svg
+      className={className}
+      viewBox="0 0 24 24"
+      xmlns="http://www.w3.org/2000/svg"
+      fill="currentColor"
+    >
+      <path d="M12 5C7.455 5 3.667 8.022 2 12c1.667 3.978 5.455 7 10 7s8.333-3.022 10-7c-1.667-3.978-5.455-7-10-7Zm0 11a4 4 0 1 1 0-8 4 4 0 0 1 0 8Zm0-6a2 2 0 1 0 .001 4.001A2 2 0 0 0 12 10Z" />
+    </svg>
+  );
+}
+
+
 
 
 
