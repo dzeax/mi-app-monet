@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import { format } from 'date-fns';
 
 import { useCatalogOverrides } from '@/context/CatalogOverridesContext';
@@ -12,6 +12,7 @@ import {
   type DoctorSenderDefaultsUpdate,
 } from '@/lib/doctorsender/defaults';
 import { showError, showSuccess } from '@/utils/toast';
+import DatabaseFlag from '@/components/campaign-planning/DatabaseFlag';
 
 type ApiDefaultsResponse = {
   database: string;
@@ -66,6 +67,24 @@ function toSelectValue(value: number | null | undefined): string {
   return value == null ? '' : String(value);
 }
 
+function mapDefaultsToForm(defaults: DoctorSenderDefaults | null): FormState {
+  const lists = defaults?.lists ?? (defaults?.listName ? [defaults.listName] : []);
+  const emails = defaults?.fromEmails ?? (defaults?.fromEmail ? [defaults.fromEmail] : []);
+  const primary = emails[0] ?? defaults?.fromEmail ?? '';
+  return {
+    accountUser: defaults?.accountUser ?? '',
+    accountToken: defaults?.accountToken ?? '',
+    fromEmailsRaw: formatList(emails),
+    replyTo: primary,
+    unsubscribeUrl: defaults?.unsubscribeUrl ?? '',
+    trackingDomain: defaults?.trackingDomain ?? (primary ? extractDomain(primary) : ''),
+    languageId: toSelectValue(defaults?.languageId),
+    listsRaw: formatList(lists),
+    headerHtml: defaults?.headerHtml ?? '',
+    footerHtml: defaults?.footerHtml ?? '',
+  };
+}
+
 export default function DatabaseRoutingView() {
   const { DATABASES } = useCatalogOverrides();
   const sortedDatabases = useMemo(
@@ -73,12 +92,16 @@ export default function DatabaseRoutingView() {
     [DATABASES]
   );
 
-  const [search, setSearch] = useState('');
+  const [selectorQuery, setSelectorQuery] = useState('');
+  const [selectorOpen, setSelectorOpen] = useState(false);
+  const selectorRef = useRef<HTMLDivElement | null>(null);
   const filteredDatabases = useMemo(() => {
-    const term = search.trim().toLowerCase();
+    const term = selectorQuery.trim().toLowerCase();
     if (!term) return sortedDatabases;
-    return sortedDatabases.filter((db) => db.name.toLowerCase().includes(term) || db.geo.toLowerCase().includes(term));
-  }, [search, sortedDatabases]);
+    return sortedDatabases.filter(
+      (db) => db.name.toLowerCase().includes(term) || db.geo.toLowerCase().includes(term) || db.dbType.toLowerCase().includes(term),
+    );
+  }, [selectorQuery, sortedDatabases]);
 
   const [selectedDatabase, setSelectedDatabase] = useState<string>(() => sortedDatabases[0]?.name ?? '');
   const [combinedDefaults, setCombinedDefaults] = useState<DoctorSenderDefaults | null>(null);
@@ -86,6 +109,17 @@ export default function DatabaseRoutingView() {
   const [updatedAt, setUpdatedAt] = useState<string | null>(null);
   const [loadingConfig, setLoadingConfig] = useState(false);
   const [saving, setSaving] = useState(false);
+
+  useEffect(() => {
+    if (!selectorOpen) return;
+    const handleClick = (event: MouseEvent) => {
+      if (!selectorRef.current?.contains(event.target as Node)) {
+        setSelectorOpen(false);
+      }
+    };
+    document.addEventListener('mousedown', handleClick);
+    return () => document.removeEventListener('mousedown', handleClick);
+  }, [selectorOpen]);
 
   // Load defaults when database changes
   useEffect(() => {
@@ -115,18 +149,7 @@ export default function DatabaseRoutingView() {
 
         setCombinedDefaults(merged);
         setUpdatedAt(data.updatedAt ?? null);
-        setFormState({
-          accountUser: merged.accountUser ?? '',
-          accountToken: merged.accountToken ?? '',
-          fromEmailsRaw: formatList(merged.fromEmails ?? []),
-          replyTo: merged.fromEmail ?? '',
-          unsubscribeUrl: merged.unsubscribeUrl ?? '',
-          trackingDomain: merged.trackingDomain ?? '',
-          languageId: toSelectValue(merged.languageId),
-          listsRaw: formatList(merged.lists ?? (merged.listName ? [merged.listName] : [])),
-          headerHtml: merged.headerHtml ?? '',
-          footerHtml: merged.footerHtml ?? '',
-        });
+        setFormState(mapDefaultsToForm(merged));
       } catch (error) {
         console.error(error);
         showError(error instanceof Error ? error.message : 'Unable to load defaults.');
@@ -146,7 +169,10 @@ export default function DatabaseRoutingView() {
     [selectedDatabase]
   );
 
-  const appliedDefaults = combinedDefaults ?? staticDefaults;
+  const activeDatabase = useMemo(
+    () => sortedDatabases.find((db) => db.name === selectedDatabase) ?? null,
+    [sortedDatabases, selectedDatabase],
+  );
 
   const handleChange = (key: keyof FormState, value: string) => {
     if (key === 'fromEmailsRaw') {
@@ -166,6 +192,11 @@ export default function DatabaseRoutingView() {
     }
     setFormState((prev) => ({ ...prev, [key]: value }));
   };
+
+  const baselineForm = useMemo(() => mapDefaultsToForm(combinedDefaults ?? staticDefaults), [combinedDefaults, staticDefaults]);
+  const isDirty = useMemo(() => {
+    return Object.keys(baselineForm).some((key) => baselineForm[key as keyof FormState] !== formState[key as keyof FormState]);
+  }, [baselineForm, formState]);
 
   const handleSave = async () => {
     if (!selectedDatabase) return;
@@ -213,24 +244,46 @@ export default function DatabaseRoutingView() {
       const merged = mergeDoctorSenderDefaults(staticDefaultsRefresh, overrides);
       setCombinedDefaults(merged);
       setUpdatedAt(new Date().toISOString());
-      setFormState({
-        accountUser: merged.accountUser ?? '',
-        accountToken: merged.accountToken ?? '',
-        fromEmailsRaw: formatList(merged.fromEmails ?? []),
-        replyTo: merged.fromEmail ?? '',
-        unsubscribeUrl: merged.unsubscribeUrl ?? '',
-        trackingDomain: merged.trackingDomain ?? '',
-        languageId: toSelectValue(merged.languageId),
-        listsRaw: formatList(merged.lists ?? (merged.listName ? [merged.listName] : [])),
-        headerHtml: merged.headerHtml ?? '',
-        footerHtml: merged.footerHtml ?? '',
-      });
+      setFormState(mapDefaultsToForm(merged));
     } catch (error) {
       showError(error instanceof Error ? error.message : 'Unable to save defaults.');
     } finally {
       setSaving(false);
     }
   };
+
+  useEffect(() => {
+    const handleShortcut = (event: KeyboardEvent) => {
+      if ((event.metaKey || event.ctrlKey) && event.key.toLowerCase() === 's') {
+        event.preventDefault();
+        if (!loadingConfig && !saving && isDirty) {
+          handleSave();
+        }
+      }
+    };
+    window.addEventListener('keydown', handleShortcut);
+    return () => window.removeEventListener('keydown', handleShortcut);
+  }, [handleSave, loadingConfig, saving, isDirty]);
+
+  const handleResetField = (key: keyof FormState) => {
+    const baseline = baselineForm[key] ?? '';
+    if (key === 'fromEmailsRaw') {
+      handleChange('fromEmailsRaw', baseline);
+      return;
+    }
+    setFormState((prev) => ({ ...prev, [key]: baseline }));
+  };
+
+  const renderFieldReset = (key: keyof FormState) =>
+    formState[key] !== baselineForm[key] ? (
+      <button
+        type="button"
+        className="text-[0.65rem] font-semibold text-[color:var(--color-primary)]"
+        onClick={() => handleResetField(key)}
+      >
+        Reset
+      </button>
+    ) : null;
 
   const handleReset = async () => {
     if (!selectedDatabase) return;
@@ -253,18 +306,7 @@ export default function DatabaseRoutingView() {
       const merged = resolveDoctorSenderDefaults(selectedDatabase);
       setCombinedDefaults(merged);
       setUpdatedAt(null);
-      setFormState({
-        accountUser: merged.accountUser ?? '',
-        accountToken: merged.accountToken ?? '',
-        fromEmailsRaw: formatList(merged.fromEmails ?? []),
-        replyTo: merged.fromEmail ?? '',
-        unsubscribeUrl: merged.unsubscribeUrl ?? '',
-        trackingDomain: merged.trackingDomain ?? '',
-        languageId: toSelectValue(merged.languageId),
-        listsRaw: formatList(merged.lists ?? (merged.listName ? [merged.listName] : [])),
-        headerHtml: merged.headerHtml ?? '',
-        footerHtml: merged.footerHtml ?? '',
-      });
+      setFormState(mapDefaultsToForm(merged));
     } catch (error) {
       showError(error instanceof Error ? error.message : 'Unable to reset defaults.');
     } finally {
@@ -274,77 +316,105 @@ export default function DatabaseRoutingView() {
 
   return (
     <div className="space-y-6" data-page="dbs-routing">
-      <header className="space-y-2">
-        <h1 className="text-2xl font-semibold text-[color:var(--color-text)]">Database Routing</h1>
-        <p className="text-sm text-[color:var(--color-text)]/70">
-          Configure default DoctorSender settings for each database used in Campaign Planning.
-        </p>
-      </header>
+      <div className="flex flex-wrap items-start justify-between gap-4">
+        <div className="space-y-1">
+          <h1 className="text-2xl font-semibold text-[color:var(--color-text)]">Database Routing</h1>
+          <p className="text-sm text-[color:var(--color-text)]/70">
+            Configure default DoctorSender settings for each database used in Campaign Planning.
+          </p>
+          <div className="flex items-center gap-3 text-xs text-[color:var(--color-text)]/60">
+            <span>{updatedAt ? `Last updated ${format(new Date(updatedAt), 'dd MMM yyyy HH:mm')}` : 'Using static defaults'}</span>
+            {isDirty ? (
+              <span className="inline-flex items-center gap-1 rounded-full bg-[color:var(--color-accent)]/10 px-2.5 py-0.5 font-semibold text-[color:var(--color-accent)]">
+                <span aria-hidden>•</span>
+                Unsaved changes
+              </span>
+            ) : null}
+          </div>
+        </div>
 
-      <div className="grid gap-6 lg:grid-cols-[260px_1fr]">
-        <aside className="rounded-xl border border-[color:var(--color-border)] bg-[color:var(--color-surface)] p-4">
-          <div className="space-y-3">
-            <div>
-              <label htmlFor="db-search" className="text-xs font-semibold uppercase tracking-[0.16em] text-[color:var(--color-text)]/55">
-                Databases
-              </label>
-              <input
-                id="db-search"
-                type="search"
-                className="input mt-1 h-9 text-sm"
-                placeholder="Search database..."
-                value={search}
-                onChange={(event) => setSearch(event.target.value)}
-              />
-            </div>
-
-            <div className="max-h-[420px] space-y-1 overflow-auto pr-1">
-              {filteredDatabases.map((database) => {
-                const active = database.name === selectedDatabase;
-                return (
+        <div className="relative w-full max-w-md" ref={selectorRef}>
+          <label className="text-[0.65rem] font-semibold uppercase tracking-[0.18em] text-[color:var(--color-text)]/55">
+            Database
+          </label>
+          <button
+            type="button"
+            onClick={() => setSelectorOpen((prev) => !prev)}
+            className={[
+              'mt-1 flex w-full items-center justify-between rounded-2xl border px-3 py-2 text-left transition',
+              'border-[color:var(--color-border)] bg-[color:var(--color-surface-2)]/60 hover:border-[color:var(--color-primary)] focus:outline-none focus:ring-2 focus:ring-[color:var(--color-primary)]/40',
+            ].join(' ')}
+          >
+            <span className="flex min-w-0 items-center gap-3">
+              {activeDatabase ? (
+                <DatabaseFlag name={activeDatabase.name} className="h-5 w-5 flex-shrink-0 rounded-full shadow-sm" />
+              ) : null}
+              <span className="min-w-0">
+                <span className="block truncate text-sm font-semibold text-[color:var(--color-text)]">
+                  {activeDatabase?.name ?? 'Select database'}
+                </span>
+                <span className="block truncate text-xs text-[color:var(--color-text)]/60">
+                  {activeDatabase ? `${activeDatabase.geo} / ${activeDatabase.dbType}` : 'Choose a database to edit defaults'}
+                </span>
+              </span>
+            </span>
+            <svg className={`h-4 w-4 flex-shrink-0 transition ${selectorOpen ? 'rotate-180' : ''}`} viewBox="0 0 20 20" fill="none">
+              <path d="M5 7l5 5 5-5" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round" strokeLinejoin="round" />
+            </svg>
+          </button>
+          {selectorOpen ? (
+            <div className="absolute right-0 z-30 mt-2 w-full max-w-md rounded-2xl border border-[color:var(--color-border)] bg-white shadow-2xl">
+              <div className="sticky top-0 border-b border-[color:var(--color-border)]/70 bg-white p-2">
+                <input
+                  type="search"
+                  value={selectorQuery}
+                  onChange={(event) => setSelectorQuery(event.target.value)}
+                  placeholder="Search database..."
+                  className="w-full rounded-xl border border-[color:var(--color-border)]/70 bg-[color:var(--color-surface-2)]/60 px-3 py-2 text-sm focus:border-[color:var(--color-primary)] focus:outline-none"
+                />
+              </div>
+              <div className="max-h-80 overflow-y-auto p-1">
+                {filteredDatabases.map((database) => (
                   <button
                     key={database.id}
                     type="button"
-                    onClick={() => setSelectedDatabase(database.name)}
+                    onClick={() => {
+                      setSelectedDatabase(database.name);
+                      setSelectorOpen(false);
+                      setSelectorQuery('');
+                    }}
                     className={[
-                      'w-full rounded-lg border px-3 py-2 text-left text-sm transition-colors',
-                      active
-                        ? 'border-[color:var(--color-primary)] bg-[color:var(--color-primary)]/10 text-[color:var(--color-text)]'
-                        : 'border-[color:var(--color-border)] bg-[color:var(--color-surface-2)]/40 text-[color:var(--color-text)]/75 hover:border-[color:var(--color-primary)]/60',
+                      'flex w-full items-center justify-between gap-3 rounded-xl px-3 py-2 text-left text-sm transition',
+                      database.name === selectedDatabase
+                        ? 'bg-[color:var(--color-primary)]/10 text-[color:var(--color-primary)]'
+                        : 'text-[color:var(--color-text)]/80 hover:bg-[color:var(--color-surface-2)]/70',
                     ].join(' ')}
                   >
-                    <div className="font-semibold text-[color:var(--color-text)]">{database.name}</div>
-                    <div className="text-xs text-[color:var(--color-text)]/60">
+                    <span className="flex items-center gap-2 truncate">
+                      <DatabaseFlag name={database.name} className="h-4 w-4 flex-shrink-0 rounded-full" />
+                      <span className="truncate">{database.name}</span>
+                    </span>
+                    <span className="text-xs text-[color:var(--color-text)]/60">
                       {database.geo} / {database.dbType}
-                    </div>
+                    </span>
                   </button>
-                );
-              })}
-              {filteredDatabases.length === 0 ? (
-                <div className="rounded-lg border border-dashed border-[color:var(--color-border)] px-3 py-4 text-center text-xs text-[color:var(--color-text)]/60">
-                  No databases match the search.
-                </div>
-              ) : null}
+                ))}
+                {filteredDatabases.length === 0 ? (
+                  <p className="px-4 py-6 text-center text-xs text-[color:var(--color-text)]/60">No databases match the search.</p>
+                ) : null}
+              </div>
             </div>
-          </div>
-        </aside>
-
-        <section className="space-y-4 rounded-xl border border-[color:var(--color-border)] bg-[color:var(--color-surface)] p-6">
-          <div className="flex flex-wrap items-center justify-between gap-3">
-            <div>
-              <h2 className="text-lg font-semibold text-[color:var(--color-text)]">{selectedDatabase}</h2>
-              <p className="text-xs text-[color:var(--color-text)]/60">
-                Country: {appliedDefaults.country || staticDefaults.country || 'Not configured'}
-              </p>
-            </div>
-            <div className="text-xs text-[color:var(--color-text)]/55">
-              {updatedAt ? `Updated ${format(new Date(updatedAt), 'dd MMM yyyy HH:mm')}` : 'Using static defaults'}
-            </div>
-          </div>
-
+          ) : null}
+        </div>
+      </div>
+      <section className="space-y-5 rounded-2xl border border-[color:var(--color-border)] bg-[color:var(--color-surface)] p-5 shadow-sm">
+        <SectionCard title="Credentials" description="Overrides for DoctorSender account authentication.">
           <div className="grid gap-4 md:grid-cols-2">
             <label className="grid gap-1 text-sm">
-              <span className="muted">DoctorSender user</span>
+              <span className="muted flex items-center justify-between">
+                <span>DoctorSender user</span>
+                {renderFieldReset('accountUser')}
+              </span>
               <input
                 type="text"
                 className="input"
@@ -356,7 +426,10 @@ export default function DatabaseRoutingView() {
             </label>
 
             <label className="grid gap-1 text-sm">
-              <span className="muted">DoctorSender token</span>
+              <span className="muted flex items-center justify-between">
+                <span>DoctorSender token</span>
+                {renderFieldReset('accountToken')}
+              </span>
               <input
                 type="password"
                 className="input font-mono text-sm"
@@ -366,9 +439,19 @@ export default function DatabaseRoutingView() {
                 placeholder="Leave blank to use default credentials"
               />
             </label>
+          </div>
+        </SectionCard>
 
+        <SectionCard
+          title="Sender identity & compliance"
+          description="Addresses, reply-to handling, unsubscribe links, and tracking domains."
+        >
+          <div className="grid gap-4 md:grid-cols-2">
             <label className="grid gap-1 text-sm md:col-span-2">
-              <span className="muted">From emails</span>
+              <span className="muted flex items-center justify-between">
+                <span>From emails</span>
+                {renderFieldReset('fromEmailsRaw')}
+              </span>
               <textarea
                 rows={3}
                 className="input font-mono text-xs"
@@ -388,7 +471,10 @@ export default function DatabaseRoutingView() {
             </label>
 
             <label className="grid gap-1 text-sm">
-              <span className="muted">Unsubscribe URL</span>
+              <span className="muted flex items-center justify-between">
+                <span>Unsubscribe URL</span>
+                {renderFieldReset('unsubscribeUrl')}
+              </span>
               <input
                 type="url"
                 className="input"
@@ -400,16 +486,18 @@ export default function DatabaseRoutingView() {
 
             <label className="grid gap-1 text-sm">
               <span className="muted">Tracking domain (auto)</span>
-              <input
-                type="text"
-                className="input bg-[color:var(--color-surface-2)]/60"
-                value={formState.trackingDomain}
-                readOnly
-              />
+              <input type="text" className="input bg-[color:var(--color-surface-2)]/60" value={formState.trackingDomain} readOnly />
             </label>
+          </div>
+        </SectionCard>
 
+        <SectionCard title="Lists & localization" description="Default lists and template language suggestions.">
+          <div className="grid gap-4 md:grid-cols-2">
             <label className="grid gap-1 text-sm md:col-span-2">
-              <span className="muted">Lists (DoctorSender)</span>
+              <span className="muted flex items-center justify-between">
+                <span>Lists (DoctorSender)</span>
+                {renderFieldReset('listsRaw')}
+              </span>
               <textarea
                 rows={2}
                 className="input font-mono text-xs"
@@ -423,38 +511,11 @@ export default function DatabaseRoutingView() {
               </span>
             </label>
 
-            <label className="grid gap-1 text-sm md:col-span-2">
-              <span className="muted">Header (HTML)</span>
-              <textarea
-                rows={6}
-                className="input font-mono text-xs"
-                value={formState.headerHtml}
-                onChange={(event) => handleChange('headerHtml', event.target.value)}
-                disabled={loadingConfig}
-                placeholder="<header>...</header>"
-              />
-              <span className="text-xs text-[color:var(--color-text)]/55">
-                Available tokens: {'{{UNSUBSCRIBE_URL}}'}, {'{{TRACKING_DOMAIN}}'}, {'{{LIST_NAME}}'}, {'{{LANG_ISO3}}'}. Avoid scripts; content is injected just after {'<body>'}.
-              </span>
-            </label>
-
-            <label className="grid gap-1 text-sm md:col-span-2">
-              <span className="muted">Footer (HTML)</span>
-              <textarea
-                rows={6}
-                className="input font-mono text-xs"
-                value={formState.footerHtml}
-                onChange={(event) => handleChange('footerHtml', event.target.value)}
-                disabled={loadingConfig}
-                placeholder="<footer>...</footer>"
-              />
-              <span className="text-xs text-[color:var(--color-text)]/55">
-                DoctorSender requiere un enlace de baja. Incluya {'__LinkUnsubs__'} o utilice {'{{UNSUBSCRIBE_URL}}'} para insertar el valor configurado aquí.
-              </span>
-            </label>
-
             <label className="grid gap-1 text-sm">
-              <span className="muted">Language</span>
+              <span className="muted flex items-center justify-between">
+                <span>Language</span>
+                {renderFieldReset('languageId')}
+              </span>
               <select
                 className="input"
                 value={formState.languageId}
@@ -470,36 +531,96 @@ export default function DatabaseRoutingView() {
               </select>
             </label>
           </div>
+        </SectionCard>
 
-          <div className="flex flex-wrap items-center justify-between gap-3 border-t border-dashed border-[color:var(--color-border)] pt-4">
-            <div className="text-xs text-[color:var(--color-text)]/60">
-              Static defaults:{' '}
-              <span className="font-semibold text-[color:var(--color-text)]">
-                From: {staticDefaults.fromEmail || '-'} | Lists: {staticDefaults.lists?.join(', ') || staticDefaults.listName || '-'}
+        <SectionCard title="HTML snippets" description="Optional header and footer injected into each routed message.">
+          <div className="grid gap-4">
+            <label className="grid gap-1 text-sm">
+              <span className="muted flex items-center justify-between">
+                <span>Header (HTML)</span>
+                {renderFieldReset('headerHtml')}
               </span>
-            </div>
+              <textarea
+                rows={6}
+                className="input font-mono text-xs"
+                value={formState.headerHtml}
+                onChange={(event) => handleChange('headerHtml', event.target.value)}
+                disabled={loadingConfig}
+                placeholder="<header>...</header>"
+              />
+              <span className="text-xs text-[color:var(--color-text)]/55">
+                Available tokens: {'{{UNSUBSCRIBE_URL}}'}, {'{{TRACKING_DOMAIN}}'}, {'{{LIST_NAME}}'}, {'{{LANG_ISO3}}'}. Avoid scripts; content is injected just after {'<body>'}.
+              </span>
+            </label>
 
-            <div className="flex items-center gap-2">
-              <button
-                type="button"
-                className="btn-ghost px-3 py-1.5"
-                onClick={handleReset}
-                disabled={loadingConfig || saving}
-              >
-                Reset
-              </button>
-              <button
-                type="button"
-                className="btn-primary px-4 py-2"
-                onClick={handleSave}
-                disabled={loadingConfig || saving}
-              >
-                {saving ? 'Saving...' : 'Save defaults'}
-              </button>
-            </div>
+            <label className="grid gap-1 text-sm">
+              <span className="muted flex items-center justify-between">
+                <span>Footer (HTML)</span>
+                {renderFieldReset('footerHtml')}
+              </span>
+              <textarea
+                rows={6}
+                className="input font-mono text-xs"
+                value={formState.footerHtml}
+                onChange={(event) => handleChange('footerHtml', event.target.value)}
+                disabled={loadingConfig}
+                placeholder="<footer>...</footer>"
+              />
+              <span className="text-xs text-[color:var(--color-text)]/55">
+                DoctorSender requiere un enlace de baja. Incluya {'__LinkUnsubs__'} o utilice {'{{UNSUBSCRIBE_URL}}'} para insertar el valor configurado aqui.
+              </span>
+            </label>
           </div>
-        </section>
-      </div>
+        </SectionCard>
+
+        <div className="sticky bottom-4 z-20 mt-6 flex flex-wrap items-center justify-between gap-3 rounded-2xl border border-[color:var(--color-border)] bg-white/95 px-4 py-3 shadow-xl backdrop-blur">
+          <div className="text-xs text-[color:var(--color-text)]/70">
+            Static defaults:{' '}
+            <span className="font-semibold text-[color:var(--color-text)]">
+              From: {staticDefaults.fromEmail || '-'} | Lists: {staticDefaults.lists?.join(', ') || staticDefaults.listName || '-'}
+            </span>
+          </div>
+          <div className="flex items-center gap-2">
+            <button
+              type="button"
+              className="btn-ghost px-3 py-1.5"
+              onClick={handleReset}
+              disabled={loadingConfig || saving || !isDirty}
+            >
+              Reset changes
+            </button>
+            <button
+              type="button"
+              className="btn-primary px-4 py-2"
+              onClick={handleSave}
+              disabled={loadingConfig || saving || !isDirty}
+            >
+              {saving ? 'Saving...' : 'Save changes'}
+            </button>
+          </div>
+        </div>
+      </section>
     </div>
   );
 }
+
+type SectionCardProps = {
+  title: string;
+  description?: string;
+  children: ReactNode;
+};
+
+function SectionCard({ title, description, children }: SectionCardProps) {
+  return (
+    <div className="space-y-3 rounded-2xl border border-[color:var(--color-border)]/70 bg-white/70 p-4">
+      <div className="space-y-1">
+        <h3 className="text-sm font-semibold text-[color:var(--color-text)]">{title}</h3>
+        {description ? <p className="text-xs text-[color:var(--color-text)]/60">{description}</p> : null}
+      </div>
+      {children}
+    </div>
+  );
+}
+
+
+

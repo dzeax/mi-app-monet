@@ -43,6 +43,7 @@ type Props = {
   onDuplicate: (item: PlanningItem) => void;
   onDelete: (item: PlanningItem) => void;
   onMove: (id: string, date: string, duplicate: boolean) => void;
+  onCreateAtDate: (date: Date) => void;
 };
 
 const priceFormatter = new Intl.NumberFormat('es-ES', {
@@ -78,6 +79,7 @@ export default function CampaignPlanningCalendar({
   onDuplicate,
   onDelete,
   onMove,
+  onCreateAtDate,
 }: Props) {
   const [draggingId, setDraggingId] = useState<string | null>(null);
   const [dragOverDate, setDragOverDate] = useState<string | null>(null);
@@ -126,6 +128,7 @@ export default function CampaignPlanningCalendar({
         dragOverDate={dragOverDate}
         onDragOverDate={markDragOverDate}
         onDragLeaveDate={clearDragOverDate}
+        onCreateAtDate={onCreateAtDate}
       />
     );
   }
@@ -151,6 +154,7 @@ export default function CampaignPlanningCalendar({
         onDragEnd={resetDragState}
         onDragOverDate={markDragOverDate}
         onDragLeaveDate={clearDragOverDate}
+        onCreateAtDate={onCreateAtDate}
       />
     );
   }
@@ -176,6 +180,7 @@ export default function CampaignPlanningCalendar({
       onDragEnd={resetDragState}
       onDragOverDate={markDragOverDate}
       onDragLeaveDate={clearDragOverDate}
+      onCreateAtDate={onCreateAtDate}
     />
   );
 }
@@ -194,6 +199,7 @@ function MonthView({
   onDragEnd,
   onDragOverDate,
   onDragLeaveDate,
+  onCreateAtDate,
 }: {
   chunks: Date[][];
   items: PlanningItem[];
@@ -208,6 +214,7 @@ function MonthView({
   onDragEnd: () => void;
   onDragOverDate: (date: Date) => void;
   onDragLeaveDate: (date?: Date) => void;
+  onCreateAtDate: (date: Date) => void;
 }) {
   return (
     <div className="card p-0 border border-[color:var(--color-border)] overflow-hidden">
@@ -278,9 +285,13 @@ function MonthView({
 
                   <div className="mt-3 space-y-2">
                     {sortedDayItems.length === 0 ? (
-                      <div className="rounded-lg border border-dashed border-[color:var(--color-border)]/70 px-3 py-4 text-center text-xs text-[color:var(--color-text)]/50">
-                        No campaigns
-                      </div>
+                      <button
+                        type="button"
+                        className="w-full rounded-lg border border-dashed border-[color:var(--color-border)]/60 px-3 py-6 text-xs font-semibold uppercase tracking-[0.18em] text-[color:var(--color-text)]/55 transition hover:border-[color:var(--color-primary)]/50 hover:text-[color:var(--color-primary)]"
+                        onClick={() => onCreateAtDate(date)}
+                      >
+                        Add campaign
+                      </button>
                     ) : (
                       sortedDayItems.map((item) => (
                         <CampaignChip
@@ -319,6 +330,7 @@ function DayView({
   dragOverDate,
   onDragOverDate,
   onDragLeaveDate,
+  onCreateAtDate,
 }: {
   items: PlanningItem[];
   date: Date;
@@ -329,6 +341,7 @@ function DayView({
   dragOverDate: string | null;
   onDragOverDate: (date: Date) => void;
   onDragLeaveDate: (date?: Date) => void;
+  onCreateAtDate: (date: Date) => void;
 }) {
   const iso = format(date, 'yyyy-MM-dd');
   const isDragTarget = dragOverDate === iso;
@@ -383,7 +396,16 @@ function DayView({
         </div>
         <div className="divide-y divide-[color:var(--color-border)]">
           {sortedItems.length === 0 ? (
-            <div className="p-6 text-sm text-[color:var(--color-text)]/55">No campaigns scheduled yet.</div>
+            <div className="flex flex-col items-center gap-3 p-6 text-sm text-[color:var(--color-text)]/55">
+              <span>Sin campañas programadas para este día.</span>
+              <button
+                type="button"
+                className="btn-primary px-4 py-2 text-xs"
+                onClick={() => onCreateAtDate(date)}
+              >
+                Crear campaña
+              </button>
+            </div>
           ) : (
             sortedItems.map((item) => (
               <div

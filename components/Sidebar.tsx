@@ -200,28 +200,6 @@ export default function Sidebar({
                 <p className="muted text-xs">Production</p>
               </div>
             )}
-          </div>
-          {!collapsed ? (
-            <div className="space-y-3">
-              {BtnCampaignPlanning}
-              {BtnDatabaseRouting}
-            </div>
-          ) : (
-            <>
-              {BtnCampaignPlanning}
-              {BtnDatabaseRouting}
-            </>
-          )}
-        </div>
-
-        <div className={collapsed ? "sidebar-card p-2" : "sidebar-card p-4"}>
-          <div className={["flex items-center mb-2", collapsed ? "justify-center" : "justify-between"].join(" ")}>
-            {!collapsed && (
-              <div>
-                <h2 className="text-base font-semibold">Actions</h2>
-                <p className="muted text-xs">Quick tools</p>
-              </div>
-            )}
             {!hideCollapseToggle && (
               <div className="flex items-center gap-2">
                 <button
@@ -255,6 +233,28 @@ export default function Sidebar({
                     />
                   </button>
                 )}
+              </div>
+            )}
+          </div>
+          {!collapsed ? (
+            <div className="space-y-3">
+              {BtnCampaignPlanning}
+              {BtnDatabaseRouting}
+            </div>
+          ) : (
+            <>
+              {BtnCampaignPlanning}
+              {BtnDatabaseRouting}
+            </>
+          )}
+        </div>
+
+        <div className={collapsed ? "sidebar-card p-2" : "sidebar-card p-4"}>
+          <div className={["flex items-center mb-2", collapsed ? "justify-center" : "justify-between"].join(" ")}>
+            {!collapsed && (
+              <div>
+                <h2 className="text-base font-semibold">Actions</h2>
+                <p className="muted text-xs">Quick tools</p>
               </div>
             )}
           </div>

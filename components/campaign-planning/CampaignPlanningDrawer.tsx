@@ -1,5 +1,6 @@
 ﻿'use client';
 
+import Image from 'next/image';
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { format } from 'date-fns';
 import Combobox from '@/components/ui/Combobox';
@@ -26,7 +27,9 @@ import {
 import { composeEmailHtml } from '@/lib/doctorsender/composeHtml';
 import { languageIdToIso3 } from '@/lib/doctorsender/defaults';
 import MiniModal from '@/components/ui/MiniModal';
+import EmailChipsInput from '@/components/ui/EmailChipsInput';
 import { showError, showSuccess } from '@/utils/toast';
+import type { SubjectLineSuggestion } from '@/lib/ai/subjectLineGenerator';
 
 type Props = {
   open: boolean;
@@ -35,6 +38,7 @@ type Props = {
   context: CampaignPlanningContextValue;
   onClose: () => void;
   defaultDate?: string;
+  seedDraft?: Partial<PlanningDraft>;
 };
 
 const defaultDraft: PlanningDraft = {
@@ -82,6 +86,41 @@ type DeliveryStepMeta = {
   status: 'ready' | 'pending' | 'attention';
 };
 
+type SubjectGeneratorParams = {
+  tone: string;
+  maxLength: number;
+  count: number;
+  allowEmojis: boolean;
+  usePersonalization: boolean;
+  model: 'gpt-5-mini' | 'gpt-4-turbo';
+  mode: 'subject' | 'pair';
+};
+
+const SUBJECT_GENERATOR_DEFAULT_PARAMS: SubjectGeneratorParams = {
+  tone: 'Neutral',
+  maxLength: 45,
+  count: 3,
+  allowEmojis: true,
+  usePersonalization: false,
+  model: 'gpt-4-turbo',
+  mode: 'pair',
+};
+
+const SUBJECT_TONE_OPTIONS = ['Neutral', 'Promotional', 'Friendly', 'Bold', 'Urgent', 'Playful'] as const;
+const SUBJECT_LENGTH_OPTIONS = [35, 45, 55, 65] as const;
+const SUBJECT_COUNT_OPTIONS = [3, 6, 8] as const;
+const SUBJECT_MODEL_OPTIONS = [
+  { value: 'gpt-5-mini', label: 'GPT-5 mini (most creative)' },
+  { value: 'gpt-4-turbo', label: 'GPT-4 Turbo (faster)' },
+] as const;
+const SUBJECT_LOADING_MESSAGES = [
+  'Analyzing the HTML preview for visual cues...',
+  'Extracting the strongest campaign highlights...',
+  'Brainstorming high-impact hooks...',
+  'Crafting subject lines tailored to your audience...',
+  'Almost there—polishing the final ideas...',
+] as const;
+
 function trackingDomainFromEmail(email: string | null | undefined, fallback?: string | null): string {
   if (!email) return fallback ?? '';
   const at = email.lastIndexOf('@');
@@ -90,7 +129,15 @@ function trackingDomainFromEmail(email: string | null | undefined, fallback?: st
   return domain || (fallback ?? '');
 }
 
-export default function CampaignPlanningDrawer({ open, mode, item, context, onClose, defaultDate }: Props) {
+export default function CampaignPlanningDrawer({
+  open,
+  mode,
+  item,
+  context,
+  onClose,
+  defaultDate,
+  seedDraft,
+}: Props) {
   const [draft, setDraft] = useState<PlanningDraft>(defaultDraft);
   const [fieldErrors, setFieldErrors] = useState<FieldErrors>({});
   const [openAddCampaign, setOpenAddCampaign] = useState(false);
@@ -104,6 +151,15 @@ export default function CampaignPlanningDrawer({ open, mode, item, context, onCl
   const [defaultsLoading, setDefaultsLoading] = useState(false);
   const [htmlFilename, setHtmlFilename] = useState<string | null>(null);
   const [priceInput, setPriceInput] = useState<string>('');
+  const [subjectGeneratorOpen, setSubjectGeneratorOpen] = useState(false);
+  const [subjectGeneratorParams, setSubjectGeneratorParams] = useState<SubjectGeneratorParams>(() => ({
+    ...SUBJECT_GENERATOR_DEFAULT_PARAMS,
+  }));
+  const [subjectSuggestions, setSubjectSuggestions] = useState<SubjectLineSuggestion[]>([]);
+  const [subjectGeneratorLoading, setSubjectGeneratorLoading] = useState(false);
+  const [subjectGeneratorError, setSubjectGeneratorError] = useState<string | null>(null);
+  const [subjectGeneratorMeta, setSubjectGeneratorMeta] = useState<{ fromCache: boolean } | null>(null);
+  const [loadingMessageIndex, setLoadingMessageIndex] = useState(0);
   const autoOpenDelivery = useMemo(
     () =>
       mode === 'edit' &&
@@ -120,6 +176,45 @@ export default function CampaignPlanningDrawer({ open, mode, item, context, onCl
   const [deliveryOpen, setDeliveryOpen] = useState<boolean>(autoOpenDelivery);
   const [activeDeliveryStep, setActiveDeliveryStep] = useState<DeliveryStepId>('doctorSender');
   const deliveryStorageKey = useMemo(() => `planning-delivery-${item?.id ?? 'new'}`, [item?.id]);
+  const subjectLanguageLabel = useMemo(
+    () => DOCTOR_SENDER_LANGUAGES.find((entry) => entry.id === draft.languageId)?.label ?? 'English',
+    [draft.languageId]
+  );
+  const subjectCategoryLabel = useMemo(
+    () => DOCTOR_SENDER_CATEGORIES.find((entry) => entry.id === draft.categoryId)?.label ?? undefined,
+    [draft.categoryId]
+  );
+  const subjectPriceLabel = useMemo(
+    () => (draft.price > 0 ? priceFormatter.format(draft.price) : undefined),
+    [draft.price]
+  );
+  const hasHtmlContent = useMemo(() => Boolean(draft.html && draft.html.trim().length > 0), [draft.html]);
+  const generatorMode = subjectGeneratorParams.mode;
+  const isPairMode = generatorMode === 'pair';
+  const loadingMessage = useMemo(
+    () => SUBJECT_LOADING_MESSAGES[loadingMessageIndex] ?? SUBJECT_LOADING_MESSAGES[0],
+    [loadingMessageIndex]
+  );
+
+  useEffect(() => {
+    if (!subjectGeneratorLoading) {
+      setLoadingMessageIndex(0);
+      return;
+    }
+
+    setLoadingMessageIndex(0);
+    const interval = window.setInterval(() => {
+      setLoadingMessageIndex((prev) => (prev + 1) % SUBJECT_LOADING_MESSAGES.length);
+    }, 2400);
+
+    return () => window.clearInterval(interval);
+  }, [subjectGeneratorLoading]);
+
+  useEffect(() => {
+    setSubjectSuggestions([]);
+    setSubjectGeneratorMeta(null);
+    setSubjectGeneratorError(null);
+  }, [generatorMode]);
 
   useEffect(() => {
     if (typeof window === 'undefined') return;
@@ -276,11 +371,13 @@ export default function CampaignPlanningDrawer({ open, mode, item, context, onCl
       });
       setPriceInput(String(item.price ?? 0));
     } else {
-      setDraft({
+      const base: PlanningDraft = {
         ...defaultDraft,
         date: defaultDate ?? format(new Date(), 'yyyy-MM-dd'),
-      });
-      setPriceInput(String(defaultDraft.price));
+      };
+      const merged = seedDraft ? { ...base, ...seedDraft } : base;
+      setDraft(merged);
+      setPriceInput(String(merged.price ?? defaultDraft.price));
     }
     setFieldErrors({});
     setSaving(false);
@@ -293,7 +390,7 @@ export default function CampaignPlanningDrawer({ open, mode, item, context, onCl
     if (htmlFileInputRef.current) {
       htmlFileInputRef.current.value = '';
     }
-  }, [open, item, defaultDate, mode, autoOpenDelivery]);
+  }, [open, item, defaultDate, mode, autoOpenDelivery, seedDraft]);
 
   useEffect(() => {
     if (!open || item) return;
@@ -512,12 +609,8 @@ export default function CampaignPlanningDrawer({ open, mode, item, context, onCl
     },
   ];
 
-  const handlePreviewRecipientsChange = (value: string) => {
-    const entries = value
-      .split(/[,;\s]+/)
-      .map((entry) => entry.trim())
-      .filter(Boolean);
-    setDraft((prev) => ({ ...prev, previewRecipients: entries }));
+  const handlePreviewRecipientsChange = (emails: string[]) => {
+    setDraft((prev) => ({ ...prev, previewRecipients: emails }));
   };
 
   const handleHtmlFileUpload: React.ChangeEventHandler<HTMLInputElement> = async (event) => {
@@ -533,8 +626,92 @@ export default function CampaignPlanningDrawer({ open, mode, item, context, onCl
     } catch {
       showError('Unable to read HTML file.');
       setHtmlFilename(null);
+      } finally {
+        event.target.value = '';
+      }
+    };
+
+  const handleSubjectGeneratorClose = () => {
+    setSubjectGeneratorOpen(false);
+    setSubjectGeneratorError(null);
+    setSubjectGeneratorLoading(false);
+    setSubjectGeneratorMeta(null);
+  };
+
+  const handleSubjectApply = (text: string, sender?: string) => {
+    setDraft((prev) => ({
+      ...prev,
+      subject: text,
+      ...(sender ? { fromName: sender } : {}),
+    }));
+    showSuccess(sender ? 'Sender and subject inserted' : 'Subject line inserted');
+    handleSubjectGeneratorClose();
+  };
+
+  const handleSubjectCopy = async (text: string) => {
+    try {
+      if (navigator?.clipboard?.writeText) {
+        await navigator.clipboard.writeText(text);
+        showSuccess('Copied to clipboard');
+      } else {
+        throw new Error('Clipboard API unavailable');
+      }
+    } catch {
+      showError('Unable to copy subject line. Copy it manually.');
+    }
+  };
+
+  const handleSubjectGenerate = async () => {
+    if (!hasHtmlContent) {
+    setSubjectGeneratorError('Add the HTML content before generating subject lines.');
+    return;
+  }
+
+  setSubjectGeneratorLoading(true);
+  setSubjectSuggestions([]);
+  setSubjectGeneratorMeta(null);
+  setSubjectGeneratorError(null);
+  try {
+    const response = await fetch('/api/ai/subject-lines', {
+      method: 'POST',
+      headers: {
+          'Content-Type': 'application/json',
+        },
+          body: JSON.stringify({
+            html: draft.html,
+            metadata: {
+              campaignName: draft.name || undefined,
+              partner: draft.partner || undefined,
+            geo: draft.geo || undefined,
+            language: subjectLanguageLabel,
+            priceLabel: subjectPriceLabel,
+            category: subjectCategoryLabel,
+            audience: draft.database ? `Database: ${draft.database}` : undefined,
+          },
+            tone: subjectGeneratorParams.tone,
+            maxLength: subjectGeneratorParams.maxLength,
+          count: subjectGeneratorParams.count,
+          allowEmojis: subjectGeneratorParams.allowEmojis,
+          usePersonalization: subjectGeneratorParams.usePersonalization,
+          model: subjectGeneratorParams.model,
+          mode: subjectGeneratorParams.mode,
+        }),
+      });
+
+      const data = await response.json();
+      if (!response.ok) {
+        throw new Error(typeof data?.error === 'string' ? data.error : 'Unable to generate subject lines.');
+      }
+
+      setSubjectSuggestions(Array.isArray(data?.suggestions) ? data.suggestions : []);
+      setSubjectGeneratorMeta({ fromCache: Boolean(data?.fromCache) });
+    } catch (error) {
+      const message = error instanceof Error ? error.message : 'Unable to generate subject lines.';
+      setSubjectGeneratorError(message);
+      setSubjectSuggestions([]);
+      setSubjectGeneratorMeta(null);
     } finally {
-      event.target.value = '';
+      setSubjectGeneratorLoading(false);
     }
   };
 
@@ -1076,7 +1253,23 @@ export default function CampaignPlanningDrawer({ open, mode, item, context, onCl
                               />
                             </label>
                             <label className="grid gap-2 text-sm">
-                              <span className="muted">Subject line</span>
+                              <div className="flex items-center justify-between gap-3">
+                                <span className="muted">Subject line</span>
+                                <button
+                                  type="button"
+                                  className="btn-primary flex items-center justify-center px-4 py-1.5 text-xs font-semibold uppercase tracking-[0.2em]"
+                                  onClick={() => {
+                                    setSubjectGeneratorError(null);
+                                    setSubjectGeneratorOpen(true);
+                                  }}
+                                  disabled={subjectGeneratorLoading || !hasHtmlContent}
+                                  title={
+                                    hasHtmlContent ? 'Generate sender + subject ideas with AI' : 'Add the HTML content before generating'
+                                  }
+                                >
+                                  {subjectGeneratorLoading ? 'AI GEN...' : 'AI GEN'}
+                                </button>
+                              </div>
                               <input
                                 type="text"
                                 className="input h-10"
@@ -1137,11 +1330,10 @@ export default function CampaignPlanningDrawer({ open, mode, item, context, onCl
                           </div>
                           <label className="grid gap-2 text-sm">
                             <span className="muted">Preview recipients</span>
-                            <textarea
-                              className="input min-h-[120px] resize-y"
-                              value={draft.previewRecipients.join(', ')}
-                              onChange={(event) => handlePreviewRecipientsChange(event.target.value)}
-                              placeholder="Add emails separated by commas or spaces."
+                            <EmailChipsInput
+                              value={draft.previewRecipients}
+                              onChange={handlePreviewRecipientsChange}
+                              placeholder="Type an email and press Enter"
                             />
                             <span className="text-xs text-[color:var(--color-text)]/55">These contacts receive the BAT preview only.</span>
                           </label>
@@ -1290,6 +1482,318 @@ export default function CampaignPlanningDrawer({ open, mode, item, context, onCl
           onClose={() => setOpenAddPartner(false)}
           onCreated={(partner) => handlePartnerChange(partner)}
         />
+      ) : null}
+
+      {subjectGeneratorOpen ? (
+        <MiniModal
+          title="Generate subject lines"
+          onClose={handleSubjectGeneratorClose}
+          widthClass="max-w-3xl"
+          bodyClassName="max-h-[75vh] overflow-y-auto"
+        >
+          <div className="grid gap-6">
+            <div className="flex flex-wrap items-start justify-between gap-3">
+              <div className="space-y-1">
+                <p className="text-sm font-semibold text-[color:var(--color-text)]">AI subject line assistant</p>
+                <p className="text-xs text-[color:var(--color-text)]/70">
+                  Tailor the prompts and generate ready-to-use subject lines from the current HTML preview.
+                </p>
+              </div>
+              <div className="flex items-center gap-2">
+                <button
+                  type="button"
+                  className="btn-ghost text-xs uppercase tracking-[0.14em]"
+                  onClick={() => setSubjectGeneratorParams({ ...SUBJECT_GENERATOR_DEFAULT_PARAMS })}
+                  disabled={subjectGeneratorLoading}
+                >
+                  Reset
+                </button>
+                <button
+                  type="button"
+                  className="btn-primary px-4 py-2 text-sm font-semibold"
+                  onClick={handleSubjectGenerate}
+                  disabled={subjectGeneratorLoading}
+                >
+                  {subjectGeneratorLoading ? 'Generating...' : 'Generate'}
+                </button>
+              </div>
+            </div>
+
+            <section className="grid gap-4">
+              <span className="text-xs font-semibold uppercase tracking-[0.18em] text-[color:var(--color-text)]/50">
+                Configuration
+              </span>
+                <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
+                  <label className="grid min-w-0 gap-1 text-xs">
+                    <span className="muted">Tone</span>
+                    <select
+                      className="input h-9 w-full"
+                      value={subjectGeneratorParams.tone}
+                      onChange={(event) =>
+                        setSubjectGeneratorParams((prev) => ({ ...prev, tone: event.target.value }))
+                      }
+                  >
+                    {SUBJECT_TONE_OPTIONS.map((option) => (
+                      <option key={option} value={option}>
+                        {option}
+                      </option>
+                    ))}
+                  </select>
+                </label>
+                <label className="grid min-w-0 gap-1 text-xs">
+                  <span className="muted">Max length</span>
+                  <select
+                    className="input h-9 w-full"
+                    value={subjectGeneratorParams.maxLength}
+                    onChange={(event) =>
+                      setSubjectGeneratorParams((prev) => ({
+                        ...prev,
+                        maxLength: Number(event.target.value),
+                      }))
+                    }
+                  >
+                    {SUBJECT_LENGTH_OPTIONS.map((option) => (
+                      <option key={option} value={option}>
+                        {option} characters
+                      </option>
+                    ))}
+                  </select>
+                </label>
+                <label className="grid min-w-0 gap-1 text-xs">
+                  <span className="muted">Number of ideas</span>
+                  <select
+                    className="input h-9 w-full"
+                    value={subjectGeneratorParams.count}
+                    onChange={(event) =>
+                      setSubjectGeneratorParams((prev) => ({
+                        ...prev,
+                        count: Number(event.target.value),
+                      }))
+                    }
+                  >
+                    {SUBJECT_COUNT_OPTIONS.map((option) => (
+                      <option key={option} value={option}>
+                        {option}
+                      </option>
+                    ))}
+                  </select>
+                </label>
+                <label className="grid min-w-0 gap-1 text-xs">
+                  <span className="muted">Model</span>
+                  <select
+                    className="input h-9 w-full"
+                    value={subjectGeneratorParams.model}
+                    onChange={(event) =>
+                      setSubjectGeneratorParams((prev) => ({
+                        ...prev,
+                        model: event.target.value as SubjectGeneratorParams['model'],
+                      }))
+                    }
+                  >
+                    {SUBJECT_MODEL_OPTIONS.map((option) => (
+                      <option key={option.value} value={option.value}>
+                        {option.label}
+                      </option>
+                    ))}
+                  </select>
+                </label>
+              </div>
+              <div className="flex flex-wrap items-center gap-2">
+                <button
+                  type="button"
+                  onClick={() =>
+                    setSubjectGeneratorParams((prev) => ({
+                      ...prev,
+                      allowEmojis: !prev.allowEmojis,
+                    }))
+                  }
+                  className={[
+                    'rounded-full border px-3 py-1 text-xs font-semibold uppercase tracking-[0.14em] transition',
+                    subjectGeneratorParams.allowEmojis
+                      ? 'border-transparent bg-[color:var(--color-primary)] text-white shadow-sm'
+                      : 'border-[color:var(--color-border)] text-[color:var(--color-text)]/70 hover:border-[color:var(--color-primary)]/40 hover:text-[color:var(--color-primary)]',
+                  ].join(' ')}
+                >
+                  {subjectGeneratorParams.allowEmojis ? 'Emojis on' : 'Emojis off'}
+                </button>
+                <button
+                  type="button"
+                  onClick={() =>
+                    setSubjectGeneratorParams((prev) => ({
+                      ...prev,
+                      usePersonalization: !prev.usePersonalization,
+                    }))
+                  }
+                  className={[
+                    'rounded-full border px-3 py-1 text-xs font-semibold uppercase tracking-[0.14em] transition',
+                    subjectGeneratorParams.usePersonalization
+                      ? 'border-transparent bg-[color:var(--color-primary)] text-white shadow-sm'
+                      : 'border-[color:var(--color-border)] text-[color:var(--color-text)]/70 hover:border-[color:var(--color-primary)]/40 hover:text-[color:var(--color-primary)]',
+                  ].join(' ')}
+                >
+                  {subjectGeneratorParams.usePersonalization ? 'Personalization on' : 'Personalization off'}
+                </button>
+              </div>
+              <div className="grid gap-1 text-xs">
+                <span className="muted">Output</span>
+                <div className="flex flex-wrap gap-2">
+                  <button
+                    type="button"
+                    onClick={() =>
+                      setSubjectGeneratorParams((prev) => ({
+                        ...prev,
+                        mode: 'subject',
+                      }))
+                    }
+                    className={[
+                      'rounded-full border px-3 py-1 text-xs font-semibold uppercase tracking-[0.14em] transition',
+                      generatorMode === 'subject'
+                        ? 'border-transparent bg-[color:var(--color-primary)] text-white shadow-sm'
+                        : 'border-[color:var(--color-border)] text-[color:var(--color-text)]/70 hover:border-[color:var(--color-primary)]/40 hover:text-[color:var(--color-primary)]',
+                    ].join(' ')}
+                  >
+                    Subjects only
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() =>
+                      setSubjectGeneratorParams((prev) => ({
+                        ...prev,
+                        mode: 'pair',
+                      }))
+                    }
+                    className={[
+                      'rounded-full border px-3 py-1 text-xs font-semibold uppercase tracking-[0.14em] transition',
+                      generatorMode === 'pair'
+                        ? 'border-transparent bg-[color:var(--color-primary)] text-white shadow-sm'
+                        : 'border-[color:var(--color-border)] text-[color:var(--color-text)]/70 hover:border-[color:var(--color-primary)]/40 hover:text-[color:var(--color-primary)]',
+                    ].join(' ')}
+                  >
+                    Sender + subject
+                  </button>
+                </div>
+                {generatorMode === 'pair' ? (
+                  <p className="text-[0.65rem] text-[color:var(--color-text)]/60">
+                    Sender stays 1-2 words, no brand names or emojis.
+                  </p>
+                ) : null}
+              </div>
+            </section>
+
+            {subjectGeneratorError ? (
+              <div className="rounded-xl border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-600">
+                {subjectGeneratorError}
+              </div>
+            ) : null}
+
+            <section className="grid gap-3">
+              <div className="flex flex-wrap items-center justify-between gap-2">
+                <span className="text-xs font-semibold uppercase tracking-[0.18em] text-[color:var(--color-text)]/50">
+                  Suggestions
+                </span>
+                {subjectGeneratorMeta?.fromCache ? (
+                  <span className="text-xs text-[color:var(--color-text)]/50">Served from cache</span>
+                ) : null}
+              </div>
+
+              {subjectGeneratorLoading ? (
+                <div className="rounded-xl border border-dashed border-[color:var(--color-border)] bg-white px-6 py-10 text-center">
+                  <div className="flex flex-col items-center gap-4 text-[color:var(--color-text)]">
+                    <Image
+                      src="/animations/brain.gif"
+                      alt="Generating subject lines"
+                      width={64}
+                      height={64}
+                      className="h-16 w-16"
+                      unoptimized
+                      priority={false}
+                    />
+                    <p className="text-sm font-semibold">{loadingMessage}</p>
+                    <p className="text-xs text-[color:var(--color-text)]/60">Hang tight, great ideas are on the way.</p>
+                  </div>
+                </div>
+              ) : subjectSuggestions.length ? (
+                <ul className="grid gap-3">
+                  {subjectSuggestions.map((suggestion, index) => (
+                    <li
+                      key={`${suggestion.text}-${index}`}
+                      className="rounded-xl border border-[color:var(--color-border)] bg-white p-4 shadow-sm"
+                    >
+                      <div className="flex flex-wrap items-start justify-between gap-3">
+                        <div className="flex flex-col gap-2">
+                          {isPairMode && suggestion.sender ? (
+                            <span className="inline-flex items-center rounded-full bg-[color:var(--color-primary)]/10 px-3 py-0.5 text-xs font-semibold uppercase tracking-[0.14em] text-[color:var(--color-primary)]">
+                              {suggestion.sender}
+                            </span>
+                          ) : null}
+                          <p className="text-sm font-semibold text-[color:var(--color-text)]">{suggestion.text}</p>
+                        </div>
+                        <div className="flex items-center gap-2">
+                          {isPairMode && suggestion.sender ? (
+                            <>
+                              <button
+                                type="button"
+                                className="btn-primary px-3 py-1 text-xs font-semibold uppercase tracking-[0.14em]"
+                                onClick={() => handleSubjectApply(suggestion.text, suggestion.sender)}
+                              >
+                                Insert both
+                              </button>
+                              <button
+                                type="button"
+                                className="btn-ghost px-3 py-1 text-xs font-semibold uppercase tracking-[0.14em]"
+                                onClick={() => handleSubjectApply(suggestion.text)}
+                              >
+                                Insert subject
+                              </button>
+                            </>
+                          ) : (
+                            <button
+                              type="button"
+                              className="btn-primary px-3 py-1 text-xs font-semibold uppercase tracking-[0.14em]"
+                              onClick={() => handleSubjectApply(suggestion.text)}
+                            >
+                              Insert
+                            </button>
+                          )}
+                          <button
+                            type="button"
+                            className="btn-ghost px-3 py-1 text-xs font-semibold uppercase tracking-[0.14em]"
+                            onClick={() => handleSubjectCopy(suggestion.text)}
+                          >
+                            Copy
+                          </button>
+                        </div>
+                      </div>
+                      <div className="mt-3 flex flex-wrap items-center gap-3 text-xs text-[color:var(--color-text)]/65">
+                        <span>{suggestion.length} chars</span>
+                        {suggestion.emoji ? (
+                          <span className="rounded-full bg-[color:var(--color-primary)]/15 px-2 py-0.5 text-[color:var(--color-primary)]">
+                            Emoji
+                          </span>
+                        ) : null}
+                        {suggestion.personalization ? (
+                          <span className="rounded-full bg-[color:var(--color-accent)]/15 px-2 py-0.5 text-[color:var(--color-accent)]">
+                            Personalized
+                          </span>
+                        ) : null}
+                        {isPairMode && suggestion.sender ? (
+                          <span className="text-[color:var(--color-text)]/60">Sender aligned</span>
+                        ) : null}
+                        {suggestion.rationale ? (
+                          <span className="line-clamp-2 text-[color:var(--color-text)]/60">{suggestion.rationale}</span>
+                        ) : null}
+                      </div>
+                    </li>
+                  ))}
+                </ul>
+              ) : (
+                <div className="rounded-xl border border-dashed border-[color:var(--color-border)] bg-white px-4 py-8 text-center text-sm text-[color:var(--color-text)]/70">
+                  Configure the prompt and select <strong>Generate</strong> to receive suggestions.
+                </div>
+              )}
+            </section>
+          </div>
+        </MiniModal>
       ) : null}
 
       {previewOpen ? (

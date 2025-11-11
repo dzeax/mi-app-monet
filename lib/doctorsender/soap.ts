@@ -1,6 +1,7 @@
 'use server';
 
 import { escapeXml, decodeXmlEntities } from '@/lib/doctorsender/utils';
+import { writeDoctorSenderDebugFile } from '@/lib/doctorsender/debug';
 
 type SoapPrimitive = string | number | boolean | null | undefined;
 type SoapValue = SoapPrimitive | SoapPrimitive[] | Record<string, SoapPrimitive>;
@@ -179,6 +180,8 @@ export async function soapCall(
   }
   const url = process.env.DOCTORSENDER_SOAP_URL ?? 'https://soapwebservice.doctorsender.com/soapserver.php';
   const body = buildEnvelope(method, data, { user, token });
+  const debugToken = `${method}-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+  await writeDoctorSenderDebugFile(`soap-${debugToken}-request.xml`, body);
 
   const response = await fetch(url, {
     method: 'POST',
@@ -189,6 +192,7 @@ export async function soapCall(
   });
 
   const responseText = await response.text();
+  await writeDoctorSenderDebugFile(`soap-${debugToken}-response.xml`, responseText);
 
   if (!response.ok) {
     throw new Error(`DoctorSender error: ${response.status} ${response.statusText}`);

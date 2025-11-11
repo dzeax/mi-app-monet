@@ -5,6 +5,7 @@ import { languageIdToIso3 } from '@/lib/doctorsender/defaults';
 import { loadDoctorSenderDefaults } from '@/lib/doctorsender/server';
 import { resolveDoctorSenderAccount } from '@/lib/doctorsender/accounts';
 import { composeEmailHtml } from '@/lib/doctorsender/composeHtml';
+import { writeDoctorSenderDebugFile } from '@/lib/doctorsender/debug';
 import type { PlanningItem } from '@/components/campaign-planning/types';
 
 type SendPreviewOverrides = {
@@ -281,6 +282,11 @@ export async function sendDoctorSenderPreview({
     htmlPreview: finalHtml.slice(0, 320),
   });
 
+  await Promise.all([
+    writeDoctorSenderDebugFile(`campaign-${campaign.id}-html.html`, finalHtml),
+    writeDoctorSenderDebugFile(`campaign-${campaign.id}-plain.txt`, normalizedPlainText),
+  ]);
+
   const basePayload = [
     campaign.subject,
     campaign.fromName || campaign.partner,
@@ -295,8 +301,8 @@ export async function sendDoctorSenderPreview({
     '', // utmCampaign
     '', // utmTerm
     '', // utmContent
-    true, // footerDs
-    true, // mirrorDs
+    false, // footerDs
+    false, // mirrorDs
     templateId ?? 0, // idTemplate
     '', // agency
     false, // isSMTP
@@ -358,7 +364,8 @@ export async function sendDoctorSenderPreview({
     }
   }
 
-  const sendResult = await soapCall('dsCampaignSendEmailsTest', [currentCampaignId, previewRecipients], account);
+  const previewContacts = previewRecipients.map((email) => ({ email }));
+  const sendResult = await soapCall('dsCampaignSendEmailsTest', [currentCampaignId, previewContacts], account);
   if (sendResult === false) {
     throw new Error('DoctorSender rejected preview send (dsCampaignSendEmailsTest returned false).');
   }

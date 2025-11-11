@@ -88,6 +88,13 @@ export default function MiniModal({
     WebkitBackdropFilter: 'blur(6px)',
   };
 
+  const headerChromeClass = solid
+    ? 'modal-chrome modal-header'
+    : 'bg-[color:var(--color-surface)]/95 backdrop-blur-sm border-b border-[--color-border]';
+  const footerChromeClass = solid
+    ? 'modal-chrome modal-footer'
+    : 'bg-[color:var(--color-surface)]/95 backdrop-blur-sm border-t border-[--color-border]';
+
   const modal = (
     <div
       className="fixed inset-0 z-[500] flex items-center justify-center p-4"
@@ -112,10 +119,8 @@ export default function MiniModal({
         {/* Header */}
         <div
           className={[
-            'sticky top-0 z-10 border-b border-[--color-border] px-5 py-3 flex items-center justify-between',
-            solid
-              ? '!bg-[color:var(--color-surface)] !backdrop-blur-0'
-              : 'bg-[color:var(--color-surface)]/95 backdrop-blur-sm',
+            'sticky top-0 z-10 px-5 py-3 flex items-center justify-between gap-3',
+            headerChromeClass,
             headerClassName,
           ].join(' ')}
         >
@@ -146,10 +151,8 @@ export default function MiniModal({
         {/* Footer */}
         <div
           className={[
-            'sticky bottom-0 z-10 border-t border-[--color-border] px-5 py-3 flex items-center justify-end gap-2',
-            solid
-              ? '!bg-[color:var(--color-surface)] !backdrop-blur-0'
-              : 'bg-[color:var(--color-surface)]/95 backdrop-blur-sm',
+            'sticky bottom-0 z-10 px-5 py-3 flex items-center justify-end gap-2',
+            footerChromeClass,
             footerClassName,
           ].join(' ')}
         >
