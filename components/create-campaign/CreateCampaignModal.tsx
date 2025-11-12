@@ -915,20 +915,22 @@ export default function CreateCampaignModal({
                     <FieldWithAddon
                       onAdd={canQuickAdd ? () => setOpenAddDatabase(true) : undefined} // ðŸ†•
                       addAriaLabel="Add database"
+                      className="w-full"
                     >
-                      <select
-                        {...register('database')}
-                        className="input h-10"
-                        aria-invalid={showErr('database') || undefined}
-                        aria-describedby={showErr('database') ? errId('database') : undefined}
-                      >
-                        <option value="">-- Select --</option>
-                        {DATABASES.map((d) => (
-                          <option key={d.id} value={d.name}>
-                            {d.name}
-                          </option>
-                        ))}
-                      </select>
+                      <div className="w-full min-w-0">
+                        <Combobox
+                          ariaLabel="Database"
+                          className="w-full"
+                          placeholder="Select database"
+                          options={DATABASES.map((d) => ({ id: d.id, value: d.name }))}
+                          value={database}
+                          onChange={(v) =>
+                            setValue('database', v, { shouldValidate: true, shouldDirty: true })
+                          }
+                          invalid={showErr('database')}
+                          ariaDescribedby={showErr('database') ? errId('database') : undefined}
+                        />
+                      </div>
                     </FieldWithAddon>
                     <Err
                       id={errId('database')}

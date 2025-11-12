@@ -16,6 +16,9 @@ export const runtime = 'nodejs';
 
 export async function PATCH(request: Request) {
   try {
+    const cookieStore = await cookies();
+    const supabase = createRouteHandlerClient({ cookies: () => cookieStore });
+
     const body = (await request.json()) as UpdateCampaignRequest;
     const id = body.id?.trim();
     const data = body.data;
@@ -24,7 +27,6 @@ export async function PATCH(request: Request) {
       return NextResponse.json({ error: 'Missing campaign id or payload.' }, { status: 400 });
     }
 
-    const supabase = createRouteHandlerClient({ cookies });
     const {
       data: { session },
       error: sessionError,

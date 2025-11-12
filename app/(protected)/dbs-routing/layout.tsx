@@ -8,10 +8,10 @@ export default function DbsRoutingLayout({ children }: { children: React.ReactNo
   const [mobileOpen, setMobileOpen] = useState(false);
 
   return (
-    <main className="mx-auto w-full max-w-none px-3 md:px-4 lg:px-6 py-6">
+    <main className="mx-auto w-full max-w-none px-2 md:px-3 lg:px-4 py-6">
       <div
         className={[
-          'grid grid-cols-1 gap-5 md:gap-6 xl:gap-7 items-start content-start',
+          'grid grid-cols-1 gap-4 md:gap-4 xl:gap-5 items-start content-start',
           collapsed ? 'md:grid-cols-[72px_1fr]' : 'md:grid-cols-[220px_1fr]',
         ].join(' ')}
       >
@@ -21,7 +21,7 @@ export default function DbsRoutingLayout({ children }: { children: React.ReactNo
         >
           <div className="hidden md:block">
             <Sidebar collapsed={collapsed} onToggleCollapse={() => setCollapsed((value) => !value)} />
-          </div>
+         </div>
 
           <div className="mt-2 md:hidden">
             <button

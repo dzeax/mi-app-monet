@@ -86,95 +86,99 @@ export default function LoginClient() {
       {/* Right / Form side */}
       <div className="relative flex items-center justify-center px-6 py-16 md:px-12 md:py-24">
         <div className="w-full max-w-md flex flex-col">
-          {/* Mobile brand header */}
-          <div className="mb-10 flex items-center md:hidden">
-            <Image
-              src="/dvlogo2.svg"
-              width={192}
-              height={57}
-              alt="Dataventure"
-              className="h-14 w-auto drop-shadow-[0_6px_12px_rgba(0,0,0,0.24)]"
-            />
-          </div>
-
-          <h1 className="text-2xl font-semibold tracking-tight text-neutral-900 dark:text-neutral-50">
-            Sign in
-          </h1>
-          <p className="mt-1 text-sm text-neutral-600 dark:text-neutral-400">
-            Welcome back! Please enter your credentials.
-          </p>
-
-          <form onSubmit={onSubmit} className="mt-12 space-y-4">
-            <label className="block">
-              <span className="text-sm font-medium text-neutral-800 dark:text-neutral-200">
-                Email
-              </span>
-              <input
-                type="email"
-                required
-                autoComplete="email"
-                value={email}
-                onChange={(e) => setEmail(e.target.value)}
-                className="mt-1 w-full rounded-xl border border-neutral-300/80 dark:border-neutral-700 bg-white dark:bg-neutral-900 px-3 py-2 text-neutral-900 dark:text-neutral-100 outline-none focus:ring-2 ring-indigo-500"
-                placeholder="you@dataventure.com"
+          <div className="rounded-[32px] border border-white/60 dark:border-neutral-800 bg-white/85 dark:bg-neutral-950/70 shadow-[0_35px_70px_rgba(15,23,42,0.15)] dark:shadow-[0_45px_90px_rgba(0,0,0,0.45)] backdrop-blur-2xl px-6 py-8 sm:px-8 sm:py-10 space-y-8">
+            {/* Mobile brand header */}
+            <div className="flex items-center md:hidden">
+              <Image
+                src="/dvlogo2.svg"
+                width={192}
+                height={57}
+                alt="Dataventure"
+                className="h-14 w-auto drop-shadow-[0_6px_12px_rgba(0,0,0,0.24)]"
               />
-            </label>
-
-            <label className="block">
-              <span className="text-sm font-medium text-neutral-800 dark:text-neutral-200">
-                Password
-              </span>
-              <div className="mt-1 relative">
-                <input
-                  type={showPwd ? 'text' : 'password'}
-                  required
-                  autoComplete="current-password"
-                  value={password}
-                  onChange={(e) => setPassword(e.target.value)}
-                  className="w-full rounded-xl border border-neutral-300/80 dark:border-neutral-700 bg-white dark:bg-neutral-900 px-3 py-2 pr-11 text-neutral-900 dark:text-neutral-100 outline-none focus:ring-2 ring-indigo-500"
-                  placeholder="********"
-                />
-                <button
-                  type="button"
-                  onClick={() => setShowPwd((s) => !s)}
-                  className="absolute right-2 top-1/2 -translate-y-1/2 text-xs px-2 py-1 rounded-md bg-neutral-100 dark:bg-neutral-800 text-neutral-700 dark:text-neutral-300"
-                  aria-label={showPwd ? 'Hide password' : 'Show password'}
-                >
-                  {showPwd ? 'Hide' : 'Show'}
-                </button>
-              </div>
-            </label>
-
-            {err && (
-              <div className="rounded-lg border border-red-300/70 bg-red-50 text-red-700 px-3 py-2 text-sm">
-                {err}
-              </div>
-            )}
-
-            <button
-              type="submit"
-              disabled={loading}
-              className="w-full rounded-xl bg-neutral-900 text-white py-2.5 font-medium hover:bg-neutral-800 disabled:opacity-60 disabled:cursor-not-allowed"
-            >
-              {loading ? (
-                <span className="flex items-center justify-center gap-2">
-                  <Image
-                    src="/animations/login-spinner.gif"
-                    alt="Signing in"
-                    width={24}
-                    height={24}
-                  />
-                  Signing in...
-                </span>
-              ) : (
-                'Sign in'
-              )}
-            </button>
-
-            <div className="flex items-center justify-start text-sm text-neutral-500">
-              Forgot password? Contact an admin to reset your credentials.
             </div>
-          </form>
+
+            <div>
+              <h1 className="text-2xl font-semibold tracking-tight text-neutral-900 dark:text-neutral-50">
+                Sign in
+              </h1>
+              <p className="mt-1 text-sm text-neutral-600 dark:text-neutral-400">
+                Welcome back! Please enter your credentials.
+              </p>
+            </div>
+
+            <form onSubmit={onSubmit} className="space-y-5">
+              <label className="block">
+                <span className="text-sm font-medium text-neutral-800 dark:text-neutral-200">
+                  Email
+                </span>
+                <input
+                  type="email"
+                  required
+                  autoComplete="email"
+                  value={email}
+                  onChange={(e) => setEmail(e.target.value)}
+                  className="mt-1 w-full rounded-xl border border-neutral-200/80 dark:border-neutral-700 bg-white/95 dark:bg-neutral-900 px-3 py-2 text-neutral-900 dark:text-neutral-100 outline-none focus:ring-2 ring-indigo-500"
+                  placeholder="you@dataventure.com"
+                />
+              </label>
+
+              <label className="block">
+                <span className="text-sm font-medium text-neutral-800 dark:text-neutral-200">
+                  Password
+                </span>
+                <div className="mt-1 relative">
+                  <input
+                    type={showPwd ? 'text' : 'password'}
+                    required
+                    autoComplete="current-password"
+                    value={password}
+                    onChange={(e) => setPassword(e.target.value)}
+                    className="w-full rounded-xl border border-neutral-200/80 dark:border-neutral-700 bg-white/95 dark:bg-neutral-900 px-3 py-2 pr-11 text-neutral-900 dark:text-neutral-100 outline-none focus:ring-2 ring-indigo-500"
+                    placeholder="********"
+                  />
+                  <button
+                    type="button"
+                    onClick={() => setShowPwd((s) => !s)}
+                    className="absolute right-2 top-1/2 -translate-y-1/2 text-xs px-2 py-1 rounded-md bg-neutral-100 dark:bg-neutral-800 text-neutral-700 dark:text-neutral-300 shadow-sm"
+                    aria-label={showPwd ? 'Hide password' : 'Show password'}
+                  >
+                    {showPwd ? 'Hide' : 'Show'}
+                  </button>
+                </div>
+              </label>
+
+              {err && (
+                <div className="rounded-lg border border-red-300/70 bg-red-50 text-red-700 px-3 py-2 text-sm">
+                  {err}
+                </div>
+              )}
+
+              <button
+                type="submit"
+                disabled={loading}
+                className="w-full rounded-xl bg-neutral-900 text-white py-2.5 font-medium hover:bg-neutral-800 disabled:opacity-60 disabled:cursor-not-allowed"
+              >
+                {loading ? (
+                  <span className="flex items-center justify-center gap-2">
+                    <Image
+                      src="/animations/login-spinner.gif"
+                      alt="Signing in"
+                      width={24}
+                      height={24}
+                    />
+                    Signing in...
+                  </span>
+                ) : (
+                  'Sign in'
+                )}
+              </button>
+
+              <div className="text-sm text-neutral-500">
+                Forgot password? Contact an admin to reset your credentials.
+              </div>
+            </form>
+          </div>
         </div>
 
         <span className="absolute bottom-6 right-6 flex items-center gap-1 text-xs text-neutral-500">

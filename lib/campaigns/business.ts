@@ -1,13 +1,35 @@
 import { autoFromCampaign, autoFromDatabase, autoInvoiceOffice, calcDerived, DEFAULT_ROUTING_RATE } from '@/lib/campaign-calcs';
 import type { CampaignRow } from '@/types/campaign';
+import type { CampaignRef, DatabaseRef, InvoiceOffice } from '@/data/reference';
 
 export type MaybeDate = string | null | undefined;
 
 export type ResolveRateFn = (date: MaybeDate) => number;
 
+type CatalogBridge = {
+  campaigns?: CampaignRef[];
+  databases?: DatabaseRef[];
+  resolveInvoiceOffice?: (geo?: string, partner?: string) => InvoiceOffice;
+};
+
 export type BusinessRulesContext = {
   resolveRate: ResolveRateFn;
   fallbackRate?: number;
+  catalogs?: CatalogBridge;
+};
+
+const normalize = (value?: string) => (value ?? '').trim().toLowerCase();
+
+const pickCampaignFromBridge = (name: string, catalogs?: CatalogBridge) => {
+  if (!catalogs?.campaigns?.length) return undefined;
+  const needle = normalize(name);
+  return catalogs.campaigns.find((c) => normalize(c.name) === needle);
+};
+
+const pickDatabaseFromBridge = (name: string, catalogs?: CatalogBridge) => {
+  if (!catalogs?.databases?.length) return undefined;
+  const needle = normalize(name);
+  return catalogs.databases.find((d) => normalize(d.name) === needle);
 };
 
 export function applyBusinessRules(
@@ -16,11 +38,24 @@ export function applyBusinessRules(
 ): CampaignRow {
   const { resolveRate, fallbackRate = DEFAULT_ROUTING_RATE } = ctx;
 
-  const { advertiser } = autoFromCampaign(row.campaign);
+  const catalogCampaign = pickCampaignFromBridge(row.campaign, ctx.catalogs);
+  const advertiser =
+    catalogCampaign?.advertiser ||
+    autoFromCampaign(row.campaign).advertiser ||
+    row.advertiser ||
+    '';
+
+  const catalogDb = pickDatabaseFromBridge(row.database, ctx.catalogs);
   const dbAuto = autoFromDatabase(row.database);
-  const geo = dbAuto.geo || row.geo || '';
-  const databaseType = (dbAuto.dbType as CampaignRow['databaseType']) || row.databaseType;
-  const invoiceOffice = autoInvoiceOffice(geo, row.partner);
+  const geo = catalogDb?.geo || dbAuto.geo || row.geo || '';
+  const databaseType =
+    (catalogDb?.dbType as CampaignRow['databaseType']) ||
+    (dbAuto.dbType as CampaignRow['databaseType']) ||
+    row.databaseType;
+
+  const resolveInvoice =
+    ctx.catalogs?.resolveInvoiceOffice || autoInvoiceOffice;
+  const invoiceOffice = resolveInvoice(geo, row.partner);
   const effectiveRate =
     row.routingRateOverride != null && Number.isFinite(row.routingRateOverride)
       ? Number(row.routingRateOverride)

@@ -78,29 +78,37 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   useEffect(() => {
     let mounted = true;
 
-    const applySession = async (session: Awaited<ReturnType<typeof supabase.auth.getSession>>['data']['session']) => {
+    const applyAuthenticatedUser = async () => {
       if (!mounted) return;
-      const authUser = session?.user ?? null;
-      if (authUser) {
-        const profile = await fetchProfile(supabase, authUser.id).catch(() => FALLBACK_PROFILE);
+      try {
+        const { data, error } = await supabase.auth.getUser();
         if (!mounted) return;
-        setUser({
-          id: authUser.id,
-          email: authUser.email ?? null,
-          role: profile.role,
-          displayName: profile.displayName,
-          avatarUrl: profile.avatarUrl,
-        });
-        setRole(profile.role);
-      } else {
+        const authUser = error ? null : data?.user ?? null;
+        if (authUser) {
+          const profile = await fetchProfile(supabase, authUser.id).catch(() => FALLBACK_PROFILE);
+          if (!mounted) return;
+          setUser({
+            id: authUser.id,
+            email: authUser.email ?? null,
+            role: profile.role,
+            displayName: profile.displayName,
+            avatarUrl: profile.avatarUrl,
+          });
+          setRole(profile.role);
+        } else {
+          setUser(null);
+          setRole(null);
+        }
+      } catch (error) {
+        if (!mounted) return;
+        console.warn('Failed to resolve authenticated user', error);
         setUser(null);
         setRole(null);
       }
     };
 
     (async () => {
-      const { data: sessionData } = await supabase.auth.getSession();
-      await applySession(sessionData.session);
+      await applyAuthenticatedUser();
       setLoading(false);
     })();
 
@@ -116,13 +124,12 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         console.warn('Failed to sync auth session', error);
       }
 
-      await applySession(session ?? null);
+      await applyAuthenticatedUser();
       setLoading(false);
     });
 
     const ensureSession = async () => {
-      const { data } = await supabase.auth.getSession();
-      await applySession(data.session);
+      await applyAuthenticatedUser();
       setLoading(false);
     };
 

@@ -24,6 +24,7 @@ import {
   type CampaignDbRow,
 } from '@/lib/campaigns/db';
 import { DEFAULT_ROUTING_RATE } from '@/lib/campaign-calcs';
+import { useCatalogOverrides } from '@/context/CatalogOverridesContext';
 
 type CampaignWithIdx = CampaignRow & { _idx: number };
 
@@ -89,6 +90,7 @@ export function CampaignDataProvider({ children }: { children: React.ReactNode }
   const { user, loading: authLoading } = useAuth();
   const { resolveRate, settings } = useRoutingSettings();
   const fallbackRate = settings.defaultRate ?? DEFAULT_ROUTING_RATE;
+  const catalogs = useCatalogOverrides();
 
   const [rows, setRows] = useState<CampaignWithIdx[]>([]);
   const [loading, setLoading] = useState(true);
@@ -101,8 +103,16 @@ export function CampaignDataProvider({ children }: { children: React.ReactNode }
 
   const computeRow = useCallback(
     (row: CampaignRow): CampaignRow =>
-      applyBusinessRules(row, { resolveRate, fallbackRate }),
-    [fallbackRate, resolveRate]
+      applyBusinessRules(row, {
+        resolveRate,
+        fallbackRate,
+        catalogs: {
+          campaigns: catalogs?.CAMPAIGNS,
+          databases: catalogs?.DATABASES,
+          resolveInvoiceOffice: catalogs?.resolveInvoiceOfficeMerged,
+        },
+      }),
+    [fallbackRate, resolveRate, catalogs?.CAMPAIGNS, catalogs?.DATABASES, catalogs?.resolveInvoiceOfficeMerged]
   );
 
   const stampRow = useCallback(

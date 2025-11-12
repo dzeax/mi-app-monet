@@ -15,10 +15,17 @@ export default function QuickAddCampaignModal({
   onClose: () => void;
   onCreated: (campaignName: string) => void;
 }) {
-  const { CAMPAIGNS, addCampaignRef, loading, error } = useCatalogOverrides();
+  const {
+    CAMPAIGNS,
+    addCampaignRef,
+    loading,
+    error: catalogError,
+    saveOverridesNow,
+  } = useCatalogOverrides();
   const [name, setName] = useState('');
   const [advertiser, setAdvertiser] = useState('');
-  const [err, setErr] = useState<string>('');
+  const [formError, setFormError] = useState<{ message: string; field?: 'name' | 'advertiser' } | null>(null);
+  const [saving, setSaving] = useState(false);
 
   const nameRef = useRef<HTMLInputElement | null>(null);
 
@@ -27,19 +34,32 @@ export default function QuickAddCampaignModal({
     return () => clearTimeout(t);
   }, []);
 
-  const submit = () => {
+  const submit = async () => {
     const n = trim(name);
-    const a = trim(advertiser) || 'White Label';
-    if (!n) { setErr('Name is required'); return; }
-    if (loading) { setErr('Still loading shared catalogs'); return; }
-    if (error) { setErr(error); return; }
+    const a = trim(advertiser);
+    if (!n) { setFormError({ message: 'Name is required', field: 'name' }); return; }
+    if (!a) { setFormError({ message: 'Advertiser is required', field: 'advertiser' }); return; }
+    if (loading) { setFormError({ message: 'Still loading shared catalogs' }); return; }
+    if (catalogError) { setFormError({ message: catalogError }); return; }
 
     const exists = CAMPAIGNS.some(c => norm(c.name) === norm(n));
-    if (exists) { setErr('Campaign already exists'); return; }
+    if (exists) { setFormError({ message: 'Campaign already exists', field: 'name' }); return; }
 
-    addCampaignRef({ name: n, advertiser: a });
-    onCreated(n);
-    onClose();
+    try {
+      setSaving(true);
+      addCampaignRef({ name: n, advertiser: a });
+      await saveOverridesNow();
+      onCreated(n);
+      onClose();
+    } catch (submissionError) {
+      const message =
+        submissionError instanceof Error
+          ? submissionError.message || 'Unable to sync shared catalogs'
+          : 'Unable to sync shared catalogs';
+      setFormError({ message });
+    } finally {
+      setSaving(false);
+    }
   };
 
   const onKeyDown: React.KeyboardEventHandler<HTMLDivElement> = (e) => {
@@ -49,8 +69,10 @@ export default function QuickAddCampaignModal({
     }
   };
 
-  const hasErr = Boolean(err);
+  const hasErr = Boolean(formError);
   const errId = 'quick-add-campaign-error';
+  const nameHasErr = formError?.field === 'name';
+  const advertiserHasErr = formError?.field === 'advertiser';
 
   return (
     <MiniModal
@@ -62,9 +84,9 @@ export default function QuickAddCampaignModal({
           <button
             className="btn-primary disabled:opacity-50 disabled:pointer-events-none"
             onClick={submit}
-            disabled={loading || !!error || !trim(name)}
+            disabled={loading || !!catalogError || !trim(name) || !trim(advertiser) || saving}
           >
-            Add
+            {saving ? 'Saving...' : 'Add'}
           </button>
         </>
       )}
@@ -74,24 +96,32 @@ export default function QuickAddCampaignModal({
           <span className="muted">Name</span>
           <input
             ref={nameRef}
-            className={`input ${hasErr ? 'input-error' : ''}`}
+            className={`input ${nameHasErr ? 'input-error' : ''}`}
             value={name}
-            onChange={e => { setName(e.target.value); setErr(''); }}
-            aria-invalid={hasErr || undefined}
-            aria-describedby={hasErr ? errId : undefined}
+            onChange={e => {
+              setName(e.target.value);
+              if (nameHasErr) setFormError(null);
+            }}
+            aria-invalid={nameHasErr || undefined}
+            aria-describedby={nameHasErr ? errId : undefined}
           />
         </label>
         <label className="text-sm grid gap-1">
           <span className="muted">Advertiser</span>
           <input
-            className="input"
+            className={`input ${advertiserHasErr ? 'input-error' : ''}`}
             value={advertiser}
-            onChange={e => setAdvertiser(e.target.value)}
+            onChange={e => {
+              setAdvertiser(e.target.value);
+              if (advertiserHasErr) setFormError(null);
+            }}
             placeholder="White Label"
+            aria-invalid={advertiserHasErr || undefined}
+            aria-describedby={advertiserHasErr ? errId : undefined}
           />
         </label>
         {hasErr ? (
-          <div id={errId} className="text-[--color-accent] text-sm">{err}</div>
+          <div id={errId} className="text-[--color-accent] text-sm">{formError?.message}</div>
         ) : null}
       </div>
     </MiniModal>

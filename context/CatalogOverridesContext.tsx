@@ -306,6 +306,7 @@ export type CatalogsCtx = {
   addDatabaseRef: (d: DatabaseIn) => void;
   addTheme: (t: string) => void;
   addType:  (t: string) => void;
+  saveOverridesNow: () => Promise<void>;
 
   updateCampaignRef: (name: string, patch: Partial<CampaignIn>) => void;
   removeCampaignRef: (name: string) => void;
@@ -366,6 +367,11 @@ export function CatalogOverridesProvider({ children }: { children: React.ReactNo
   // Para evitar bucles de eco: cuando aplicamos remoto, no disparemos guardado
   const skipNextSaveRef = useRef(false);
   const saveTimerRef = useRef<number | null>(null);
+  const overridesRef = useRef<OverridesShape>({});
+
+  useEffect(() => {
+    overridesRef.current = overrides;
+  }, [overrides]);
 
   /* -------------------------- Carga inicial remota ------------------------- */
   useEffect(() => {
@@ -459,10 +465,21 @@ export function CatalogOverridesProvider({ children }: { children: React.ReactNo
       } else {
         setError('Unable to sync catalog overrides. Check network connectivity or Supabase configuration.');
       }
+      throw err;
     } finally {
       setSyncing(false);
     }
   }, [supabase, user?.id, canWriteShared]);
+
+  const saveOverridesNow = useCallback(async () => {
+    if (!canWriteShared) return;
+    if (loading) throw new Error('Shared catalogs are still loading.');
+    if (saveTimerRef.current) {
+      window.clearTimeout(saveTimerRef.current);
+      saveTimerRef.current = null;
+    }
+    await upsertRemote(overridesRef.current);
+  }, [canWriteShared, loading, upsertRemote]);
 
   // Debounce: cada cambio local (user action) -> upsert remoto (si procede)
   useEffect(() => {
@@ -475,7 +492,8 @@ export function CatalogOverridesProvider({ children }: { children: React.ReactNo
 
     if (saveTimerRef.current) window.clearTimeout(saveTimerRef.current);
     saveTimerRef.current = window.setTimeout(() => {
-      upsertRemote(overrides);
+      upsertRemote(overrides).catch(() => {});
+      saveTimerRef.current = null;
     }, 300);
 
     return () => {
@@ -754,6 +772,7 @@ export function CatalogOverridesProvider({ children }: { children: React.ReactNo
     addDatabaseRef,
     addTheme,
     addType,
+    saveOverridesNow,
 
     updateCampaignRef,
     removeCampaignRef,

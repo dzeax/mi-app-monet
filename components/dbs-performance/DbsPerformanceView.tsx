@@ -61,6 +61,21 @@ export default function DbsPerformanceView() {
 
   const dbTypeOptions = availableDbTypes.length ? availableDbTypes : filters.dbTypes;
 
+  const hasSummaryData =
+    summary.metrics.current.count > 0 ||
+    summary.metrics.previous.count > 0;
+  const hasForecastData = Boolean(forecast.month || forecast.quarter);
+  const hasTrendData = trend.points.length > 0;
+  const hasSectionsData = sections.some(
+    (section) =>
+      section.countries.length > 0 ||
+      section.metrics.current.count > 0 ||
+      section.metrics.previous.count > 0
+  );
+  const hydrated = hasSummaryData || hasTrendData || hasSectionsData;
+
+  const filtersRefreshing = refreshing || (!hydrated && loading);
+
   return (
     <div className="space-y-5" data-component="dbs-performance-view">
       <DbsPerformanceFilters
@@ -71,7 +86,7 @@ export default function DbsPerformanceView() {
         availableCountries={availableCountries}
         availableDbTypes={dbTypeOptions}
         onRefresh={handleRefresh}
-        refreshing={refreshing || loading}
+        refreshing={filtersRefreshing}
         onExport={handleExport}
         exportDisabled={exportDisabled}
       />
@@ -80,23 +95,26 @@ export default function DbsPerformanceView() {
         metrics={summary.metrics}
         range={range}
         compareRange={compareRange}
-        loading={loading && !summary.metrics.current.count}
+        loading={loading && !hasSummaryData}
         showYoy={showYoy}
         yoyDelta={summary.yoyDelta}
       />
 
-      <DbsPerformanceForecast forecast={forecast} loading={loading} />
+      <DbsPerformanceForecast
+        forecast={forecast}
+        loading={loading && !hasForecastData}
+      />
 
       <DbsPerformanceTrends
         trend={trend}
         metric={trendMetric}
         onMetricChange={setTrendMetric}
-        loading={loading}
+        loading={loading && !hasTrendData}
       />
 
       <DbsPerformanceSections
         sections={sections}
-        loading={loading}
+        loading={loading && !hasSectionsData}
         showYoy={showYoy}
         resolveBaseDetail={resolveBaseDetail}
       />

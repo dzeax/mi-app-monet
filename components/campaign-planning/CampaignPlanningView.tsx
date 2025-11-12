@@ -1,5 +1,6 @@
 ﻿'use client';
 
+import Image from 'next/image';
 import { useEffect, useMemo, useState } from 'react';
 import {
   CampaignPlanningProvider,
@@ -450,8 +451,18 @@ function PlanningViewInner() {
 
         <div className="relative flex-1">
           {planning.loading ? (
-            <div className="absolute inset-0 z-10 rounded-2xl border border-dashed border-[color:var(--color-border)]/70 bg-white/60 backdrop-blur-sm flex items-center justify-center text-sm text-[color:var(--color-text)]/55">
-              Loading planning...
+            <div className="absolute inset-0 z-10 rounded-2xl border border-dashed border-[color:var(--color-border)]/70 bg-white/60 backdrop-blur-sm flex flex-col items-center justify-center gap-4 text-sm text-[color:var(--color-text)]/65">
+              <Image
+                src="/animations/loadplanning1.gif"
+                alt="Loading planning animation"
+                width={120}
+                height={120}
+                className="h-20 w-20 md:h-24 md:w-24"
+                priority
+              />
+              <div className="text-base font-medium tracking-wide text-[color:var(--color-text)]/70">
+                Loading planning...
+              </div>
             </div>
           ) : null}
           <CampaignPlanningCalendar

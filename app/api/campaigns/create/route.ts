@@ -15,6 +15,9 @@ type CreateCampaignRequest = {
 
 export async function POST(request: Request) {
   try {
+    const cookieStore = await cookies();
+    const supabase = createRouteHandlerClient({ cookies: () => cookieStore });
+
     const body = (await request.json()) as CreateCampaignRequest;
     const payload = body.data;
 
@@ -26,7 +29,6 @@ export async function POST(request: Request) {
       return NextResponse.json({ error: 'Campaign id is required.' }, { status: 400 });
     }
 
-    const supabase = createRouteHandlerClient({ cookies });
     const {
       data: { session },
       error: sessionError,
