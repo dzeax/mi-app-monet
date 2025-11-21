@@ -142,7 +142,7 @@ export default function CreateCampaignModal({
   const CAMPAIGNS = catalogs?.CAMPAIGNS ?? EMPTY_CAMPAIGNS;
   const PARTNERS = catalogs?.PARTNERS ?? EMPTY_PARTNERS;
   const DATABASES = catalogs?.DATABASES ?? EMPTY_DATABASES;
-  const THEMES = catalogs?.THEMES ?? [];
+  const THEMES = useMemo(() => catalogs?.THEMES ?? [], [catalogs?.THEMES]);
   const TYPES = (catalogs?.TYPES ?? DEAL_TYPES.slice()).slice();
 
   const normalizeKey = useCallback((value: string) => value.trim().toLowerCase(), []);
@@ -186,6 +186,12 @@ export default function CreateCampaignModal({
   const allowedCampaigns = useMemo(() => {
     return new Set(CAMPAIGNS.map((campaign) => normalizeKey(campaign.name)));
   }, [CAMPAIGNS, normalizeKey]);
+  const allowedPartners = useMemo(() => {
+    return new Set(PARTNERS.map((partner) => normalizeKey(partner.name)));
+  }, [PARTNERS, normalizeKey]);
+  const allowedThemes = useMemo(() => {
+    return new Set(THEMES.map((theme) => normalizeKey(theme)));
+  }, [THEMES, normalizeKey]);
 
   const schema = z.object({
     date: z.string().min(1, 'Required'),
@@ -200,8 +206,30 @@ export default function CreateCampaignModal({
       }, 'Select a campaign from the list'),
     advertiser: z.string().min(1, 'Required'),
     invoiceOffice: ZInvoiceOffice, // <- enum fuerte
-    partner: z.string().min(1, 'Required'),
-    theme: z.string().min(1, 'Required'),
+    partner: z
+      .string()
+      .min(1, 'Required')
+      .refine((v) => {
+        const val = (v ?? '').trim().toLowerCase();
+        if (!val) return false;
+        if (allowedPartners.has(val)) return true;
+        if (mode === 'edit' && initialRow) {
+          return val === normalizeKey(initialRow.partner || '');
+        }
+        return false;
+      }, 'Select a partner from the list'),
+    theme: z
+      .string()
+      .min(1, 'Required')
+      .refine((v) => {
+        const val = (v ?? '').trim().toLowerCase();
+        if (!val) return false;
+        if (allowedThemes.has(val)) return true;
+        if (mode === 'edit' && initialRow) {
+          return val === normalizeKey(initialRow.theme || '');
+        }
+        return false;
+      }, 'Select a theme from the list'),
     price: z.coerce.number().nonnegative(),
     priceCurrency: z.literal(CURRENCY_EUR),
     type: ZDealType, // <- enum fuerte
@@ -331,6 +359,7 @@ export default function CreateCampaignModal({
   const database = watch('database');
   const geo = watch('geo');
   const partner = watch('partner');
+  const themeValue = watch('theme');
   const price = watch('price');
   const qty = watch('qty');
   const vSent = watch('vSent');
@@ -548,7 +577,7 @@ export default function CreateCampaignModal({
       ? 'text-[--color-primary]'
       : watchMargin < 0
       ? 'text-[--color-accent]'
-      : 'opacity-70';
+      : 'text-[color:var(--color-text)]/70';
 
   // Inputs de solo lectura â€” compacto + contraste
   const roInput = 'input h-10 border-dotted bg-[color:var(--color-surface-2)]/70';
@@ -745,56 +774,54 @@ export default function CreateCampaignModal({
                   </Field>
                 </div>
 
+
+
                 <div className="col-span-12 md:col-span-6">
                   <Field label="Partner">
                     <FieldWithAddon
-                      onAdd={canQuickAdd ? () => setOpenAddPartner(true) : undefined} // ðŸ†•
+                      onAdd={canQuickAdd ? () => setOpenAddPartner(true) : undefined} // 🆕
                       addAriaLabel="Add partner"
+                      className="w-full"
                     >
-                      <select
-                        {...register('partner')}
-                        className="input h-10"
-                        aria-invalid={showErr('partner') || undefined}
-                        aria-describedby={showErr('partner') ? errId('partner') : undefined}
-                      >
-                        <option value="">-- Select --</option>
-                        {PARTNERS.map((p) => (
-                          <option key={p.id} value={p.name}>
-                            {p.name}
-                            {p.isInternal ? ' (INT)' : ''}
-                          </option>
-                        ))}
-                      </select>
+                      <div className="w-full min-w-0">
+                        <Combobox
+                          ariaLabel="Partner"
+                          className="w-full"
+                          placeholder="Select partner"
+                          options={PARTNERS.map((p) => ({
+                            id: p.id,
+                            value: p.name,
+                            label: p.isInternal ? `${p.name} (INT)` : p.name,
+                          }))}
+                          value={partner}
+                          onChange={(v) =>
+                            setValue('partner', v, { shouldValidate: true, shouldDirty: true })
+                          }
+                          invalid={showErr('partner')}
+                          ariaDescribedby={showErr('partner') ? errId('partner') : undefined}
+                        />
+                      </div>
                     </FieldWithAddon>
                     <Err id={errId('partner')} e={showErr('partner') ? errors.partner : undefined} />
                   </Field>
                 </div>
 
+
+
                 <div className="col-span-12 md:col-span-6">
                   <Field label="Theme">
-                    <div className="relative">
-                      <select
-                        {...register('theme')}
-                        aria-invalid={showErr('theme') || undefined}
-                        aria-describedby={showErr('theme') ? errId('theme') : undefined}
-                        className={`input h-10 ${showErr('theme') ? 'input-error' : ''}`}
-                      >
-                        <option value="">-- Select --</option>
-                        {THEMES.map((t: string) => (
-                          <option key={t} value={t}>
-                            {t}
-                          </option>
-                        ))}
-                      </select>
-                      {showErr('theme') && (
-                        <Tooltip
-                          content={errors.theme?.message}
-                          className="absolute right-2 inset-y-0 flex items-center"
-                        >
-                          <span aria-hidden className="text-[--color-accent] text-sm">âš </span>
-                        </Tooltip>
-                      )}
-                    </div>
+                    <Combobox
+                      ariaLabel="Theme"
+                      className="w-full"
+                      placeholder="Select theme"
+                      options={THEMES.map((t: string) => ({ id: t, value: t }))}
+                      value={themeValue}
+                      onChange={(v) =>
+                        setValue('theme', v, { shouldValidate: true, shouldDirty: true })
+                      }
+                      invalid={showErr('theme')}
+                      ariaDescribedby={showErr('theme') ? errId('theme') : undefined}
+                    />
                     <Err id={errId('theme')} e={showErr('theme') ? errors.theme : undefined} />
                   </Field>
                 </div>
@@ -1034,17 +1061,19 @@ export default function CreateCampaignModal({
                     </div>
                     <div className="col-span-12 sm:col-span-6">
                       <Field label="Turnover (€)" badge="CALC" hint={`Formula: ${turnoverHint}`}>
-                        <div className="relative group">
-                          <input
-                            type="number"
-                            step="0.01"
-                            {...register('turnover')}
-                            className={`${roInput} pr-16`}
-                            readOnly
-                          />
-                          <span className="absolute inset-y-0 right-2 flex items-center text-xs opacity-0 group-hover:opacity-70 group-focus-within:opacity-70 transition-opacity">
+                        <div className="group flex flex-col gap-1">
+                          <div className="relative">
+                            <input
+                              type="number"
+                              step="0.01"
+                              {...register('turnover')}
+                              className={`${roInput} pr-16`}
+                              readOnly
+                            />
+                          </div>
+                          <div className="flex justify-end text-xs text-[color:var(--color-text)]/70 opacity-0 group-hover:opacity-100 group-focus-within:opacity-100 transition-opacity">
                             {fmtEUR.format(watchTurnover || 0)}
-                          </span>
+                          </div>
                         </div>
                         <Err
                           id={errId('turnover')}
@@ -1054,38 +1083,42 @@ export default function CreateCampaignModal({
                     </div>
                     <div className="col-span-12 sm:col-span-6">
                       <Field label="Margin" badge="CALC" hint={`Formula: ${marginHint}`}>
-                        <div className="relative group">
-                          <input
-                            type="number"
-                            step="0.01"
-                            {...register('margin')}
-                            className={`${roInput} pr-24 ${marginTextClass}`}
-                            readOnly
-                            aria-live="polite"
-                          />
-                          <span
-                            className={`absolute inset-y-0 right-2 flex items-center text-xs opacity-0 group-hover:opacity-90 group-focus-within:opacity-90 transition-opacity ${marginTextClass}`}
+                        <div className="group flex flex-col gap-1">
+                          <div className="relative">
+                            <input
+                              type="number"
+                              step="0.01"
+                              {...register('margin')}
+                              className={`${roInput} pr-24 ${marginTextClass}`}
+                              readOnly
+                              aria-live="polite"
+                            />
+                          </div>
+                          <div
+                            className={`flex justify-end text-xs ${marginTextClass} opacity-0 group-hover:opacity-100 group-focus-within:opacity-100 transition-opacity`}
                           >
                             {fmtEUR.format(watchMargin || 0)}
                             {watchMarginPct == null ? '' : ` (${fmtPct.format(watchMarginPct)})`}
-                          </span>
+                          </div>
                         </div>
                         <Err id={errId('margin')} e={showErr('margin') ? errors.margin : undefined} />
                       </Field>
                     </div>
                     <div className="col-span-12">
                       <Field label="eCPM (€)" badge="CALC" hint={`Formula: ${ecpmHint}`}>
-                        <div className="relative group">
-                          <input
-                            type="number"
-                            step="0.01"
-                            {...register('ecpm')}
-                            className={`${roInput} pr-16`}
-                            readOnly
-                          />
-                          <span className="absolute inset-y-0 right-2 flex items-center text-xs opacity-0 group-hover:opacity-70 group-focus-within:opacity-70 transition-opacity">
+                        <div className="group flex flex-col gap-1">
+                          <div className="relative">
+                            <input
+                              type="number"
+                              step="0.01"
+                              {...register('ecpm')}
+                              className={`${roInput} pr-16`}
+                              readOnly
+                            />
+                          </div>
+                          <div className="flex justify-end text-xs text-[color:var(--color-text)]/70 opacity-0 group-hover:opacity-100 group-focus-within:opacity-100 transition-opacity">
                             {fmtEUR.format(watchEcpm || 0)}
-                          </span>
+                          </div>
                         </div>
                         <Err id={errId('ecpm')} e={showErr('ecpm') ? errors.ecpm : undefined} />
                       </Field>

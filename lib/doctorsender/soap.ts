@@ -26,6 +26,25 @@ function serializePrimitive(value: SoapPrimitive) {
 }
 
 function serializeArray(values: SoapPrimitive[]) {
+  const allObjects = values.every((value) => value && typeof value === 'object' && !Array.isArray(value));
+
+  if (allObjects) {
+    const items = (values as Record<string, SoapPrimitive>[])
+      .map((obj) => {
+        const entries = Object.entries(obj ?? {})
+          .map(([key, val]) => {
+            if (val === null || val === undefined) return `<${key} xsi:nil="true" />`;
+            if (typeof val === 'boolean') return `<${key} xsi:type="xsd:boolean">${val ? 'true' : 'false'}</${key}>`;
+            if (typeof val === 'number' && Number.isInteger(val)) return `<${key} xsi:type="xsd:int">${val}</${key}>`;
+            return `<${key} xsi:type="xsd:string">${escapeXml(String(val))}</${key}>`;
+          })
+          .join('');
+        return `<item xsi:type="SOAP-ENC:Struct">${entries}</item>`;
+      })
+      .join('');
+    return `<item SOAP-ENC:arrayType="SOAP-ENC:Struct[${values.length}]" xsi:type="SOAP-ENC:Array">${items}</item>`;
+  }
+
   const type = values.every((value) => typeof value === 'number' && Number.isInteger(value))
     ? 'xsd:int'
     : 'xsd:string';

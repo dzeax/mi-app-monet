@@ -204,6 +204,7 @@ export async function sendDoctorSenderPreview({
   campaign,
   overrides,
 }: SendPreviewOptions): Promise<DoctorSenderPreviewResult> {
+  const delay = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
   const defaults = await loadDoctorSenderDefaults(campaign.database);
   const account =
     defaults.accountUser && defaults.accountToken
@@ -352,29 +353,25 @@ export async function sendDoctorSenderPreview({
     currentCampaignId = createdCampaignId;
   }
 
-  if (trackingDomain) {
-    try {
-      await soapCall('dsSettingsSetTrackingCampaign', [
-        currentCampaignId,
-        trackingDomain,
-      ], account);
-    } catch (error) {
-      // Tracking domain is optional; log but do not block
-      console.error('DoctorSender tracking domain error:', error);
-    }
-  }
+  // Breve pausa para dar tiempo a DS a persistir la campaña antes del BAT
+  await delay(2000);
 
-  const previewContacts = previewRecipients.map((email) => ({ email }));
-  const sendResult = await soapCall('dsCampaignSendEmailsTest', [currentCampaignId, previewContacts], account);
+  // dsCampaignSendEmailsTest acepta array de strings
+  const previewContacts = previewRecipients;
+  let sendResult = await soapCall('dsCampaignSendEmailsTest', [currentCampaignId, previewContacts], account);
   if (sendResult === false) {
-    throw new Error('DoctorSender rejected preview send (dsCampaignSendEmailsTest returned false).');
+    await delay(1500);
+    sendResult = await soapCall('dsCampaignSendEmailsTest', [currentCampaignId, previewContacts], account);
+    if (sendResult === false) {
+      throw new Error('DoctorSender rejected preview send (dsCampaignSendEmailsTest returned false after retry).');
+    }
   }
 
   const snapshot = await fetchCampaignSnapshot(account, currentCampaignId);
 
   return {
     campaignId: currentCampaignId,
-    status: snapshot.status,
+    status: 'preview_sent',
     sendDate: snapshot.sendDate,
     listUnsubscribe: snapshot.listUnsubscribe,
     preflight,
