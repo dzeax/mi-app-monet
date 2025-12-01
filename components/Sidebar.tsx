@@ -4,11 +4,16 @@ import Image from "next/image";
 import { ReactNode, useEffect, useState } from "react";
 import { usePathname, useRouter } from "next/navigation";
 import { useAuth } from "@/context/AuthContext";
+import { useBusinessUnit } from "@/context/BusinessUnitContext";
+import { CRM_CLIENTS, getCrmClient } from "@/lib/crm/clients";
 import CreateCampaignModal from "./create-campaign/CreateCampaignModal";
 import ManageCatalogsModal from "./catalogs/ManageCatalogsModal";
 import ImportCsvModal from "./import/ImportCsvModal";
 import RoutingSettingsModal from "@/components/admin/RoutingSettingsModal";
 import ManageUsersModal from "@/components/admin/ManageUsersModal";
+import ManageRatesModal from "@/components/rates/ManageRatesModal";
+import CrmImportModal from "@/components/crm/CrmImportModal";
+import CrmCatalogsModal from "@/components/crm/CrmCatalogsModal";
 
 type Props = {
   collapsed: boolean;
@@ -26,12 +31,23 @@ export default function Sidebar({
   const router = useRouter();
   const pathname = usePathname();
   const { isAdmin, isEditor } = useAuth();
+  const { unit } = useBusinessUnit();
+  const isCrm = unit === "crm";
+  const pathSegments = pathname?.split("/").filter(Boolean) ?? [];
+  const crmIdx = pathSegments.indexOf("crm");
+  const clientSlugFromPath = crmIdx >= 0 ? pathSegments[crmIdx + 1] ?? null : null;
+  const activeClient = isCrm
+    ? getCrmClient(clientSlugFromPath) ?? CRM_CLIENTS[0] ?? null
+    : null;
 
   const [openCreate, setOpenCreate] = useState(false);
   const [openManage, setOpenManage] = useState(false);
   const [openImport, setOpenImport] = useState(false);
   const [openUsers, setOpenUsers] = useState(false);
   const [openRouting, setOpenRouting] = useState(false);
+  const [openRates, setOpenRates] = useState(false);
+  const [openCrmImport, setOpenCrmImport] = useState(false);
+  const [openCrmCatalogs, setOpenCrmCatalogs] = useState(false);
 
   // Density (comfy|compact) persisted
   const [density, setDensity] = useState<"comfy" | "compact">("comfy");
@@ -196,7 +212,44 @@ export default function Sidebar({
     items: (ReactNode | null | false)[];
   };
 
-  const sections: Section[] = [
+  const crmModuleButtons = (activeClient?.modules || []).map((module) => {
+    const target = `/crm/${activeClient?.slug}/${module.slug}`;
+    const isActive = pathname?.startsWith(target);
+    const iconSrc =
+      module.icon === "runbook"
+        ? "/icons/sidebar/manage-catalogs.svg"
+        : module.icon === "chart"
+        ? "/icons/sidebar/reports.svg"
+        : module.icon === "insight"
+        ? "/icons/sidebar/reports.svg"
+        : "/icons/sidebar/planning.svg";
+    return (
+      <button
+        key={module.slug}
+        onClick={() => !module.comingSoon && router.push(target)}
+        className={btnBase(
+          module.comingSoon
+            ? "opacity-60"
+            : isActive
+            ? "sidebar-btn--active"
+            : ""
+        )}
+        title={module.label}
+        aria-label={module.label}
+        disabled={module.comingSoon}
+      >
+        <Image src={iconSrc} alt="" aria-hidden width={24} height={24} className="sidebar-icon" />
+        {!collapsed && (
+          <span>
+            {module.label}
+            {module.comingSoon ? " (soon)" : ""}
+          </span>
+        )}
+      </button>
+    );
+  });
+
+  const monetizationSections: Section[] = [
     {
       key: "campaigns",
       title: "Campaigns",
@@ -228,6 +281,55 @@ export default function Sidebar({
       items: [isAdmin ? BtnUsers : null],
     },
   ];
+
+  const crmSections: Section[] = [
+    {
+      key: "client-ops",
+      title: activeClient ? activeClient.name : "CRM",
+      description: "Client modules",
+      items: [
+        ...crmModuleButtons,
+        isEditor ? (
+          <button
+            key="crm-import"
+            onClick={() => setOpenCrmImport(true)}
+            className={btnBase(openCrmImport ? "sidebar-btn--active" : "")}
+            title="Import CSV"
+            aria-label="Import CSV"
+          >
+            <Image src="/icons/sidebar/import-csv.svg" alt="" aria-hidden width={24} height={24} className="sidebar-icon" />
+            {!collapsed && <span>Import CSV</span>}
+          </button>
+        ) : null,
+        isEditor ? (
+          <button
+            key="crm-catalogs"
+            onClick={() => setOpenCrmCatalogs(true)}
+            className={btnBase(openCrmCatalogs ? "sidebar-btn--active" : "")}
+            title="Manage catalogs"
+            aria-label="Manage catalogs"
+          >
+            <Image src="/icons/sidebar/manage-catalogs.svg" alt="" aria-hidden width={24} height={24} className="sidebar-icon" />
+            {!collapsed && <span>Manage catalogs</span>}
+          </button>
+        ) : null,
+        isEditor ? (
+          <button
+            key="crm-rates"
+            onClick={() => setOpenRates(true)}
+            className={btnBase(openRates ? "sidebar-btn--active" : "")}
+            title="Manage rates"
+            aria-label="Manage rates"
+          >
+            <Image src="/icons/sidebar/manage-catalogs.svg" alt="" aria-hidden width={24} height={24} className="sidebar-icon" />
+            {!collapsed && <span>Manage rates</span>}
+          </button>
+        ) : null,
+      ],
+    },
+  ];
+
+  const sections: Section[] = isCrm ? crmSections : monetizationSections;
 
   const visibleSections = sections
     .map((section) => ({
@@ -309,7 +411,7 @@ export default function Sidebar({
         </div>
       )}
 
-      {openCreate && (
+      {unit === "monetization" && openCreate && (
         <CreateCampaignModal
           onClose={() => {
             setOpenCreate(false);
@@ -317,7 +419,7 @@ export default function Sidebar({
           }}
         />
       )}
-      {isAdmin && openImport && (
+      {unit === "monetization" && isAdmin && openImport && (
         <ImportCsvModal
           onClose={() => {
             setOpenImport(false);
@@ -325,7 +427,28 @@ export default function Sidebar({
           }}
         />
       )}
-      {openManage && (
+      {unit === "crm" && isEditor && openCrmImport && activeClient && (
+        <CrmImportModal
+          clientSlug={activeClient.slug}
+          onClose={() => {
+            setOpenCrmImport(false);
+            onActionDone?.();
+          }}
+        />
+      )}
+      {unit === "crm" && isEditor && openCrmCatalogs && (
+        <CrmCatalogsModal onClose={() => setOpenCrmCatalogs(false)} clientSlug={activeClient?.slug || "emg"} />
+      )}
+      {unit === "crm" && openRates && activeClient && (
+        <ManageRatesModal
+          clientSlug={activeClient.slug}
+          onClose={() => {
+            setOpenRates(false);
+            onActionDone?.();
+          }}
+        />
+      )}
+      {unit === "monetization" && openManage && (
         <ManageCatalogsModal
           onClose={() => {
             setOpenManage(false);
@@ -333,7 +456,7 @@ export default function Sidebar({
           }}
         />
       )}
-      {isAdmin && openUsers && (
+      {unit === "monetization" && isAdmin && openUsers && (
         <ManageUsersModal
           onClose={() => {
             setOpenUsers(false);
@@ -341,7 +464,7 @@ export default function Sidebar({
           }}
         />
       )}
-      {isAdmin && openRouting && (
+      {unit === "monetization" && isAdmin && openRouting && (
         <RoutingSettingsModal
           onClose={() => {
             setOpenRouting(false);

@@ -10,6 +10,7 @@
     "catalogs:build": "node scripts/build-catalogs.mjs"
   },
   "dependencies": {
+    "csv-parse": "^5.5.6",
     "@hookform/resolvers": "^5.2.1",
     "@sparticuz/chromium": "^141.0.0",
     "@supabase/auth-helpers-nextjs": "^0.10.0",

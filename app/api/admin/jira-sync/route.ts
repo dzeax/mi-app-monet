@@ -1,0 +1,265 @@
+import { NextResponse } from 'next/server';
+import { cookies } from 'next/headers';
+import { createRouteHandlerClient } from '@supabase/auth-helpers-nextjs';
+
+const DEFAULT_CLIENT = 'emg';
+const JQL_DEFAULT = 'project = CRM ORDER BY updated DESC';
+const PAGE_SIZE = 100;
+
+const STATUS_MAP: Record<string, string> = {
+  backlog: 'Backlog',
+  refining: 'Refining',
+  ready: 'Ready',
+  'in progress': 'In progress',
+  validation: 'Validation',
+  done: 'Done',
+};
+
+const PRIORITY_MAP: Record<string, 'P1' | 'P2' | 'P3'> = {
+  critical: 'P1',
+  blocker: 'P1',
+  highest: 'P1',
+  major: 'P1',
+  high: 'P1',
+  medium: 'P2',
+  low: 'P3',
+  minor: 'P3',
+  trivial: 'P3',
+  lowest: 'P3',
+};
+
+const TEAM_OWNERS = [
+  'david zea',
+  'stephane rabarinala',
+  'extern.lucas.vialatte',
+];
+
+function mapStatus(input?: string | null) {
+  if (!input) return 'Backlog';
+  const key = input.trim().toLowerCase();
+  return STATUS_MAP[key] || 'Backlog';
+}
+
+function mapPriority(input?: string | null): 'P1' | 'P2' | 'P3' {
+  if (!input) return 'P2';
+  const key = input.trim().toLowerCase();
+  return PRIORITY_MAP[key] || 'P3';
+}
+
+function isTeamOwner(assignee?: { displayName?: string | null; emailAddress?: string | null }) {
+  if (!assignee) return false;
+  const display = assignee.displayName?.toLowerCase().trim();
+  const email = assignee.emailAddress?.toLowerCase().trim();
+  return TEAM_OWNERS.some((name) => (display?.includes(name) ?? false) || (email?.includes(name) ?? false));
+}
+
+async function fetchIssues(jql: string, nextPageToken?: string | null) {
+  const base = process.env.JIRA_BASE;
+  const email = process.env.JIRA_EMAIL;
+  const token = process.env.JIRA_API_TOKEN;
+
+  if (!base || !email || !token) {
+    throw new Error('Missing JIRA env vars (JIRA_BASE, JIRA_EMAIL, JIRA_API_TOKEN)');
+  }
+
+  // Use new search endpoint per Atlassian CHANGE-2046
+  const url = `${base}/rest/api/3/search/jql`;
+  const headers = {
+    Accept: 'application/json',
+    'Content-Type': 'application/json',
+    Authorization: `Basic ${Buffer.from(`${email}:${token}`).toString('base64')}`,
+  };
+
+  const res = await fetch(url, {
+    method: 'POST',
+    headers,
+    cache: 'no-store',
+    body: JSON.stringify({
+      jql,
+      maxResults: PAGE_SIZE,
+      nextPageToken: nextPageToken || undefined,
+      fields: ['summary', 'status', 'priority', 'assignee', 'issuetype', 'created', 'duedate', 'parent', 'reporter'],
+    }),
+  });
+  if (!res.ok) {
+    const body = await res.text().catch(() => '');
+    throw new Error(`JIRA request failed (${res.status}): ${body}`);
+  }
+  return res.json();
+}
+
+export const runtime = 'nodejs';
+
+export async function POST(request: Request) {
+  const cookieStore = await cookies();
+  const supabase = createRouteHandlerClient({ cookies: () => cookieStore });
+
+  try {
+    const { searchParams } = new URL(request.url);
+    const client = searchParams.get('client') || DEFAULT_CLIENT;
+    const jql = searchParams.get('jql') || JQL_DEFAULT;
+
+    const { data: userData, error: userError } = await supabase.auth.getUser();
+    if (userError) return NextResponse.json({ error: userError.message }, { status: 500 });
+    const userId = userData.user?.id;
+    if (!userId) return NextResponse.json({ error: 'Not authenticated' }, { status: 401 });
+
+    // Optional: enforce admin role via app_users
+    const { data: profile } = await supabase
+      .from('app_users')
+      .select('role,is_active')
+      .eq('user_id', userId)
+      .maybeSingle();
+    if (!profile?.is_active || (profile.role !== 'admin' && profile.role !== 'editor')) {
+      return NextResponse.json({ error: 'Forbidden' }, { status: 403 });
+    }
+
+    let nextPageToken: string | null | undefined = null;
+    let pageCount = 0;
+    const payload: any[] = [];
+
+    do {
+      const page = await fetchIssues(jql, nextPageToken);
+      const issues = Array.isArray(page.issues) ? page.issues : [];
+      nextPageToken = page.nextPageToken;
+      pageCount += 1;
+
+      for (const issue of issues) {
+        const fields = issue.fields || {};
+        const statusName = fields.status?.name as string | undefined;
+        const priorityName = fields.priority?.name as string | undefined;
+        const assignee = fields.assignee || {};
+        if (!isTeamOwner(assignee)) continue;
+        const assigneeName = assignee.displayName as string | undefined;
+        const parentKey = fields.parent?.key as string | undefined;
+        const parentSummary = fields.parent?.fields?.summary as string | undefined;
+        const parentIssuetype =
+          (fields.parent?.fields?.issuetype?.name as string | undefined) ||
+          (fields.parent?.issuetype?.name as string | undefined);
+        const typeName =
+          parentKey
+            ? `${parentKey}${parentSummary ? ` ${parentSummary}` : parentIssuetype ? ` ${parentIssuetype}` : ''}`
+            : (fields.issuetype?.name as string | undefined);
+        const reporterName = fields.reporter?.displayName as string | undefined;
+
+        payload.push({
+          client_slug: client,
+          ticket_id: issue.key,
+          title: fields.summary || '',
+          status: mapStatus(statusName),
+          priority: mapPriority(priorityName),
+          assigned_date: fields.created ? fields.created.slice(0, 10) : null,
+          due_date: fields.duedate || null,
+          eta_date: fields.duedate || null,
+        // Owner stays app-owned (primary contributor). Do not set it from JIRA to avoid clobbering contributions.
+        owner: 'Unassigned',
+          reporter: reporterName || null,
+          type: typeName || null,
+          jira_url: `${process.env.JIRA_BASE?.replace(/\/+$/, '') || ''}/browse/${issue.key}`,
+          work_hours: 0,
+          prep_hours: null,
+          comments: null,
+          jira_assignee: assigneeName || null,
+          created_by: userId,
+        });
+      }
+    } while (nextPageToken);
+
+    if (!payload.length) {
+      return NextResponse.json({ imported: 0, message: 'No issues returned from JIRA' });
+    }
+
+    // Preserve effort and comments entered in the app when syncing with JIRA.
+    // JIRA remains the source of truth for status, title, owner, dates, etc.
+    const ticketIds = Array.from(new Set(payload.map((row) => row.ticket_id as string)));
+
+    // Fetch existing tickets to preserve effort/comments AND keep the same row id
+    // so that contributions (FK with ON DELETE CASCADE) are not lost.
+    const { data: existing, error: existingError } = await supabase
+      .from('crm_data_quality_tickets')
+      .select('id, ticket_id, work_hours, prep_hours, comments')
+      .eq('client_slug', client)
+      .in('ticket_id', ticketIds);
+
+    if (existingError) {
+      return NextResponse.json({ error: existingError.message }, { status: 500 });
+    }
+
+    const existingMap = new Map<
+      string,
+      { id: string; work_hours: number | null; prep_hours: number | null; comments: string | null }
+    >();
+    (existing ?? []).forEach((row) => {
+      existingMap.set(row.ticket_id as string, {
+        id: row.id as string,
+        work_hours: row.work_hours != null ? Number(row.work_hours) : null,
+        prep_hours: row.prep_hours != null ? Number(row.prep_hours) : null,
+        comments: (row.comments as string | null) ?? null,
+      });
+    });
+
+    // Check which tickets already have contributions, to avoid overwriting the app-owned owner.
+    const existingIds = Array.from(existingMap.values())
+      .map((v) => v.id)
+      .filter(Boolean);
+    const contribMap = new Set<string>();
+    if (existingIds.length > 0) {
+      const { data: contribs } = await supabase
+        .from('crm_data_quality_contributions')
+        .select('ticket_id')
+        .in('ticket_id', existingIds);
+      contribs?.forEach((c) => contribMap.add(c.ticket_id as string));
+    }
+
+    const toInsert: any[] = [];
+    const toUpdate: { id: string; data: any }[] = [];
+
+    payload.forEach((row) => {
+      const key = row.ticket_id as string;
+      const prev = existingMap.get(key);
+      if (!prev) {
+        toInsert.push(row);
+        return;
+      }
+      // Preserve app-owned effort/comments, update only JIRA-owned fields.
+      const updateData: Record<string, any> = {
+        status: row.status,
+        assigned_date: row.assigned_date,
+        due_date: row.due_date,
+        eta_date: row.eta_date,
+        ticket_id: row.ticket_id,
+        title: row.title,
+        priority: row.priority,
+        reporter: row.reporter,
+        type: row.type,
+        jira_url: row.jira_url,
+        jira_assignee: row.jira_assignee,
+        // DO NOT touch work_hours, prep_hours, comments (app-owned)
+      };
+      toUpdate.push({ id: prev.id, data: updateData });
+    });
+
+    if (toInsert.length) {
+      const { error: insertError } = await supabase.from('crm_data_quality_tickets').insert(toInsert);
+      if (insertError) {
+        return NextResponse.json({ error: insertError.message }, { status: 500 });
+      }
+    }
+
+    // Batched updates by id to avoid recreating rows (which would cascade-delete contributions).
+    for (const chunk of toUpdate) {
+      const { error: updError } = await supabase
+        .from('crm_data_quality_tickets')
+        .update(chunk.data)
+        .eq('id', chunk.id);
+      if (updError) {
+        return NextResponse.json({ error: updError.message }, { status: 500 });
+      }
+    }
+
+    return NextResponse.json({ imported: payload.length, pages: pageCount });
+  } catch (err) {
+    const message = err instanceof Error ? err.message : 'Unexpected error';
+    return NextResponse.json({ error: message }, { status: 500 });
+  }
+}
