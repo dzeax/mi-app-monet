@@ -2,6 +2,11 @@ const REGIONAL_INDICATOR_START = 0x1f1e6;
 
 export const GEO_ALIASES: Record<string, string> = {
   UK: 'GB',
+  ALL: 'MULTI',
+  COM: 'MULTI',
+  BF: 'BE',
+  BN: 'BE',
+  EN: 'GB',
 };
 
 export const SPECIAL_LABELS: Record<string, string> = {

@@ -29,7 +29,6 @@ type Filters = {
   dueFrom: string;
   dueTo: string;
   daysBucket: string;
-  view: string;
 };
 
 const STATUS_OPTIONS = [
@@ -42,22 +41,6 @@ const STATUS_OPTIONS = [
 ];
 const OWNER_DEFAULTS = ["Stephane", "Lucas V."];
 const TYPE_DEFAULTS = ["DATA", "LIFECYCLE", "CAMPAIGNS", "GLOBAL", "OPS"];
-const VIEW_PRESETS: {
-  id: string;
-  label: string;
-  status?: string[];
-  daysBucket?: string;
-}[] = [
-  { id: "", label: "All tickets" },
-  {
-    id: "open",
-    label: "Open (not Done)",
-    status: ["Backlog", "Refining", "Ready", "In progress", "Validation"],
-  },
-  { id: "inprogress", label: "In progress only", status: ["In progress"] },
-  { id: "due7", label: "Due next 7 days", daysBucket: "next7" },
-  { id: "overdue", label: "Overdue", daysBucket: "overdue" },
-];
 
 const unique = (values: (string | null)[]) =>
   Array.from(new Set(values)).filter(Boolean) as string[];
@@ -292,7 +275,6 @@ export default function CrmDataQualityView() {
     dueFrom: "",
     dueTo: "",
     daysBucket: "",
-    view: "",
   });
   const [rows, setRows] = useState<DataQualityTicket[]>([]);
   const [loading, setLoading] = useState(true);
@@ -834,7 +816,7 @@ export default function CrmDataQualityView() {
     setFilters({
       status: [],
       owner: [],
-       assignee: [],
+      assignee: [],
       priority: [],
       type: [],
       search: "",
@@ -843,21 +825,9 @@ export default function CrmDataQualityView() {
       dueFrom: "",
       dueTo: "",
       daysBucket: "",
-      view: "",
     });
     setSearchInput("");
     setPage(0);
-  };
-
-  const applyView = (viewId: string) => {
-    const preset = VIEW_PRESETS.find((v) => v.id === viewId);
-    if (!preset) return;
-    setFilters((prev) => ({
-      ...prev,
-      status: preset.status ?? [],
-      daysBucket: preset.daysBucket ?? "",
-      view: viewId,
-    }));
   };
 
   const totals = useMemo(() => {
@@ -1232,25 +1202,6 @@ export default function CrmDataQualityView() {
                 counts={options.assigneeCounts}
                 onChange={(vals) => handleChange("assignee", vals)}
               />
-            </div>
-            <div className="min-w-[180px] flex-1">
-              <label className="text-xs font-medium text-[color:var(--color-text)]/70">
-                Views
-              </label>
-              <select
-                className="input h-10 w-full"
-                value={filters.view}
-                onChange={(e) => {
-                  handleChange("view", e.target.value);
-                  applyView(e.target.value);
-                }}
-              >
-                {VIEW_PRESETS.map((v) => (
-                  <option key={v.id} value={v.id}>
-                    {v.label}
-                  </option>
-                ))}
-              </select>
             </div>
             <div className="flex flex-wrap items-center gap-2 ml-auto">
               <button

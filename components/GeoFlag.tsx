@@ -30,6 +30,19 @@ export default function GeoFlag({ geo }: GeoFlagProps) {
   }
 
   const canonical = canonicalGeo(code);
+  if (canonical === "MULTI") {
+    const title = "Multiple geos";
+    return (
+      <span
+        className="inline-flex h-5 w-5 items-center justify-center text-[15px] leading-none"
+        title={title}
+        aria-label={title}
+      >
+        <span aria-hidden>🌐</span>
+        <span className="sr-only">Multiple geos</span>
+      </span>
+    );
+  }
   const flagClass = geoFlagClass(canonical);
   const label = geoLabel(canonical);
   const title = `${label}${code ? ` (${code})` : ''}`;
