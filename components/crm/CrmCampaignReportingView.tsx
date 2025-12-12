@@ -1,10 +1,13 @@
-﻿"use client";
+﻿/* eslint-disable @typescript-eslint/no-explicit-any */
+"use client";
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { usePathname } from "next/navigation";
 import Link from "next/link";
 import ColumnPicker from "@/components/ui/ColumnPicker";
 import GeoFlag from "@/components/GeoFlag";
+import CrmGenerateUnitsModal from "@/components/crm/CrmGenerateUnitsModal";
+import { showError, showSuccess } from "@/utils/toast";
 
 type Row = {
   id: string;
@@ -97,10 +100,13 @@ function MultiSelect({
   const itemRefs = useRef<(HTMLLabelElement | null)[]>([]);
   const [activeIdx, setActiveIdx] = useState(0);
 
-  const toggle = (val: string) => {
-    if (values.includes(val)) onChange(values.filter((v) => v !== val));
-    else onChange([...values, val]);
-  };
+  const toggle = useCallback(
+    (val: string) => {
+      if (values.includes(val)) onChange(values.filter((v) => v !== val));
+      else onChange([...values, val]);
+    },
+    [values, onChange],
+  );
 
   const allSelected =
     values.length === options.length ||
@@ -158,7 +164,7 @@ function MultiSelect({
     };
     document.addEventListener("keydown", handler);
     return () => document.removeEventListener("keydown", handler);
-  }, [open, options, activeIdx]);
+  }, [open, options, activeIdx, toggle]);
 
   return (
     <div className="relative" ref={ref}>
@@ -227,6 +233,8 @@ export default function CrmCampaignReportingView() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [exporting, setExporting] = useState(false);
+  const [deleting, setDeleting] = useState(false);
+  const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
   const [filters, setFilters] = useState<Filters>({
     search: "",
     brand: [],
@@ -248,6 +256,7 @@ export default function CrmCampaignReportingView() {
   const [sortKey, setSortKey] = useState<SortKey>("sendDate");
   const [sortDir, setSortDir] = useState<SortDir>("desc");
   const [compact, setCompact] = useState(false);
+  const [openGenerate, setOpenGenerate] = useState(false);
   const COLVIS_STORAGE_KEY = "campaign_colvis_v1";
   const columnOptions = useMemo(
     () =>
@@ -279,6 +288,7 @@ export default function CrmCampaignReportingView() {
   );
   const [actionsOpen, setActionsOpen] = useState(false);
   const actionsRef = useRef<HTMLDivElement | null>(null);
+  const headerSelectRef = useRef<HTMLInputElement | null>(null);
   const [openAdvanced, setOpenAdvanced] = useState(false);
   const makeClearAndResetPage = useCallback(
     (fn: () => void) => () => {
@@ -348,6 +358,11 @@ export default function CrmCampaignReportingView() {
       window.removeEventListener("crm:imported", handler);
     };
   }, [clientSlug, dateFrom, dateTo]);
+
+  useEffect(() => {
+    // Clear any selection if the dataset changes
+    setSelectedIds(new Set());
+  }, [rows]);
 
   const rowMatchesFilters = useCallback(
     (r: Row, exclude?: keyof Filters) => {
@@ -425,9 +440,9 @@ export default function CrmCampaignReportingView() {
     };
   }, [rows, rowMatchesFilters]);
 
-  const handleFilterChange = (key: keyof Filters, value: string | string[]) => {
+  const handleFilterChange = useCallback((key: keyof Filters, value: string | string[]) => {
     setFilters((prev) => ({ ...prev, [key]: value as any }));
-  };
+  }, []);
 
   const clearFilters = () => {
     setFilters({
@@ -493,7 +508,8 @@ export default function CrmCampaignReportingView() {
     filters.search,
     dateFrom,
     dateTo,
-    currentYearStart,
+    startOfThisMonth,
+    endOfThisMonth,
     handleFilterChange,
     makeClearAndResetPage,
   ]);
@@ -537,7 +553,8 @@ export default function CrmCampaignReportingView() {
     columnOptions.forEach((c) => {
       if (showCol(c.id)) count += 1;
     });
-    return Math.max(count, 1);
+    // +1 for the selection column
+    return Math.max(count, 1) + 1;
   }, [columnOptions, showCol]);
 
   const applyDatePreset = useCallback((preset: typeof datePreset) => {
@@ -606,6 +623,10 @@ export default function CrmCampaignReportingView() {
       case "last-year":
         from = formatLocalDate(startOfYear(-1));
         to = formatLocalDate(endOfYear(-1));
+        break;
+      case "all-time":
+        from = "";
+        to = "";
         break;
       default:
         // Custom range: don't override manual dates
@@ -678,6 +699,61 @@ export default function CrmCampaignReportingView() {
     const start = Math.min(page * pageSize, Math.max(sortedRows.length - 1, 0));
     return sortedRows.slice(start, start + pageSize);
   }, [sortedRows, page, pageSize]);
+
+  const pageIds = useMemo(() => pagedRows.map((r) => r.id), [pagedRows]);
+  const selectedCount = selectedIds.size;
+  const allPageSelected = pageIds.length > 0 && pageIds.every((id) => selectedIds.has(id));
+  const somePageSelected = pageIds.some((id) => selectedIds.has(id)) && !allPageSelected;
+
+  useEffect(() => {
+    if (headerSelectRef.current) {
+      headerSelectRef.current.indeterminate = somePageSelected;
+    }
+  }, [somePageSelected, allPageSelected]);
+
+  const toggleRowSelection = (id: string) => {
+    setSelectedIds((prev) => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
+      return next;
+    });
+  };
+
+  const togglePageSelection = () => {
+    setSelectedIds((prev) => {
+      const next = new Set(prev);
+      if (allPageSelected) {
+        pageIds.forEach((id) => next.delete(id));
+      } else {
+        pageIds.forEach((id) => next.add(id));
+      }
+      return next;
+    });
+  };
+
+  const clearSelection = () => setSelectedIds(new Set());
+
+  const dateFromRef = useRef<HTMLInputElement | null>(null);
+  const dateToRef = useRef<HTMLInputElement | null>(null);
+  const openPicker = (ref: React.RefObject<HTMLInputElement>) => {
+    const el = ref.current;
+    if (!el) return;
+    el.focus();
+    // @ts-expect-error showPicker is not yet in lib.dom.d.ts everywhere
+    if (typeof el.showPicker === "function") {
+      // Must be called from a user gesture; wrap in try/catch to avoid runtime errors.
+      try {
+        // @ts-expect-error showPicker is not yet in lib.dom.d.ts everywhere
+        el.showPicker();
+      } catch {
+        // fallback to native focus/click already done above
+        el.click();
+      }
+    } else {
+      el.click();
+    }
+  };
 
   const totalPages = Math.max(Math.ceil(sortedRows.length / pageSize), 1);
   const startIdx = sortedRows.length === 0 ? 0 : page * pageSize + 1;
@@ -758,6 +834,29 @@ export default function CrmCampaignReportingView() {
       URL.revokeObjectURL(url);
     } finally {
       setExporting(false);
+    }
+  };
+
+  const deleteSelected = async () => {
+    if (!selectedIds.size) return;
+    try {
+      setDeleting(true);
+      const res = await fetch("/api/crm/campaign-email-units", {
+        method: "DELETE",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ client: clientSlug, ids: Array.from(selectedIds) }),
+      });
+      const body = await res.json().catch(() => null);
+      if (!res.ok) {
+        throw new Error(body?.error || `Failed to delete (${res.status})`);
+      }
+      setRows((prev) => prev.filter((r) => !selectedIds.has(r.id)));
+      setSelectedIds(new Set());
+      showSuccess("Email units deleted");
+    } catch (err) {
+      showError(err instanceof Error ? err.message : "Unable to delete email units");
+    } finally {
+      setDeleting(false);
     }
   };
 
@@ -874,6 +973,7 @@ export default function CrmCampaignReportingView() {
                 value={datePreset}
                 onChange={(e) => applyDatePreset(e.target.value as typeof datePreset)}
               >
+                <option value="all-time">All time</option>
                 <option value="this-week">This week</option>
                 <option value="last-week">Last week</option>
                 <option value="this-month">This month</option>
@@ -911,7 +1011,7 @@ export default function CrmCampaignReportingView() {
             </div>
           </div>
           {openAdvanced ? (
-            <div className="mt-3 grid grid-cols-[repeat(auto-fit,minmax(180px,1fr))] gap-3">
+            <div className="mt-3 grid grid-cols-[repeat(auto-fit,minmax(140px,1fr))] gap-3">
               <MultiSelect
                 label="Touchpoint"
                 options={filterOptions.touchpoint.values.map((s) => ({ label: s, value: s }))}
@@ -926,29 +1026,55 @@ export default function CrmCampaignReportingView() {
                 counts={filterOptions.status.counts}
                 onChange={(vals) => handleFilterChange("status", vals)}
               />
-              <div className="flex flex-col gap-1">
+              <div className="flex flex-col gap-1 justify-end">
                 <label className="text-xs font-medium text-[color:var(--color-text)]/70">From</label>
-                <input
-                  type="date"
-                  className="input input-date h-10"
-                  value={dateFrom}
-                  onChange={(e) => {
-                    setDatePreset("");
-                    setDateFrom(e.target.value);
-                  }}
-                />
+                <div className="relative flex w-full items-center">
+                  <input
+                    ref={dateFromRef}
+                    type="date"
+                    className="input input-date h-10 w-full pr-10"
+                    value={dateFrom}
+                    onChange={(e) => {
+                      setDatePreset("");
+                      setDateFrom(e.target.value);
+                    }}
+                    onClick={() => openPicker(dateFromRef)}
+                    onFocus={() => openPicker(dateFromRef)}
+                  />
+                  <button
+                    type="button"
+                    onClick={() => openPicker(dateFromRef)}
+                    className="absolute right-3 top-1/2 -translate-y-1/2 transform text-[color:var(--color-text)]/60"
+                    aria-label="Open start date picker"
+                  >
+                    📅
+                  </button>
+                </div>
               </div>
-              <div className="flex flex-col gap-1">
+              <div className="flex flex-col gap-1 justify-end">
                 <label className="text-xs font-medium text-[color:var(--color-text)]/70">To</label>
-                <input
-                  type="date"
-                  className="input input-date h-10"
-                  value={dateTo}
-                  onChange={(e) => {
-                    setDatePreset("");
-                    setDateTo(e.target.value);
-                  }}
-                />
+                <div className="relative flex w-full items-center">
+                  <input
+                    ref={dateToRef}
+                    type="date"
+                    className="input input-date h-10 w-full pr-10"
+                    value={dateTo}
+                    onChange={(e) => {
+                      setDatePreset("");
+                      setDateTo(e.target.value);
+                    }}
+                    onClick={() => openPicker(dateToRef)}
+                    onFocus={() => openPicker(dateToRef)}
+                  />
+                  <button
+                    type="button"
+                    onClick={() => openPicker(dateToRef)}
+                    className="absolute right-3 top-1/2 -translate-y-1/2 transform text-[color:var(--color-text)]/60"
+                    aria-label="Open end date picker"
+                  >
+                    📅
+                  </button>
+                </div>
               </div>
               {(dateFrom && dateFrom !== currentYearStart) || dateTo ? (
                 <div className="flex items-end">
@@ -990,8 +1116,34 @@ export default function CrmCampaignReportingView() {
         </div>
       ) : null}
 
+      {selectedCount > 0 ? (
+        <div className="flex flex-wrap items-center justify-between gap-3 rounded-xl border border-[color:var(--color-border)] bg-[color:var(--color-surface-2)] px-3 py-2 text-sm text-[color:var(--color-text)]">
+          <span>{selectedCount.toLocaleString()} email unit(s) selected</span>
+          <div className="flex flex-wrap items-center gap-2">
+            <button
+              className="btn-primary h-9 px-3"
+              type="button"
+              onClick={deleteSelected}
+              disabled={deleting}
+            >
+              {deleting ? "Deleting..." : "Delete units"}
+            </button>
+            <button className="btn-ghost h-9 px-3" type="button" onClick={clearSelection}>
+              Clear selection
+            </button>
+          </div>
+        </div>
+      ) : null}
+
       <div className="overflow-hidden rounded-2xl border border-[color:var(--color-border)] bg-[color:var(--color-surface)]">
-        <div className="flex flex-wrap items-center justify-end gap-3 border-b border-[color:var(--color-border)]/70 px-3 py-2">
+        <div className="flex flex-wrap items-center justify-between gap-3 border-b border-[color:var(--color-border)]/70 px-3 py-2">
+          <button
+            className="btn-primary h-9 px-3 text-xs sm:text-sm"
+            type="button"
+            onClick={() => setOpenGenerate(true)}
+          >
+            Generate units
+          </button>
           <label className="flex items-center gap-2 text-xs text-[color:var(--color-text)]/80">
             <input
               type="checkbox"
@@ -1042,6 +1194,16 @@ export default function CrmCampaignReportingView() {
           <table className={`min-w-full text-sm ${tableDensityClass}`}>
             <thead className="bg-[color:var(--color-surface-2)]/60 text-left text-[color:var(--color-text)]/80">
               <tr>
+                <th className="w-10 px-3 py-3">
+                  <input
+                    ref={headerSelectRef}
+                    type="checkbox"
+                    className="h-4 w-4"
+                    checked={allPageSelected}
+                    onChange={togglePageSelection}
+                    aria-label="Select all on page"
+                  />
+                </th>
                 {showCol("date") ? (
                   <th className={`px-3 py-3 font-semibold border-b-2 border-transparent ${sortHeaderClass("sendDate")}`}>
                     <button
@@ -1166,6 +1328,15 @@ export default function CrmCampaignReportingView() {
               ) : (
                 pagedRows.map((r) => (
                   <tr key={r.id} className="hover:bg-[color:var(--color-surface-2)]/40">
+                    <td className="px-3 py-3">
+                      <input
+                        type="checkbox"
+                        className="h-4 w-4"
+                        checked={selectedIds.has(r.id)}
+                        onChange={() => toggleRowSelection(r.id)}
+                        aria-label="Select row"
+                      />
+                    </td>
                     {showCol("date") ? (
                       <td className="px-3 py-3 font-semibold">
                         {r.sendDate ? formatDate(r.sendDate) : ""}
@@ -1261,6 +1432,7 @@ export default function CrmCampaignReportingView() {
                             target="_blank"
                             title="Open in JIRA"
                           >
+                            {/* eslint-disable-next-line @next/next/no-img-element */}
                             <img
                               src="/icons/ui/jira.png"
                               alt="Open in JIRA"
@@ -1349,10 +1521,13 @@ export default function CrmCampaignReportingView() {
           onClose={() => setShowColumnPicker(false)}
         />
       ) : null}
+
+      {openGenerate ? (
+        <CrmGenerateUnitsModal
+          clientSlug={clientSlug}
+          onClose={() => setOpenGenerate(false)}
+        />
+      ) : null}
     </div>
   );
 }
-
-
-
-

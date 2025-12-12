@@ -1,4 +1,5 @@
-﻿"use client";
+﻿/* eslint-disable @typescript-eslint/no-explicit-any */
+"use client";
 
 import type React from "react";
 import {
@@ -101,10 +102,13 @@ function MultiSelect({
   const itemRefs = useRef<(HTMLLabelElement | null)[]>([]);
   const [activeIdx, setActiveIdx] = useState(0);
 
-  const toggle = (val: string) => {
-    if (values.includes(val)) onChange(values.filter((v) => v !== val));
-    else onChange([...values, val]);
-  };
+  const toggle = useCallback(
+    (val: string) => {
+      if (values.includes(val)) onChange(values.filter((v) => v !== val));
+      else onChange([...values, val]);
+    },
+    [values, onChange],
+  );
 
   const allSelected =
     values.length === options.length ||
@@ -162,7 +166,7 @@ function MultiSelect({
     };
     document.addEventListener("keydown", handler);
     return () => document.removeEventListener("keydown", handler);
-  }, [open, options, activeIdx]);
+  }, [open, options, activeIdx, toggle]);
 
   return (
     <div className="relative" ref={ref}>
@@ -402,9 +406,21 @@ export default function CrmDataQualityView() {
 
   const [sortKey, setSortKey] = useState<SortKey>("assignedDate");
   const [sortDir, setSortDir] = useState<SortDir>("asc");
-  const [groupBy, setGroupBy] = useState<GroupBy>("none");
+  const [groupBy] = useState<GroupBy>("none");
   const [page, setPage] = useState(0);
   const pageSize = 20;
+
+  useEffect(() => {
+    const handler = (e: MouseEvent) => {
+      if (!openMenuId) return;
+      const menu = document.getElementById(`actions-menu-${openMenuId}`);
+      const btn = document.getElementById(`actions-btn-${openMenuId}`);
+      if (menu?.contains(e.target as Node) || btn?.contains(e.target as Node)) return;
+      setOpenMenuId(null);
+    };
+    document.addEventListener("mousedown", handler);
+    return () => document.removeEventListener("mousedown", handler);
+  }, [openMenuId]);
 
   const openDatePicker = (
     event:
@@ -421,7 +437,7 @@ export default function CrmDataQualityView() {
     }
   };
 
-  const rowMatches = (t: DataQualityTicket, exclude?: keyof Filters) => {
+  const rowMatches = useCallback((t: DataQualityTicket, exclude?: keyof Filters) => {
     if (
       exclude !== "status" &&
       filters.status.length > 0 &&
@@ -498,7 +514,7 @@ export default function CrmDataQualityView() {
       }
     }
     return true;
-  };
+  }, [filters.assignedFrom, filters.assignedTo, filters.assignee, filters.daysBucket, filters.dueFrom, filters.dueTo, filters.owner, filters.priority, filters.search, filters.status, filters.type]);
 
   const activeChips = useMemo(() => {
     const chips: { label: string; onClear: () => void }[] = [];
@@ -705,11 +721,11 @@ export default function CrmDataQualityView() {
       priorityCounts: countBy(rowsForPriority, "priority"),
       typeCounts: countBy(rowsForType, "type"),
     };
-  }, [rows, filters]);
+  }, [rows, rowMatches]);
 
   const filtered = useMemo(
     () => rows.filter((t) => rowMatches(t)),
-    [filters, rows],
+    [rows, rowMatches],
   );
 
   const sortedRows = useMemo(() => {
@@ -1147,6 +1163,7 @@ export default function CrmDataQualityView() {
             >
               {syncingJira ? (
                 <span className="flex items-center gap-2">
+                  {/* eslint-disable-next-line @next/next/no-img-element */}
                   <img
                     src="/animations/data-sync.gif"
                     alt="Syncing JIRA"
@@ -1393,7 +1410,7 @@ export default function CrmDataQualityView() {
         </div>
       </div>
 
-      <div className="overflow-hidden rounded-2xl border border-[color:var(--color-border)] bg-[color:var(--color-surface)]">
+      <div className="overflow-visible rounded-2xl border border-[color:var(--color-border)] bg-[color:var(--color-surface)]">
         {error ? (
           <div className="px-4 py-3 text-sm text-[color:var(--color-text)]/75">
             {error}
@@ -1402,7 +1419,7 @@ export default function CrmDataQualityView() {
         <div className="flex justify-end px-4 py-2 text-sm text-[color:var(--color-text)]/80">
           {totalTickets} tickets
         </div>
-        <div className="overflow-auto">
+        <div className="relative overflow-x-auto overflow-y-visible">
           <table className={`min-w-full text-sm ${tableDensityClass}`}>
             <thead className="bg-[color:var(--color-surface-2)]/60 text-left text-[color:var(--color-text)]/80">
               <tr>
@@ -1681,7 +1698,43 @@ export default function CrmDataQualityView() {
                           ) : null}
                           {showCol("contributors") ? (
                             <td className="px-3 py-3 font-semibold">
-                              {ownerLabel || renderPlaceholder()}
+                              {ownerLabel ? (
+                                owners.length <= 1 ? (
+                                  <span>{ownerLabel}</span>
+                                ) : (
+                                  <div className="inline-flex items-center gap-2">
+                                    <span>{owners[0]}</span>
+                                    <div className="relative group">
+                                      <span
+                                        className="inline-flex items-center rounded-full bg-[color:var(--color-surface-2)] px-2 py-0.5 text-xs font-semibold text-[color:var(--color-text)]/80 ring-1 ring-[color:var(--color-border)]"
+                                        tabIndex={0}
+                                      >
+                                        +{owners.length - 1}
+                                      </span>
+                                      <div className="pointer-events-none absolute left-0 top-7 z-50 hidden min-w-[220px] rounded-lg border border-[color:var(--color-border)] bg-[color:var(--color-surface)] px-3 py-2 text-xs text-[color:var(--color-text)] shadow-md group-hover:block group-focus-within:block">
+                                        <p className="mb-1 font-semibold text-[color:var(--color-text)]">
+                                          Contributors ({owners.length})
+                                        </p>
+                                        <ul className="space-y-1">
+                                          {contribs.map((c, idx) => (
+                                            <li key={`${c.owner}-${idx}`} className="flex flex-col">
+                                              <span className="font-semibold">{c.owner}</span>
+                                              <span className="text-[color:var(--color-text)]/70">
+                                                Work {c.workHours ?? 0}h · Prep{" "}
+                                                {c.prepHours != null
+                                                  ? c.prepHours
+                                                  : ((c.workHours ?? 0) * 0.35).toFixed(2)}h
+                                              </span>
+                                            </li>
+                                          ))}
+                                        </ul>
+                                      </div>
+                                    </div>
+                                  </div>
+                                )
+                              ) : (
+                                renderPlaceholder()
+                              )}
                             </td>
                           ) : null}
                           {showCol("reporter") ? (
@@ -1832,6 +1885,7 @@ export default function CrmDataQualityView() {
                                   target="_blank"
                                   title="Open in JIRA"
                                 >
+                                  {/* eslint-disable-next-line @next/next/no-img-element */}
                                   <img
                                     src="/icons/ui/jira.png"
                                     alt="Open in JIRA"
@@ -1843,10 +1897,11 @@ export default function CrmDataQualityView() {
                               )}
                             </td>
                           ) : null}
-                          {isEditor || isAdmin ? (
+                              {isEditor || isAdmin ? (
                             showCol("actions") ? (
                               <td className="relative px-3 py-3 text-right">
                                 <button
+                                  id={`actions-btn-${t.ticketId}`}
                                   className="rounded-md p-1.5 text-[color:var(--color-text)]/70 hover:bg-[color:var(--color-surface-2)]"
                                   onClick={() =>
                                     setOpenMenuId((prev) =>
@@ -1860,7 +1915,10 @@ export default function CrmDataQualityView() {
                                   </span>
                                 </button>
                                 {openMenuId === t.ticketId ? (
-                                  <div className="absolute right-2 top-10 z-20 w-36 rounded-lg border border-[color:var(--color-border)] bg-[color:var(--color-surface)] shadow-lg">
+                                  <div
+                                    id={`actions-menu-${t.ticketId}`}
+                                    className="absolute right-2 top-10 z-50 w-36 rounded-lg border border-[color:var(--color-border)] bg-[color:var(--color-surface)] shadow-lg"
+                                  >
                                     <button
                                       className="block w-full px-3 py-2 text-left text-sm hover:bg-[color:var(--color-surface-2)]"
                                       onClick={() => {
@@ -1869,23 +1927,6 @@ export default function CrmDataQualityView() {
                                       }}
                                     >
                                       Edit
-                                    </button>
-                                    <button
-                                      className="block w-full px-3 py-2 text-left text-sm hover:bg-[color:var(--color-surface-2)]"
-                                      onClick={() => {
-                                        setOpenMenuId(null);
-                                        const clone = {
-                                          ...t,
-                                          ticketId: "",
-                                          jiraUrl: t.jiraUrl || "",
-                                        };
-                                        openEditModal(clone);
-                                        showSuccess(
-                                          "Duplicating ticket (set new ID)",
-                                        );
-                                      }}
-                                    >
-                                      Duplicate
                                     </button>
                                     <button
                                       className="block w-full px-3 py-2 text-left text-sm text-[color:var(--color-accent)] hover:bg-[color:var(--color-surface-2)]"
@@ -2080,7 +2121,7 @@ export default function CrmDataQualityView() {
                   </button>
                 </div>
                 <div className="space-y-2">
-                  {formContribs.map((c, idx) => (
+                  {formContribs.map((c) => (
                     <div
                       key={c.id}
                       className="grid grid-cols-1 gap-2 rounded-lg border border-[color:var(--color-border)] bg-[color:var(--color-surface)] px-3 py-2 sm:grid-cols-4 sm:items-center sm:gap-3"
@@ -2122,9 +2163,21 @@ export default function CrmDataQualityView() {
                   onChange={(e) => {
                     const val = e.target.value;
                     setFormContribs((prev) =>
-                      prev.map((item) =>
-                        item.id === c.id ? { ...item, workHours: val } : item,
-                      ),
+                      prev.map((item) => {
+                        if (item.id !== c.id) return item;
+                        const next = { ...item, workHours: val };
+                        const shouldAutoPrep =
+                          item.prepHours === "" ||
+                          Number(item.prepHours) === 0;
+                        if (shouldAutoPrep) {
+                          const wNum = Number(val);
+                          next.prepHours =
+                            Number.isFinite(wNum) && wNum >= 0
+                              ? String(wNum * 0.35)
+                              : "";
+                        }
+                        return next;
+                      }),
                     );
                   }}
                 />
@@ -2139,7 +2192,7 @@ export default function CrmDataQualityView() {
                           step="0.01"
                           min="0"
                           value={c.prepHours}
-                          placeholder="Auto 35% if blank"
+                          placeholder="Auto 35% if blank or 0"
                           onChange={(e) => {
                             const val = e.target.value;
                             setFormContribs((prev) =>

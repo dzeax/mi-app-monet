@@ -14,21 +14,21 @@ type Props = {
 export default async function CrmModulePage({ params }: Props) {
   const { client: clientSlug, module: moduleSlug } = await params;
   const client = getCrmClient(clientSlug);
-  const module = getCrmModule(client, moduleSlug);
+  const moduleConfig = getCrmModule(client, moduleSlug);
 
-  if (!client || !module) {
+  if (!client || !moduleConfig) {
     notFound();
   }
 
-  if (module.type === 'data_quality') {
+  if (moduleConfig.type === 'data_quality') {
     return <CrmDataQualityView />;
   }
-  if (module.type === 'campaign_reporting') {
+  if (moduleConfig.type === 'campaign_reporting') {
     return <CrmCampaignReportingView />;
   }
 
   // Temporary placeholders for modules not yet implemented
-  if (module.type === 'runbook' || module.type === 'insights' || module.comingSoon) {
+  if (moduleConfig.type === 'runbook' || moduleConfig.type === 'insights' || moduleConfig.comingSoon) {
     return <CrmOperationsOverview />;
   }
 

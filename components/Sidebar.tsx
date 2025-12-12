@@ -14,6 +14,7 @@ import ManageUsersModal from "@/components/admin/ManageUsersModal";
 import ManageRatesModal from "@/components/rates/ManageRatesModal";
 import CrmImportModal from "@/components/crm/CrmImportModal";
 import CrmCatalogsModal from "@/components/crm/CrmCatalogsModal";
+import CrmEffortRulesModal from "@/components/crm/CrmEffortRulesModal";
 
 type Props = {
   collapsed: boolean;
@@ -48,6 +49,7 @@ export default function Sidebar({
   const [openRates, setOpenRates] = useState(false);
   const [openCrmImport, setOpenCrmImport] = useState(false);
   const [openCrmCatalogs, setOpenCrmCatalogs] = useState(false);
+  const [openEffortRules, setOpenEffortRules] = useState(false);
 
   // Density (comfy|compact) persisted
   const [density, setDensity] = useState<"comfy" | "compact">("comfy");
@@ -325,6 +327,18 @@ export default function Sidebar({
             {!collapsed && <span>Manage rates</span>}
           </button>
         ) : null,
+        isAdmin ? (
+          <button
+            key="crm-effort-rules"
+            onClick={() => setOpenEffortRules(true)}
+            className={btnBase(openEffortRules ? "sidebar-btn--active" : "")}
+            title="Effort rules"
+            aria-label="Effort rules"
+          >
+            <Image src="/icons/sidebar/manage-catalogs.svg" alt="" aria-hidden width={24} height={24} className="sidebar-icon" />
+            {!collapsed && <span>Effort Rules</span>}
+          </button>
+        ) : null,
       ],
     },
   ];
@@ -448,6 +462,15 @@ export default function Sidebar({
           }}
         />
       )}
+      {unit === "crm" && isAdmin && openEffortRules && activeClient && (
+        <CrmEffortRulesModal
+          clientSlug={activeClient.slug}
+          onClose={() => {
+            setOpenEffortRules(false);
+            onActionDone?.();
+          }}
+        />
+      )}
       {unit === "monetization" && openManage && (
         <ManageCatalogsModal
           onClose={() => {
@@ -475,4 +498,3 @@ export default function Sidebar({
     </aside>
   );
 }
-

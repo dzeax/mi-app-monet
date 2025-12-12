@@ -1,11 +1,26 @@
 import { NextResponse } from "next/server";
 import { cookies } from "next/headers";
 import { createRouteHandlerClient } from "@supabase/auth-helpers-nextjs";
+import { supabaseAdmin } from "@/lib/supabase/admin";
 import { z } from "zod";
 import { parse } from "csv-parse/sync";
 
 const DEFAULT_CLIENT = "emg";
 export const runtime = "nodejs";
+
+type ContributionInput = {
+  owner?: unknown;
+  workHours?: unknown;
+  prepHours?: unknown;
+  notes?: unknown;
+};
+
+type Contribution = {
+  owner: string;
+  workHours: number;
+  prepHours: number | null;
+  notes: string | null;
+};
 
 const ContributionZ = z.object({
   owner: z.string().min(1),
@@ -36,12 +51,12 @@ const TicketPayloadZ = z.object({
 });
 
 const normalizeContributions = (
-  contribs: any[] | undefined,
+  contribs: ContributionInput[] | undefined,
   fallbackOwner: string,
   fallbackWork: number,
   fallbackPrep: number | null,
 ) => {
-  const list =
+  const list: ContributionInput[] =
     contribs && Array.isArray(contribs) && contribs.length > 0
       ? contribs
       : [
@@ -70,9 +85,7 @@ const normalizeContributions = (
     .filter((c) => c.owner);
 };
 
-const aggregateTotals = (
-  contributions: { owner: string; workHours: number; prepHours: number }[],
-) => {
+const aggregateTotals = (contributions: Contribution[]) => {
   return contributions.reduce(
     (acc, c) => {
       acc.work += c.workHours;
@@ -86,11 +99,18 @@ const aggregateTotals = (
 export async function GET(request: Request) {
   const cookieStore = await cookies();
   const supabase = createRouteHandlerClient({ cookies: () => cookieStore });
+  const admin = supabaseAdmin();
+  const {
+    data: { session },
+  } = await supabase.auth.getSession();
+  if (!session) {
+    return NextResponse.json({ error: "Not authenticated" }, { status: 401 });
+  }
   const { searchParams } = new URL(request.url);
   const client = searchParams.get("client") || DEFAULT_CLIENT;
 
   try {
-    const { data, error } = await supabase
+    const { data, error } = await admin
       .from("crm_data_quality_tickets")
       .select("*")
       .eq("client_slug", client)
@@ -122,36 +142,55 @@ export async function GET(request: Request) {
       jiraAssignee: row.jira_assignee ?? null,
       createdAt: row.created_at,
       updatedAt: row.updated_at,
-      contributions: [] as any[],
+      contributions: [] as Contribution[],
       hasContributions: false,
     }));
 
     const ids = tickets.map((t) => t.id);
     if (ids.length > 0) {
-      const { data: contribs, error: contribError } = await supabase
-        .from("crm_data_quality_contributions")
-        .select("*")
-        .in("ticket_id", ids);
-      if (!contribError && Array.isArray(contribs)) {
-        const map = new Map<string, any[]>();
-        contribs.forEach((c) => {
-          const arr = map.get(c.ticket_id) || [];
+      const CHUNK = 200;
+      type ContributionRow = {
+        ticket_id?: string;
+        owner?: string;
+        work_hours?: number | string | null;
+        prep_hours?: number | string | null;
+        notes?: string | null;
+      };
+      const contribRows: ContributionRow[] = [];
+      for (let i = 0; i < ids.length; i += CHUNK) {
+        const slice = ids.slice(i, i + CHUNK);
+        const { data: contribs, error: contribError } = await admin
+          .from("crm_data_quality_contributions")
+          .select("*")
+          .in("ticket_id", slice);
+        if (contribError) {
+          console.error("[crm:data-quality] contribError chunk", { error: contribError, from: i, to: i + CHUNK });
+          continue;
+        }
+        if (Array.isArray(contribs)) {
+          contribRows.push(...contribs);
+        }
+      }
+      if (contribRows.length > 0) {
+        const map = new Map<string, Contribution[]>();
+        contribRows.forEach((c) => {
+          const ticketId = c.ticket_id || "";
+          if (!ticketId) return;
+          const arr = map.get(ticketId) || [];
           arr.push({
-            owner: c.owner,
+            owner: c.owner || "",
             workHours: Number(c.work_hours ?? 0),
             prepHours: c.prep_hours != null ? Number(c.prep_hours) : null,
             notes: c.notes ?? null,
           });
-          map.set(c.ticket_id, arr);
+          map.set(ticketId, arr);
         });
         tickets.forEach((t) => {
           const contribs = map.get(t.id);
           if (contribs?.length) {
             t.contributions = contribs;
             t.hasContributions = true;
-            const totals = aggregateTotals(
-              contribs as { owner: string; workHours: number; prepHours: number }[],
-            );
+            const totals = aggregateTotals(contribs);
             t.workHours = totals.work;
             t.prepHours = totals.prep;
             t.owner = contribs[0].owner;
@@ -184,6 +223,7 @@ export async function POST(request: Request) {
     if (!userId) {
       return NextResponse.json({ error: "Not authenticated" }, { status: 401 });
     }
+    const admin = supabaseAdmin();
 
     const contributions = normalizeContributions(
       parsed.contributions,
@@ -228,7 +268,14 @@ export async function POST(request: Request) {
 
     const ticketId = data.id as string;
     // replace contributions
-    await supabase.from("crm_data_quality_contributions").delete().eq("ticket_id", ticketId);
+    // Replace contributions using service role to avoid RLS delete/insert issues
+    const { error: deleteContribError } = await admin
+      .from("crm_data_quality_contributions")
+      .delete()
+      .eq("ticket_id", ticketId);
+    if (deleteContribError) {
+      throw new Error(`Failed to clear contributions: ${deleteContribError.message}`);
+    }
     const contribPayload = contributions.map((c) => ({
       ticket_id: ticketId,
       client_slug: clientSlug,
@@ -239,9 +286,20 @@ export async function POST(request: Request) {
       created_by: userId,
     }));
     if (contribPayload.length > 0) {
-      await supabase.from("crm_data_quality_contributions").upsert(contribPayload, {
-        onConflict: "ticket_id,owner",
-      });
+      const { error: contribError } = await admin
+        .from("crm_data_quality_contributions")
+        .upsert(contribPayload, { onConflict: "ticket_id,owner" });
+      if (contribError) {
+        throw new Error(`Failed to save contributions: ${contribError.message}`);
+      }
+    }
+
+    const { data: contribRows, error: contribSelectError } = await admin
+      .from("crm_data_quality_contributions")
+      .select("*")
+      .eq("ticket_id", ticketId);
+    if (contribSelectError) {
+      throw new Error(`Failed to reload contributions: ${contribSelectError.message}`);
     }
 
     const ticket = {
@@ -264,7 +322,12 @@ export async function POST(request: Request) {
       comments: data.comments,
       createdAt: data.created_at,
       updatedAt: data.updated_at,
-      contributions,
+      contributions: contribRows?.map((c) => ({
+        owner: c.owner,
+        workHours: Number(c.work_hours ?? 0),
+        prepHours: c.prep_hours != null ? Number(c.prep_hours) : null,
+        notes: c.notes ?? null,
+      })),
     };
 
     return NextResponse.json({ ticket }, { status: 201 });
@@ -297,7 +360,7 @@ export async function PUT(request: Request) {
     const firstLine = csvText.split(/\r?\n/, 1)[0] || "";
     const delimiter = firstLine.includes(";") && !firstLine.includes(",") ? ";" : ",";
 
-    const records: any[] = parse(csvText, {
+    const records: Record<string, unknown>[] = parse(csvText, {
       columns: true,
       skip_empty_lines: true,
       trim: true,
@@ -360,7 +423,6 @@ export async function PUT(request: Request) {
     }
     const userId = sessionData.session?.user?.id;
     if (!userId) return NextResponse.json({ error: "Not authenticated" }, { status: 401 });
-
     const payload = cleaned.map((row) => ({
       ...row,
       created_by: userId,
@@ -401,6 +463,7 @@ export async function PATCH(request: Request) {
     }
     const userId = sessionData.session?.user?.id;
     if (!userId) return NextResponse.json({ error: "Not authenticated" }, { status: 401 });
+    const admin = supabaseAdmin();
 
     const contributions = normalizeContributions(
       parsed.contributions,
@@ -446,7 +509,13 @@ export async function PATCH(request: Request) {
     }
 
     const dbTicketId = data.id as string;
-    await supabase.from("crm_data_quality_contributions").delete().eq("ticket_id", dbTicketId);
+    const { error: deleteContribError } = await admin
+      .from("crm_data_quality_contributions")
+      .delete()
+      .eq("ticket_id", dbTicketId);
+    if (deleteContribError) {
+      throw new Error(`Failed to clear contributions: ${deleteContribError.message}`);
+    }
     const contribPayload = contributions.map((c) => ({
       ticket_id: dbTicketId,
       client_slug: clientSlug,
@@ -457,9 +526,20 @@ export async function PATCH(request: Request) {
       created_by: userId,
     }));
     if (contribPayload.length > 0) {
-      await supabase.from("crm_data_quality_contributions").upsert(contribPayload, {
-        onConflict: "ticket_id,owner",
-      });
+      const { error: contribError } = await admin
+        .from("crm_data_quality_contributions")
+        .upsert(contribPayload, { onConflict: "ticket_id,owner" });
+      if (contribError) {
+        throw new Error(`Failed to save contributions: ${contribError.message}`);
+      }
+    }
+
+    const { data: contribRows, error: contribSelectError } = await admin
+      .from("crm_data_quality_contributions")
+      .select("*")
+      .eq("ticket_id", dbTicketId);
+    if (contribSelectError) {
+      throw new Error(`Failed to reload contributions: ${contribSelectError.message}`);
     }
 
     const ticket = {
@@ -482,7 +562,12 @@ export async function PATCH(request: Request) {
       comments: data.comments,
       createdAt: data.created_at,
       updatedAt: data.updated_at,
-      contributions,
+      contributions: contribRows?.map((c) => ({
+        owner: c.owner,
+        workHours: Number(c.work_hours ?? 0),
+        prepHours: c.prep_hours != null ? Number(c.prep_hours) : null,
+        notes: c.notes ?? null,
+      })),
     };
 
     return NextResponse.json({ ticket });

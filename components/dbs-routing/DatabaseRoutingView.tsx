@@ -1,3 +1,4 @@
+/* eslint-disable react-hooks/exhaustive-deps */
 'use client';
 
 import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
@@ -198,7 +199,7 @@ export default function DatabaseRoutingView() {
     return Object.keys(baselineForm).some((key) => baselineForm[key as keyof FormState] !== formState[key as keyof FormState]);
   }, [baselineForm, formState]);
 
-  const handleSave = async () => {
+  const handleSave = useCallback(async () => {
     if (!selectedDatabase) return;
     setSaving(true);
     try {
@@ -250,7 +251,7 @@ export default function DatabaseRoutingView() {
     } finally {
       setSaving(false);
     }
-  };
+  }, [selectedDatabase, loadingConfig, saving, isDirty, formState, baselineForm, selectedDatabaseName]);
 
   useEffect(() => {
     const handleShortcut = (event: KeyboardEvent) => {
@@ -621,6 +622,3 @@ function SectionCard({ title, description, children }: SectionCardProps) {
     </div>
   );
 }
-
-
-

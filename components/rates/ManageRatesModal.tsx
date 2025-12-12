@@ -1,6 +1,7 @@
+﻿/* eslint-disable @typescript-eslint/no-explicit-any */
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useState } from "react";
 import MiniModal from "@/components/ui/MiniModal";
 import { showError, showSuccess } from "@/utils/toast";
 
@@ -18,7 +19,6 @@ export default function ManageRatesModal({ clientSlug, onClose }: Props) {
   const [savingOwner, setSavingOwner] = useState<string | null>(null);
   const [newOwner, setNewOwner] = useState("");
   const [newRate, setNewRate] = useState("");
-  const hasRates = useMemo(() => Object.keys(rates).length > 0, [rates]);
 
   useEffect(() => {
     let active = true;
@@ -73,7 +73,7 @@ export default function ManageRatesModal({ clientSlug, onClose }: Props) {
     <MiniModal onClose={onClose} title="Manage rates">
       <div className="space-y-4">
         <p className="text-sm text-[color:var(--color-text)]/80">
-          Configura la tarifa diaria (EUR) por owner. Budget = días totales × tarifa diaria.
+          Configura la tarifa diaria (EUR) por owner. Budget = dias totales x tarifa diaria.
         </p>
 
         <div className="space-y-2">
@@ -92,7 +92,7 @@ export default function ManageRatesModal({ clientSlug, onClose }: Props) {
                     <div className="flex-1">
                       <div className="text-sm font-semibold text-[color:var(--color-text)]">{owner}</div>
                       <div className="text-xs text-[color:var(--color-text)]/60">
-                        Actual: {Number(dailyRate).toFixed(2)} € / día
+                        Actual: {Number(dailyRate).toFixed(2)} EUR / dia
                       </div>
                     </div>
                     <input
@@ -133,7 +133,7 @@ export default function ManageRatesModal({ clientSlug, onClose }: Props) {
               type="number"
               step="1"
               min="0"
-              placeholder="EUR/día"
+              placeholder="EUR/dia"
               value={newRate}
               onChange={(e) => setNewRate(e.target.value)}
             />

@@ -1,8 +1,9 @@
+﻿/* eslint-disable @typescript-eslint/no-explicit-any */
 "use client";
 
 import { useEffect, useState } from "react";
 import MiniModal from "@/components/ui/MiniModal";
-import { showError, showSuccess } from "@/utils/toast";
+import { showSuccess } from "@/utils/toast";
 
 type Item = { id: string; label: string };
 

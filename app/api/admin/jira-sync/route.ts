@@ -53,7 +53,36 @@ function isTeamOwner(assignee?: { displayName?: string | null; emailAddress?: st
   return TEAM_OWNERS.some((name) => (display?.includes(name) ?? false) || (email?.includes(name) ?? false));
 }
 
-async function fetchIssues(jql: string, nextPageToken?: string | null) {
+type JiraIssueFields = {
+  summary?: string | null;
+  status?: { name?: string | null } | null;
+  priority?: { name?: string | null } | null;
+  assignee?: { displayName?: string | null; emailAddress?: string | null } | null;
+  issuetype?: { name?: string | null } | null;
+  created?: string | null;
+  duedate?: string | null;
+  parent?: {
+    key?: string | null;
+    fields?: { summary?: string | null; issuetype?: { name?: string | null } | null } | null;
+    issuetype?: { name?: string | null } | null;
+  } | null;
+  reporter?: { displayName?: string | null } | null;
+};
+
+type JiraIssue = {
+  key?: string;
+  fields?: JiraIssueFields | null;
+};
+
+type JiraSearchResponse = {
+  issues?: JiraIssue[];
+  nextPageToken?: string | null;
+};
+
+async function fetchIssues(
+  jql: string,
+  nextPageToken?: string | null,
+): Promise<JiraSearchResponse> {
   const base = process.env.JIRA_BASE;
   const email = process.env.JIRA_EMAIL;
   const token = process.env.JIRA_API_TOKEN;
@@ -85,7 +114,7 @@ async function fetchIssues(jql: string, nextPageToken?: string | null) {
     const body = await res.text().catch(() => '');
     throw new Error(`JIRA request failed (${res.status}): ${body}`);
   }
-  return res.json();
+  return (await res.json()) as JiraSearchResponse;
 }
 
 export const runtime = 'nodejs';
@@ -116,7 +145,8 @@ export async function POST(request: Request) {
 
     let nextPageToken: string | null | undefined = null;
     let pageCount = 0;
-    const payload: any[] = [];
+    type JiraRow = Record<string, unknown>;
+    const payload: JiraRow[] = [];
 
     do {
       const page = await fetchIssues(jql, nextPageToken);
@@ -211,8 +241,8 @@ export async function POST(request: Request) {
       contribs?.forEach((c) => contribMap.add(c.ticket_id as string));
     }
 
-    const toInsert: any[] = [];
-    const toUpdate: { id: string; data: any }[] = [];
+    const toInsert: JiraRow[] = [];
+    const toUpdate: { id: string; data: Record<string, unknown> }[] = [];
 
     payload.forEach((row) => {
       const key = row.ticket_id as string;
@@ -222,7 +252,7 @@ export async function POST(request: Request) {
         return;
       }
       // Preserve app-owned effort/comments, update only JIRA-owned fields.
-      const updateData: Record<string, any> = {
+      const updateData: Record<string, unknown> = {
         status: row.status,
         assigned_date: row.assigned_date,
         due_date: row.due_date,
