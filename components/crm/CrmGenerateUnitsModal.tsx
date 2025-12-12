@@ -579,40 +579,39 @@ const currentProfile = TIME_PROFILES[profileKey] ?? TIME_PROFILES.standard;
               <h3 className="text-sm font-semibold text-[color:var(--color-text)]">
                 Ticket & campaign basics
               </h3>
-              <div className="space-y-3 rounded-xl border border-[color:var(--color-border)] bg-[color:var(--color-surface-2)]/60 px-3 py-3">
-                <div className="grid grid-cols-1 gap-3">
-                  <div className="grid grid-cols-1 gap-2 md:grid-cols-[1.2fr_minmax(0,0.8fr)] items-end">
-                    <div className="space-y-1">
-                      <label className="text-xs font-medium text-[color:var(--color-text)]/70">
-                        JIRA ticket
-                      </label>
-                      <input
-                        className="input h-10 w-full"
-                        placeholder="CRM-1701"
-                        value={jiraTicket}
-                        onChange={(e) => setJiraTicket(e.target.value)}
-                      />
-                    </div>
-                    <div className="space-y-1 md:justify-self-end w-full md:w-auto">
-                      <label className="text-xs font-medium text-[color:var(--color-text)]/70">
-                        &nbsp;
-                      </label>
-                      <button
-                        type="button"
-                        className="btn-ghost h-10 w-full md:w-auto px-4"
-                        onClick={handleFetchJira}
-                        disabled={loadingJira || !jiraTicket.trim()}
-                      >
-                        {loadingJira ? "Fetching..." : "Fetch from JIRA"}
-                      </button>
-                    </div>
+              <div className="space-y-2 rounded-xl border border-[color:var(--color-border)] bg-[color:var(--color-surface-2)]/60 px-3 py-2">
+                <div className="grid grid-cols-2 gap-3">
+                  <div className="space-y-1">
+                    <label className="text-xs font-medium text-[color:var(--color-text)]/70 whitespace-nowrap">
+                      JIRA ticket
+                    </label>
+                    <input
+                      className="input h-9 w-full"
+                      placeholder="CRM-1701"
+                      value={jiraTicket}
+                      onChange={(e) => setJiraTicket(e.target.value)}
+                    />
+                  </div>
+
+                  <div className="flex flex-col items-end space-y-1">
+                    <label className="select-none text-xs font-medium text-transparent">
+                      Fetch
+                    </label>
+                    <button
+                      type="button"
+                      className="btn-ghost h-9 px-3 text-sm whitespace-nowrap"
+                      onClick={handleFetchJira}
+                      disabled={loadingJira || !jiraTicket.trim()}
+                    >
+                      {loadingJira ? "Fetching..." : "Fetch from JIRA"}
+                    </button>
                   </div>
 
                   {jiraError ? (
-                    <p className="text-xs text-[color:var(--color-accent)]">{jiraError}</p>
+                    <p className="col-span-2 text-xs text-[color:var(--color-accent)]">{jiraError}</p>
                   ) : null}
                   {jiraInfo ? (
-                    <div className="rounded-lg border border-[color:var(--color-border)] bg-[color:var(--color-surface)]/80 px-3 py-2 text-xs">
+                    <div className="col-span-2 rounded-lg border border-[color:var(--color-border)] bg-[color:var(--color-surface)]/80 px-3 py-2 text-xs">
                       <div className="flex flex-col gap-1 sm:flex-row sm:items-center sm:justify-between sm:gap-2">
                         <span className="font-semibold">
                           {jiraInfo.key} - {jiraInfo.title || "No title"}
@@ -636,62 +635,61 @@ const currentProfile = TIME_PROFILES[profileKey] ?? TIME_PROFILES.standard;
                     </div>
                   ) : null}
 
-                  <div className="space-y-1">
-                    <label className="text-xs font-medium text-[color:var(--color-text)]/70">
+                  <div className="col-span-2 space-y-1">
+                    <label className="text-xs font-medium text-[color:var(--color-text)]/70 whitespace-nowrap">
                       Campaign name
                     </label>
                     <input
-                      className="input h-10 w-full"
+                      className="input h-9 w-full"
                       placeholder="Black Friday 2025"
                       value={campaignName}
                       onChange={(e) => setCampaignName(e.target.value)}
                     />
                   </div>
 
-                  <div className="grid grid-cols-1 gap-3 md:grid-cols-2">
-                    <div className="space-y-1">
-                      <label className="text-xs font-medium text-[color:var(--color-text)]/70 whitespace-nowrap">
-                        Brand
-                      </label>
-                      <select
-                        className="input h-10 w-full"
-                        value={brand}
-                        onChange={(e) => {
-                          const next = e.target.value;
-                          setBrand(next);
-                          if (BRAND_MARKETS[next]) {
-                            setSelectedMarkets(BRAND_MARKETS[next]);
-                          } else setSelectedMarkets([]);
-                          if (BRAND_SEGMENTS[next]) setSelectedSegments(BRAND_SEGMENTS[next]);
-                          else setSelectedSegments([]);
-                        }}
-                      >
-                        <option value="" disabled>
-                          Select brand
-                        </option>
-                        <option value="Europcar">Europcar</option>
-                        <option value="Goldcar">Goldcar</option>
-                      </select>
-                    </div>
-                    <div className="space-y-1">
-                      <label className="text-xs font-medium text-[color:var(--color-text)]/70 whitespace-nowrap">
-                        Owner (builder)
-                      </label>
-                      <input
-                        list="crm-generate-owners"
-                        className="input h-10 w-full"
-                        placeholder="Who builds these emails?"
-                        value={owner}
-                        onChange={(e) => setOwner(e.target.value)}
-                      />
-                      {ownersCatalog.length > 0 ? (
-                        <datalist id="crm-generate-owners">
-                          {ownersCatalog.map((o) => (
-                            <option key={o} value={o} />
-                          ))}
-                        </datalist>
-                      ) : null}
-                    </div>
+                  <div className="space-y-1">
+                    <label className="text-xs font-medium text-[color:var(--color-text)]/70 whitespace-nowrap">
+                      Brand
+                    </label>
+                    <select
+                      className="input h-9 w-full"
+                      value={brand}
+                      onChange={(e) => {
+                        const next = e.target.value;
+                        setBrand(next);
+                        if (BRAND_MARKETS[next]) {
+                          setSelectedMarkets(BRAND_MARKETS[next]);
+                        } else setSelectedMarkets([]);
+                        if (BRAND_SEGMENTS[next]) setSelectedSegments(BRAND_SEGMENTS[next]);
+                        else setSelectedSegments([]);
+                      }}
+                    >
+                      <option value="" disabled>
+                        Select brand
+                      </option>
+                      <option value="Europcar">Europcar</option>
+                      <option value="Goldcar">Goldcar</option>
+                    </select>
+                  </div>
+
+                  <div className="space-y-1">
+                    <label className="text-xs font-medium text-[color:var(--color-text)]/70 whitespace-nowrap">
+                      Owner (builder)
+                    </label>
+                    <input
+                      list="crm-generate-owners"
+                      className="input h-9 w-full"
+                      placeholder="Select owner"
+                      value={owner}
+                      onChange={(e) => setOwner(e.target.value)}
+                    />
+                    {ownersCatalog.length > 0 ? (
+                      <datalist id="crm-generate-owners">
+                        {ownersCatalog.map((o) => (
+                          <option key={o} value={o} />
+                        ))}
+                      </datalist>
+                    ) : null}
                   </div>
                 </div>
                 <div className="text-[11px] text-[color:var(--color-text)]/60">
