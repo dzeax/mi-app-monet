@@ -599,11 +599,25 @@ const currentProfile = TIME_PROFILES[profileKey] ?? TIME_PROFILES.standard;
                     </label>
                     <button
                       type="button"
-                      className="btn-ghost h-9 px-3 text-sm whitespace-nowrap"
+                      className="inline-flex h-9 w-9 items-center justify-center rounded-md border border-[color:var(--color-border)] bg-[color:var(--color-surface)] transition hover:bg-[color:var(--color-surface-2)]/60 disabled:cursor-not-allowed disabled:opacity-50"
                       onClick={handleFetchJira}
                       disabled={loadingJira || !jiraTicket.trim()}
+                      title={loadingJira ? "Fetching from JIRA..." : "Fetch from JIRA"}
+                      aria-label="Fetch from JIRA"
                     >
-                      {loadingJira ? "Fetching..." : "Fetch from JIRA"}
+                      {loadingJira ? (
+                        <span className="h-4 w-4 animate-spin rounded-full border-2 border-[color:var(--color-border)] border-t-[color:var(--color-accent)]" />
+                      ) : (
+                        <>
+                          {/* eslint-disable-next-line @next/next/no-img-element */}
+                          <img
+                            src="/icons/ui/jira.png"
+                            alt="Fetch from JIRA"
+                            className="h-5 w-auto object-contain opacity-80"
+                          />
+                          <span className="sr-only">Fetch from JIRA</span>
+                        </>
+                      )}
                     </button>
                   </div>
 
@@ -678,8 +692,9 @@ const currentProfile = TIME_PROFILES[profileKey] ?? TIME_PROFILES.standard;
                     </label>
                     <input
                       list="crm-generate-owners"
-                      className="input h-9 w-full"
-                      placeholder="Select owner"
+                      className="input h-9 w-full placeholder:text-[12px]"
+                      placeholder="Who builds these emails?"
+                      inputMode="text"
                       value={owner}
                       onChange={(e) => setOwner(e.target.value)}
                     />
