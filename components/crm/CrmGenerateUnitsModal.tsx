@@ -581,44 +581,37 @@ const currentProfile = TIME_PROFILES[profileKey] ?? TIME_PROFILES.standard;
               </h3>
               <div className="space-y-2 rounded-xl border border-[color:var(--color-border)] bg-[color:var(--color-surface-2)]/60 px-3 py-2">
                 <div className="grid grid-cols-2 gap-3">
-                  <div className="space-y-1">
+                  <div className="col-span-2 space-y-1">
                     <label className="text-xs font-medium text-[color:var(--color-text)]/70 whitespace-nowrap">
                       JIRA ticket
                     </label>
-                    <input
-                      className="input h-9 w-full"
-                      placeholder="CRM-1701"
-                      value={jiraTicket}
-                      onChange={(e) => setJiraTicket(e.target.value)}
-                    />
-                  </div>
-
-                  <div className="flex flex-col items-end space-y-1">
-                    <label className="select-none text-xs font-medium text-transparent">
-                      Fetch
-                    </label>
-                    <button
-                      type="button"
-                      className="inline-flex h-9 w-9 items-center justify-center rounded-md border border-[color:var(--color-border)] bg-[color:var(--color-surface)] transition hover:bg-[color:var(--color-surface-2)]/60 disabled:cursor-not-allowed disabled:opacity-50"
-                      onClick={handleFetchJira}
-                      disabled={loadingJira || !jiraTicket.trim()}
-                      title={loadingJira ? "Fetching from JIRA..." : "Fetch from JIRA"}
-                      aria-label="Fetch from JIRA"
-                    >
-                      {loadingJira ? (
-                        <span className="h-4 w-4 animate-spin rounded-full border-2 border-[color:var(--color-border)] border-t-[color:var(--color-accent)]" />
-                      ) : (
-                        <>
-                          {/* eslint-disable-next-line @next/next/no-img-element */}
+                    <div className="relative">
+                      <input
+                        className="input h-9 w-full pr-10"
+                        placeholder="CRM-1701"
+                        value={jiraTicket}
+                        onChange={(e) => setJiraTicket(e.target.value)}
+                      />
+                      <button
+                        type="button"
+                        className="absolute right-2 top-1/2 inline-flex h-7 w-7 -translate-y-1/2 items-center justify-center rounded-md transition hover:bg-[color:var(--color-surface-2)]/60 disabled:cursor-not-allowed disabled:opacity-50"
+                        onClick={handleFetchJira}
+                        disabled={loadingJira || !jiraTicket.trim()}
+                        title={loadingJira ? "Fetching from JIRA..." : "Fetch from JIRA"}
+                        aria-label="Fetch from JIRA"
+                      >
+                        {loadingJira ? (
+                          <span className="h-4 w-4 animate-spin rounded-full border-2 border-[color:var(--color-border)] border-t-[color:var(--color-accent)]" />
+                        ) : (
+                          /* eslint-disable-next-line @next/next/no-img-element */
                           <img
                             src="/icons/ui/jira.png"
                             alt="Fetch from JIRA"
                             className="h-5 w-auto object-contain opacity-80"
                           />
-                          <span className="sr-only">Fetch from JIRA</span>
-                        </>
-                      )}
-                    </button>
+                        )}
+                      </button>
+                    </div>
                   </div>
 
                   {jiraError ? (
