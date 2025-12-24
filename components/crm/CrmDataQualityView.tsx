@@ -55,12 +55,17 @@ const STATUS_OPTIONS = [
 const OWNER_DEFAULTS = ["Stephane", "Lucas V."];
 const TYPE_DEFAULTS = ["DATA", "LIFECYCLE", "CAMPAIGNS", "GLOBAL", "OPS"];
 const NEEDS_EFFORT_STATUSES = new Set(["Validation", "Done"]);
-const DEFAULT_WORKSTREAM = "Data Quality";
+const DEFAULT_WORKSTREAM = "Data";
 const WORKSTREAM_DEFAULTS = [
   DEFAULT_WORKSTREAM,
-  "Strategy",
+  "Strategy & Governance",
   "Campaigns",
-  "Governance",
+  "Lifecycle",
+  "Prospect Lifecycle",
+  "NLP",
+  "Driver's Lifecycle (PBA)",
+  "Driver's Lifecycle (FDO)",
+  "Heatmap",
 ];
 
 const unique = (values: (string | null)[]) =>
@@ -564,9 +569,23 @@ const isZeroValue = (value?: number | string | null) => {
   return Number.isFinite(parsed) && parsed === 0;
 };
 
+const WORKSTREAM_ALIASES: Record<string, string> = {
+  "data quality": "Data",
+  data: "Data",
+  strategy: "Strategy & Governance",
+  governance: "Strategy & Governance",
+  "strategy & governance": "Strategy & Governance",
+  lifecyle: "Lifecycle",
+  "prospect lifecyle": "Prospect Lifecycle",
+  lifecycle: "Lifecycle",
+  "prospect lifecycle": "Prospect Lifecycle",
+};
+
 const normalizeWorkstream = (value?: string | null) => {
   const trimmed = value?.trim();
-  return trimmed ? trimmed : DEFAULT_WORKSTREAM;
+  if (!trimmed) return DEFAULT_WORKSTREAM;
+  const key = trimmed.toLowerCase();
+  return WORKSTREAM_ALIASES[key] ?? trimmed;
 };
 
 const normalizePersonKey = (value?: string | null) =>
@@ -803,6 +822,17 @@ export default function CrmDataQualityView() {
   const labelForPersonKey = useCallback(
     (key: string) => peopleById.get(key) ?? key,
     [peopleById],
+  );
+  const getRateForContribution = useCallback(
+    (contrib: { owner: string; personId?: string | null }) => {
+      const personKey = resolvePersonKey(contrib.owner, contrib.personId ?? null);
+      return (
+        (personKey ? ownerRates[personKey] : undefined) ??
+        (contrib.personId ? ownerRates[contrib.personId] : undefined) ??
+        ownerRates[contrib.owner]
+      );
+    },
+    [ownerRates, resolvePersonKey],
   );
   useEffect(() => {
     if (aliasToPersonId.size === 0) return;
@@ -1514,8 +1544,7 @@ export default function CrmDataQualityView() {
       const totalHours = totalWork + totalPrep;
       const totalDays = totalHours / 7;
       const budget = contribs.reduce((acc, c) => {
-        const rateKey = c.personId || c.owner;
-        const rate = ownerRates[rateKey]?.dailyRate;
+        const rate = getRateForContribution(c)?.dailyRate;
         if (rate != null) {
           const work = c.workHours ?? 0;
           const prep = c.prepHours != null ? c.prepHours : work * 0.35;
@@ -1568,7 +1597,7 @@ export default function CrmDataQualityView() {
       }
     };
     return withMeta.sort(cmp);
-  }, [filtered, sortKey, sortDir, ownerRates, filterContributionsByWorkstream]);
+  }, [filtered, sortKey, sortDir, getRateForContribution, filterContributionsByWorkstream]);
 
   useEffect(() => {
     const maxPage = Math.max(Math.ceil(sortedRows.length / pageSize) - 1, 0);
@@ -1638,13 +1667,12 @@ export default function CrmDataQualityView() {
         const days = hours / 7;
         totalHours += hours;
         totalDays += days;
-        const rateKey = c.personId || c.owner;
-        const rate = ownerRates[rateKey]?.dailyRate;
+        const rate = getRateForContribution(c)?.dailyRate;
         if (rate != null) totalBudget += days * rate;
       });
     });
     return { totalHours, totalDays, totalBudget };
-  }, [filtered, ownerRates, filterContributionsByWorkstream]);
+  }, [filtered, getRateForContribution, filterContributionsByWorkstream]);
 
   const handleChangeForm = (key: keyof typeof form, value: string) => {
     setForm((prev) => ({ ...prev, [key]: value }));
@@ -2624,8 +2652,7 @@ export default function CrmDataQualityView() {
                       const isZeroTotalHours = isZeroValue(totalHours);
                       const isZeroTotalDays = isZeroValue(totalDays);
                       const budget = contribs.reduce((acc, c) => {
-                        const rateKey = c.personId || c.owner;
-                        const rate = ownerRates[rateKey]?.dailyRate;
+                        const rate = getRateForContribution(c)?.dailyRate;
                         if (rate != null) {
                           const work = c.workHours ?? 0;
                           const prep = c.prepHours != null ? c.prepHours : work * 0.35;
@@ -2635,8 +2662,7 @@ export default function CrmDataQualityView() {
                       }, 0);
                       const budgetCurrency = (() => {
                         for (const c of contribs) {
-                          const rateKey = c.personId || c.owner;
-                          const currency = ownerRates[rateKey]?.currency;
+                          const currency = getRateForContribution(c)?.currency;
                           if (currency) return currency;
                         }
                         return "EUR";
