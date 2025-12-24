@@ -14,6 +14,21 @@ const UpsertRateZ = z.object({
 
 export const runtime = "nodejs";
 
+const normalizeAlias = (value: string) => value.trim().toLowerCase();
+
+const resolvePersonId = async (supabase: ReturnType<typeof createRouteHandlerClient>, clientSlug: string, owner: string) => {
+  const { data } = await supabase
+    .from("crm_people_aliases")
+    .select("alias, person_id")
+    .eq("client_slug", clientSlug);
+  const key = normalizeAlias(owner);
+  const match = (data ?? []).find(
+    (row: { alias?: string | null; person_id?: string | null }) =>
+      row.alias && row.person_id && normalizeAlias(row.alias) === key,
+  );
+  return match?.person_id ?? null;
+};
+
 export async function GET(request: Request) {
   const cookieStore = await cookies();
   const supabase = createRouteHandlerClient({ cookies: () => cookieStore });
@@ -37,6 +52,7 @@ export async function GET(request: Request) {
         id: row.id as string,
         clientSlug: row.client_slug as string,
         owner: row.owner as string,
+        personId: (row.person_id as string | null) ?? null,
         dailyRate: Number(row.daily_rate ?? 0),
         currency: (row.currency as string) || "EUR",
       })) ?? [];
@@ -74,6 +90,7 @@ export async function POST(request: Request) {
     const payload = {
       client_slug: clientSlug,
       owner,
+      person_id: await resolvePersonId(supabase, clientSlug, owner),
       daily_rate: parsed.dailyRate,
       currency: parsed.currency || "EUR",
       created_by: userId,
@@ -98,6 +115,7 @@ export async function POST(request: Request) {
       id: data.id as string,
       clientSlug: data.client_slug as string,
       owner: data.owner as string,
+      personId: (data.person_id as string | null) ?? null,
       dailyRate: Number(data.daily_rate ?? 0),
       currency: (data.currency as string) || "EUR",
     };

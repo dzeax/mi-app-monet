@@ -3,6 +3,7 @@ create table if not exists public.crm_owner_rates (
   id uuid primary key default uuid_generate_v4(),
   client_slug text not null references public.crm_clients(slug) on delete cascade,
   owner text not null,
+  person_id uuid references public.crm_people(id),
   daily_rate numeric not null check (daily_rate >= 0),
   currency text not null default 'EUR',
   valid_from date not null default (timezone('utc', now()))::date,
@@ -10,6 +11,13 @@ create table if not exists public.crm_owner_rates (
   created_at timestamptz not null default timezone('utc', now()),
   updated_at timestamptz not null default timezone('utc', now())
 );
+
+-- Backfill for existing deployments
+alter table public.crm_owner_rates
+  add column if not exists person_id uuid references public.crm_people(id);
+
+create index if not exists crm_owner_rates_client_person_idx
+  on public.crm_owner_rates (client_slug, person_id);
 
 -- Ensure one active rate per client/owner (latest row wins on conflict)
 do $$
@@ -93,4 +101,3 @@ create policy "Admins can delete owner rates"
         and au.role = 'admin'
     )
   );
-

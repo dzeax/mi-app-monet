@@ -15,6 +15,7 @@ create table if not exists public.campaign_email_units (
   touchpoint text, -- Launch / Repush / Last call, etc.
   variant text not null default '', -- A/B test or creative variant
   owner text not null, -- persona que produce el email
+  person_id uuid references public.crm_people(id),
   jira_ticket text not null,
   status text not null default 'Planned',
   hours_master_template numeric not null default 0,
@@ -62,6 +63,13 @@ create trigger set_timestamp
 before update on public.campaign_email_units
 for each row
 execute procedure public.trigger_set_timestamp();
+
+-- Backfill for existing deployments
+alter table public.campaign_email_units
+  add column if not exists person_id uuid references public.crm_people(id);
+
+create index if not exists campaign_email_units_client_person_idx
+  on public.campaign_email_units (client_slug, person_id);
 
 -- Helpful indexes for common filters
 create index if not exists campaign_email_units_client_send_date_idx

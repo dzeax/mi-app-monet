@@ -6,26 +6,36 @@ import { z } from "zod";
 import { parse } from "csv-parse/sync";
 
 const DEFAULT_CLIENT = "emg";
+const DEFAULT_WORKSTREAM = "Data Quality";
 export const runtime = "nodejs";
 
 type ContributionInput = {
   owner?: unknown;
+  personId?: unknown;
+  effortDate?: unknown;
   workHours?: unknown;
   prepHours?: unknown;
+  workstream?: unknown;
   notes?: unknown;
 };
 
 type Contribution = {
   owner: string;
+  personId: string | null;
+  effortDate: string | null;
   workHours: number;
   prepHours: number | null;
+  workstream: string;
   notes: string | null;
 };
 
 const ContributionZ = z.object({
   owner: z.string().min(1),
+  personId: z.string().uuid().nullable().optional(),
+  effortDate: z.string().min(1).nullable().optional(),
   workHours: z.number().nonnegative(),
   prepHours: z.number().nonnegative().nullable().optional(),
+  workstream: z.string().min(1).optional(),
   notes: z.string().nullable().optional(),
 });
 
@@ -50,11 +60,22 @@ const TicketPayloadZ = z.object({
   id: z.string().uuid().optional(),
 });
 
+const isIsoDate = (value: string) => /^\d{4}-\d{2}-\d{2}$/.test(value);
+
+const todaysIsoDate = () => new Date().toISOString().slice(0, 10);
+
+const defaultEffortDateForAssignedDate = (assignedDate: string) => {
+  const year = Number(assignedDate.slice(0, 4));
+  if (Number.isFinite(year) && year >= 2026) return todaysIsoDate();
+  return assignedDate;
+};
+
 const normalizeContributions = (
   contribs: ContributionInput[] | undefined,
   fallbackOwner: string,
   fallbackWork: number,
   fallbackPrep: number | null,
+  fallbackEffortDate: string,
 ) => {
   const list: ContributionInput[] =
     contribs && Array.isArray(contribs) && contribs.length > 0
@@ -62,23 +83,37 @@ const normalizeContributions = (
       : [
           {
             owner: fallbackOwner,
+            personId: null,
+            effortDate: fallbackEffortDate,
             workHours: fallbackWork,
             prepHours: fallbackPrep,
+            workstream: DEFAULT_WORKSTREAM,
           },
         ];
   return list
     .map((c) => {
+      const effortDateRaw =
+        typeof c.effortDate === "string" ? c.effortDate.trim() : "";
       const work = Number(c.workHours ?? 0);
       const prepRaw = c.prepHours;
       const prep =
         prepRaw == null || prepRaw === ""
           ? work * 0.35
           : Number(prepRaw);
+      const workstreamRaw =
+        typeof c.workstream === "string" ? c.workstream.trim() : "";
+      const personIdRaw =
+        typeof c.personId === "string" && c.personId.trim()
+          ? c.personId.trim()
+          : null;
       return {
         owner: String(c.owner || "").trim(),
+        personId: personIdRaw,
+        effortDate: effortDateRaw && isIsoDate(effortDateRaw) ? effortDateRaw : fallbackEffortDate,
         workHours: Number.isFinite(work) && work >= 0 ? work : 0,
         prepHours:
           Number.isFinite(prep) && prep >= 0 ? prep : work * 0.35,
+        workstream: workstreamRaw || DEFAULT_WORKSTREAM,
         notes: c.notes ? String(c.notes) : null,
       };
     })
@@ -94,6 +129,24 @@ const aggregateTotals = (contributions: Contribution[]) => {
     },
     { work: 0, prep: 0 },
   );
+};
+
+const normalizeAlias = (value: string) => value.trim().toLowerCase();
+
+const loadAliasMap = async (
+  admin: ReturnType<typeof supabaseAdmin>,
+  clientSlug: string,
+) => {
+  const { data } = await admin
+    .from("crm_people_aliases")
+    .select("alias, person_id")
+    .eq("client_slug", clientSlug);
+  const map = new Map<string, string>();
+  (data ?? []).forEach((row: { alias?: string | null; person_id?: string | null }) => {
+    if (!row.alias || !row.person_id) return;
+    map.set(normalizeAlias(row.alias), row.person_id);
+  });
+  return map;
 };
 
 export async function GET(request: Request) {
@@ -152,8 +205,11 @@ export async function GET(request: Request) {
       type ContributionRow = {
         ticket_id?: string;
         owner?: string;
+        person_id?: string | null;
+        effort_date?: string | null;
         work_hours?: number | string | null;
         prep_hours?: number | string | null;
+        workstream?: string | null;
         notes?: string | null;
       };
       const contribRows: ContributionRow[] = [];
@@ -179,8 +235,11 @@ export async function GET(request: Request) {
           const arr = map.get(ticketId) || [];
           arr.push({
             owner: c.owner || "",
+            personId: c.person_id ?? null,
+            effortDate: c.effort_date ?? null,
             workHours: Number(c.work_hours ?? 0),
             prepHours: c.prep_hours != null ? Number(c.prep_hours) : null,
+            workstream: c.workstream || DEFAULT_WORKSTREAM,
             notes: c.notes ?? null,
           });
           map.set(ticketId, arr);
@@ -224,13 +283,19 @@ export async function POST(request: Request) {
       return NextResponse.json({ error: "Not authenticated" }, { status: 401 });
     }
     const admin = supabaseAdmin();
+    const aliasMap = await loadAliasMap(admin, clientSlug);
 
+    const fallbackEffortDate = defaultEffortDateForAssignedDate(parsed.assignedDate);
     const contributions = normalizeContributions(
       parsed.contributions,
       parsed.owner,
       parsed.workHours,
       parsed.prepHours ?? null,
-    );
+      fallbackEffortDate,
+    ).map((c) => ({
+      ...c,
+      personId: c.personId ?? aliasMap.get(normalizeAlias(c.owner)) ?? null,
+    }));
     if (contributions.length === 0) {
       return NextResponse.json({ error: "At least one contribution is required" }, { status: 400 });
     }
@@ -280,15 +345,18 @@ export async function POST(request: Request) {
       ticket_id: ticketId,
       client_slug: clientSlug,
       owner: c.owner,
+      person_id: c.personId,
+      effort_date: c.effortDate,
       work_hours: c.workHours,
       prep_hours: c.prepHours,
+      workstream: c.workstream,
       notes: c.notes ?? null,
       created_by: userId,
     }));
     if (contribPayload.length > 0) {
       const { error: contribError } = await admin
         .from("crm_data_quality_contributions")
-        .upsert(contribPayload, { onConflict: "ticket_id,owner" });
+        .upsert(contribPayload, { onConflict: "ticket_id,owner,effort_date,workstream" });
       if (contribError) {
         throw new Error(`Failed to save contributions: ${contribError.message}`);
       }
@@ -324,8 +392,11 @@ export async function POST(request: Request) {
       updatedAt: data.updated_at,
       contributions: contribRows?.map((c) => ({
         owner: c.owner,
+        personId: c.person_id ?? null,
+        effortDate: c.effort_date ?? null,
         workHours: Number(c.work_hours ?? 0),
         prepHours: c.prep_hours != null ? Number(c.prep_hours) : null,
+        workstream: c.workstream || DEFAULT_WORKSTREAM,
         notes: c.notes ?? null,
       })),
     };
@@ -464,13 +535,19 @@ export async function PATCH(request: Request) {
     const userId = sessionData.session?.user?.id;
     if (!userId) return NextResponse.json({ error: "Not authenticated" }, { status: 401 });
     const admin = supabaseAdmin();
+    const aliasMap = await loadAliasMap(admin, clientSlug);
 
+    const fallbackEffortDate = defaultEffortDateForAssignedDate(parsed.assignedDate);
     const contributions = normalizeContributions(
       parsed.contributions,
       parsed.owner,
       parsed.workHours,
       parsed.prepHours ?? null,
-    );
+      fallbackEffortDate,
+    ).map((c) => ({
+      ...c,
+      personId: c.personId ?? aliasMap.get(normalizeAlias(c.owner)) ?? null,
+    }));
     if (contributions.length === 0) {
       return NextResponse.json({ error: "At least one contribution is required" }, { status: 400 });
     }
@@ -520,15 +597,18 @@ export async function PATCH(request: Request) {
       ticket_id: dbTicketId,
       client_slug: clientSlug,
       owner: c.owner,
+      person_id: c.personId,
+      effort_date: c.effortDate,
       work_hours: c.workHours,
       prep_hours: c.prepHours,
+      workstream: c.workstream,
       notes: c.notes ?? null,
       created_by: userId,
     }));
     if (contribPayload.length > 0) {
       const { error: contribError } = await admin
         .from("crm_data_quality_contributions")
-        .upsert(contribPayload, { onConflict: "ticket_id,owner" });
+        .upsert(contribPayload, { onConflict: "ticket_id,owner,effort_date,workstream" });
       if (contribError) {
         throw new Error(`Failed to save contributions: ${contribError.message}`);
       }
@@ -564,8 +644,11 @@ export async function PATCH(request: Request) {
       updatedAt: data.updated_at,
       contributions: contribRows?.map((c) => ({
         owner: c.owner,
+        personId: c.person_id ?? null,
+        effortDate: c.effort_date ?? null,
         workHours: Number(c.work_hours ?? 0),
         prepHours: c.prep_hours != null ? Number(c.prep_hours) : null,
+        workstream: c.workstream || DEFAULT_WORKSTREAM,
         notes: c.notes ?? null,
       })),
     };

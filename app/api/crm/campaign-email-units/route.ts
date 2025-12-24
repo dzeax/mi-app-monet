@@ -8,6 +8,27 @@ import { computeHoursForUnit } from "@/lib/crm/timeProfiles";
 const DEFAULT_CLIENT = "emg";
 export const runtime = "nodejs";
 
+const normalizeAlias = (value: string) => value.trim().toLowerCase();
+
+const loadAliasMap = async (
+  supabase: ReturnType<typeof createRouteHandlerClient>,
+  clientSlug: string,
+) => {
+  const { data } = await supabase
+    .from("crm_people_aliases")
+    .select("alias, person_id")
+    .eq("client_slug", clientSlug);
+  const map = new Map<string, string>();
+  (data ?? []).forEach((row: { alias?: string | null; person_id?: string | null }) => {
+    if (!row.alias || !row.person_id) return;
+    map.set(normalizeAlias(row.alias), row.person_id);
+  });
+  return map;
+};
+
+const resolvePersonId = (aliasMap: Map<string, string>, owner: string) =>
+  aliasMap.get(normalizeAlias(owner)) ?? null;
+
 const normalizeDate = (val: unknown): string | null => {
   if (!val) return null;
   const raw = String(val).trim();
@@ -54,6 +75,21 @@ const GeneratePayloadZ = z.object({
     .optional(),
 });
 
+const BulkUpdatePayloadZ = z.object({
+  client: z.string().optional(),
+  ids: z.array(z.string().min(1)).nonempty(),
+  patch: z
+    .object({
+      sendDate: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).optional(),
+      owner: z.string().min(1).optional(),
+      status: z.string().min(1).optional(),
+    })
+    .refine(
+      (v) => v.sendDate != null || v.owner != null || v.status != null,
+      "At least one patch field is required",
+    ),
+});
+
 type EffortRule = {
   id?: string;
   priority: number;
@@ -84,6 +120,7 @@ type CampaignUnitInsert = {
   touchpoint: string;
   variant: string;
   owner: string;
+  person_id?: string | null;
   jira_ticket: string;
   status: string;
   hours_master_template: number;
@@ -199,6 +236,7 @@ export async function GET(request: Request) {
       touchpoint: r.touchpoint,
       variant: r.variant || "",
       owner: r.owner,
+      personId: r.person_id ?? null,
       jiraTicket: r.jira_ticket,
       status: r.status,
       hoursMasterTemplate: Number(r.hours_master_template ?? 0),
@@ -270,6 +308,8 @@ export async function POST(request: Request) {
     if (!userId) {
       return NextResponse.json({ error: "Not authenticated" }, { status: 401 });
     }
+    const aliasMap = await loadAliasMap(supabase, clientSlug);
+    const personId = resolvePersonId(aliasMap, parsed.owner);
 
     const markets = Array.from(
       new Set(parsed.markets.map((m) => m.trim()).filter(Boolean)),
@@ -365,6 +405,7 @@ export async function POST(request: Request) {
               touchpoint,
               variant: variant || "",
               owner: parsed.owner,
+              person_id: personId,
               jira_ticket: parsed.jiraTicket,
               status: parsed.status,
               hours_master_template: hours.hours_master_template,
@@ -518,9 +559,11 @@ export async function PUT(request: Request) {
     }
     const userId = sessionData.session?.user?.id;
     if (!userId) return NextResponse.json({ error: "Not authenticated" }, { status: 401 });
+    const aliasMap = await loadAliasMap(supabase, clientSlug);
 
     const payload = deduped.map((row) => ({
       ...row,
+      person_id: row.owner ? resolvePersonId(aliasMap, row.owner) : null,
       created_by: userId,
     }));
 
@@ -570,6 +613,54 @@ export async function DELETE(request: Request) {
 
     return NextResponse.json({ deleted: ids.length });
   } catch (err) {
+    const msg = err instanceof Error ? err.message : "Unexpected error";
+    return NextResponse.json({ error: msg }, { status: 500 });
+  }
+}
+
+export async function PATCH(request: Request) {
+  const cookieStore = await cookies();
+  const supabase = createRouteHandlerClient({ cookies: () => cookieStore });
+
+  try {
+    const body = await request.json().catch(() => null);
+    const parsed = BulkUpdatePayloadZ.parse(body);
+    const client = parsed.client || DEFAULT_CLIENT;
+
+    const { data: sessionData, error: sessionError } = await supabase.auth.getSession();
+    if (sessionError) {
+      return NextResponse.json({ error: sessionError.message }, { status: 500 });
+    }
+    const userId = sessionData.session?.user?.id;
+    if (!userId) {
+      return NextResponse.json({ error: "Not authenticated" }, { status: 401 });
+    }
+
+    const update: Record<string, unknown> = {};
+    if (parsed.patch.sendDate) update.send_date = parsed.patch.sendDate;
+    if (parsed.patch.owner) {
+      const aliasMap = await loadAliasMap(supabase, client);
+      update.owner = parsed.patch.owner;
+      update.person_id = resolvePersonId(aliasMap, parsed.patch.owner);
+    }
+    if (parsed.patch.status) update.status = parsed.patch.status;
+
+    const { data, error } = await supabase
+      .from("campaign_email_units")
+      .update(update)
+      .in("id", parsed.ids)
+      .eq("client_slug", client)
+      .select("id");
+
+    if (error) {
+      return NextResponse.json({ error: error.message }, { status: 500 });
+    }
+
+    return NextResponse.json({ updated: data?.length ?? 0 });
+  } catch (err) {
+    if (err instanceof z.ZodError) {
+      return NextResponse.json({ error: err.message }, { status: 400 });
+    }
     const msg = err instanceof Error ? err.message : "Unexpected error";
     return NextResponse.json({ error: msg }, { status: 500 });
   }

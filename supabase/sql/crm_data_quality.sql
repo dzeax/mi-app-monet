@@ -40,15 +40,83 @@ create table if not exists public.crm_data_quality_contributions (
   id uuid primary key default uuid_generate_v4(),
   ticket_id uuid not null references public.crm_data_quality_tickets(id) on delete cascade,
   client_slug text not null references public.crm_clients(slug) on delete cascade,
+  effort_date date not null default (timezone('utc', now()))::date,
   owner text not null,
+  person_id uuid references public.crm_people(id),
   work_hours numeric not null default 0,
   prep_hours numeric,
+  workstream text not null default 'Data Quality',
   notes text,
   created_by uuid references auth.users(id),
   created_at timestamptz not null default timezone('utc', now()),
   updated_at timestamptz not null default timezone('utc', now()),
-  constraint crm_data_quality_contrib_unique_owner unique (ticket_id, owner)
+  constraint crm_data_quality_contrib_unique_owner_date_stream unique (ticket_id, owner, effort_date, workstream)
 );
+
+-- Backfill for existing deployments (create table won't add new columns / constraints)
+alter table public.crm_data_quality_contributions
+  add column if not exists effort_date date;
+
+alter table public.crm_data_quality_contributions
+  add column if not exists workstream text;
+
+alter table public.crm_data_quality_contributions
+  add column if not exists person_id uuid references public.crm_people(id);
+
+update public.crm_data_quality_contributions
+set workstream = 'Data Quality'
+where workstream is null;
+
+alter table public.crm_data_quality_contributions
+  alter column workstream set default 'Data Quality';
+
+alter table public.crm_data_quality_contributions
+  alter column workstream set not null;
+
+create index if not exists crm_data_quality_contrib_person_idx
+  on public.crm_data_quality_contributions (client_slug, person_id);
+
+-- For historical data, attribute effort to the ticket assigned_date (Option A)
+update public.crm_data_quality_contributions c
+set effort_date = t.assigned_date
+from public.crm_data_quality_tickets t
+where c.ticket_id = t.id
+  and c.effort_date is null;
+
+alter table public.crm_data_quality_contributions
+  alter column effort_date set default (timezone('utc', now()))::date;
+
+alter table public.crm_data_quality_contributions
+  alter column effort_date set not null;
+
+do $$
+begin
+  if exists (
+    select 1 from pg_constraint
+    where conname = 'crm_data_quality_contrib_unique_owner'
+  ) then
+    alter table public.crm_data_quality_contributions
+      drop constraint crm_data_quality_contrib_unique_owner;
+  end if;
+end$$;
+
+do $$
+begin
+  if exists (
+    select 1 from pg_constraint
+    where conname = 'crm_data_quality_contrib_unique_owner_date'
+  ) then
+    alter table public.crm_data_quality_contributions
+      drop constraint crm_data_quality_contrib_unique_owner_date;
+  end if;
+  if not exists (
+    select 1 from pg_constraint
+    where conname = 'crm_data_quality_contrib_unique_owner_date_stream'
+  ) then
+    alter table public.crm_data_quality_contributions
+      add constraint crm_data_quality_contrib_unique_owner_date_stream unique (ticket_id, owner, effort_date, workstream);
+  end if;
+end$$;
 
 -- Update timestamp trigger for contributions
 drop trigger if exists set_timestamp on public.crm_data_quality_contributions;

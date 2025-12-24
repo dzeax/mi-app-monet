@@ -69,6 +69,12 @@ export async function GET(request: Request) {
     const key = body.key as string | undefined;
     const title = (fields.summary as string | undefined) || "";
     const status = (fields.status?.name as string | undefined) || null;
+    const createdDate = (fields.created as string | undefined)?.slice(0, 10) || null;
+    const dueDate = (fields.duedate as string | undefined) || null;
+    const assignee =
+      (fields.assignee?.displayName as string | undefined) ||
+      (fields.assignee?.emailAddress as string | undefined) ||
+      null;
     const description =
       (fields.description && typeof fields.description === "string"
         ? (fields.description as string)
@@ -78,6 +84,9 @@ export async function GET(request: Request) {
       key: key || ticket,
       title,
       status,
+      createdDate,
+      dueDate,
+      assignee,
       url: `${base}/browse/${encodeURIComponent(key || ticket)}`,
       summary: title,
       description,
@@ -89,4 +98,3 @@ export async function GET(request: Request) {
     return NextResponse.json({ error: msg }, { status: 500 });
   }
 }
-

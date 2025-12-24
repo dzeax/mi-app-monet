@@ -10,11 +10,11 @@ type Props = {
   onImported?: () => void;
 };
 
-type ImportTarget = "data-quality" | "campaigns";
+type ImportTarget = "ticket-reporting" | "campaigns";
 
 const EXPECTED: Record<ImportTarget, { title: string; cols: string }> = {
-  "data-quality": {
-    title: "Data Quality tickets",
+  "ticket-reporting": {
+    title: "Ticket Reporting tickets",
     cols:
       "status, assigned_date, due_date, ticket_id, title, priority (P1/P2/P3), owner, reporter, type, jira_url, work_hours, prep_hours, eta_date, comments.",
   },
@@ -26,7 +26,7 @@ const EXPECTED: Record<ImportTarget, { title: string; cols: string }> = {
 };
 
 export default function CrmImportModal({ clientSlug, onClose, onImported }: Props) {
-  const [target, setTarget] = useState<ImportTarget>("data-quality");
+  const [target, setTarget] = useState<ImportTarget>("ticket-reporting");
   const [importing, setImporting] = useState(false);
   const [filename, setFilename] = useState<string | null>(null);
   const [status, setStatus] = useState<string | null>(null);
@@ -42,7 +42,7 @@ export default function CrmImportModal({ clientSlug, onClose, onImported }: Prop
     try {
       const text = await file.text();
       const endpoint =
-        target === "data-quality"
+        target === "ticket-reporting"
           ? `/api/crm/data-quality?client=${clientSlug}`
           : `/api/crm/campaign-email-units?client=${clientSlug}`;
       const res = await fetch(endpoint, {
@@ -90,11 +90,11 @@ export default function CrmImportModal({ clientSlug, onClose, onImported }: Prop
             <input
               type="radio"
               name="import-target"
-              value="data-quality"
-              checked={target === "data-quality"}
-              onChange={() => setTarget("data-quality")}
+              value="ticket-reporting"
+              checked={target === "ticket-reporting"}
+              onChange={() => setTarget("ticket-reporting")}
             />
-            Data Quality tickets
+            Ticket Reporting tickets
           </label>
           <label className="flex items-center gap-2 text-sm">
             <input
@@ -114,7 +114,7 @@ export default function CrmImportModal({ clientSlug, onClose, onImported }: Prop
           <p className="mt-1">Fechas: yyyy-mm-dd o dd/mm/aaaa. Números con coma o punto.</p>
           <p className="mt-1">
             Clave de upsert:
-            {target === "data-quality"
+            {target === "ticket-reporting"
               ? " (client_slug, ticket_id)"
               : " (client_slug, jira_ticket, send_date, market, segment, touchpoint, variant, owner)"}
           </p>

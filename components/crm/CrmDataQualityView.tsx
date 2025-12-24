@@ -12,6 +12,16 @@ import {
 } from "react";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
+import { DayPicker } from "react-day-picker";
+import type { DateRange } from "react-day-picker";
+import {
+  endOfMonth,
+  format,
+  parseISO,
+  startOfMonth,
+  startOfYear,
+  subDays,
+} from "date-fns";
 import type { CrmOwnerRate, DataQualityTicket } from "@/types/crm";
 import { useAuth } from "@/context/AuthContext";
 import MiniModal from "@/components/ui/MiniModal";
@@ -30,6 +40,8 @@ type Filters = {
   dueFrom: string;
   dueTo: string;
   daysBucket: string;
+  needsEffort: boolean;
+  workstream: string[];
 };
 
 const STATUS_OPTIONS = [
@@ -42,6 +54,14 @@ const STATUS_OPTIONS = [
 ];
 const OWNER_DEFAULTS = ["Stephane", "Lucas V."];
 const TYPE_DEFAULTS = ["DATA", "LIFECYCLE", "CAMPAIGNS", "GLOBAL", "OPS"];
+const NEEDS_EFFORT_STATUSES = new Set(["Validation", "Done"]);
+const DEFAULT_WORKSTREAM = "Data Quality";
+const WORKSTREAM_DEFAULTS = [
+  DEFAULT_WORKSTREAM,
+  "Strategy",
+  "Campaigns",
+  "Governance",
+];
 
 const unique = (values: (string | null)[]) =>
   Array.from(new Set(values)).filter(Boolean) as string[];
@@ -56,6 +76,33 @@ const formatDate = (value?: string | null) => {
   return value;
 };
 
+const formatRangeDate = (value?: string | null) => {
+  if (!value || !isIsoDate(value)) return null;
+  const parsed = parseISO(value);
+  if (Number.isNaN(parsed.getTime())) return null;
+  return format(parsed, "MMM d, yyyy");
+};
+
+const formatRangeInputDate = (value?: string | null) => {
+  if (!value || !isIsoDate(value)) return null;
+  const parsed = parseISO(value);
+  if (Number.isNaN(parsed.getTime())) return null;
+  return format(parsed, "dd/MM/yy");
+};
+
+const formatRangeLabel = (
+  label: string,
+  from?: string | null,
+  to?: string | null,
+) => {
+  const fromLabel = formatRangeDate(from);
+  const toLabel = formatRangeDate(to);
+  if (fromLabel && toLabel) return `${label}: ${fromLabel} - ${toLabel}`;
+  if (fromLabel) return `${label}: Since ${fromLabel}`;
+  if (toLabel) return `${label}: Until ${toLabel}`;
+  return null;
+};
+
 function daysToDue(dueDate: string | null): number | null {
   if (!dueDate) return null;
   const today = new Date();
@@ -66,20 +113,35 @@ function daysToDue(dueDate: string | null): number | null {
   return Math.ceil(diff / (1000 * 60 * 60 * 24));
 }
 
+const isIsoDate = (value: string) => /^\d{4}-\d{2}-\d{2}$/.test(value);
+
+const todaysIsoDate = () => new Date().toISOString().slice(0, 10);
+
+const defaultEffortDateForAssignedDate = (assignedDate: string) => {
+  const year = Number(assignedDate.slice(0, 4));
+  if (Number.isFinite(year) && year >= 2026) return todaysIsoDate();
+  return assignedDate;
+};
+
 type Option = { label: string; value: string };
+type PersonDirectoryItem = {
+  personId: string;
+  displayName: string;
+  aliases: string[];
+};
 const STATUS_COLORS: Record<string, string> = {
   "In progress": "bg-amber-100 text-amber-800",
   Ready: "bg-blue-100 text-blue-800",
   Backlog: "bg-slate-100 text-slate-800",
   Refining: "bg-purple-100 text-purple-800",
   Validation: "bg-teal-100 text-teal-800",
-  Done: "bg-emerald-100 text-emerald-800",
+  Done: "bg-emerald-50 text-emerald-700",
 };
 
 const PRIORITY_COLORS: Record<string, string> = {
-  P1: "bg-rose-100 text-rose-800",
-  P2: "bg-amber-100 text-amber-800",
-  P3: "bg-slate-100 text-slate-800",
+  P1: "bg-rose-50 text-rose-700",
+  P2: "bg-amber-50 text-amber-700",
+  P3: "bg-slate-50 text-slate-600",
 };
 
 function MultiSelect({
@@ -214,6 +276,178 @@ function MultiSelect({
             ))}
           </div>
         </div>
+        ) : null}
+    </div>
+  );
+}
+
+function DateRangeField({
+  label,
+  from,
+  to,
+  onChangeFrom,
+  onChangeTo,
+  onClear,
+}: {
+  label: string;
+  from: string;
+  to: string;
+  onChangeFrom: (value: string) => void;
+  onChangeTo: (value: string) => void;
+  onClear: () => void;
+}) {
+  const [open, setOpen] = useState(false);
+  const wrapRef = useRef<HTMLDivElement | null>(null);
+  const fromDate = from && isIsoDate(from) ? parseISO(from) : undefined;
+  const toDate = to && isIsoDate(to) ? parseISO(to) : undefined;
+  const hasRange = Boolean(fromDate || toDate);
+  const display = (() => {
+    const fromLabel = formatRangeInputDate(from);
+    const toLabel = formatRangeInputDate(to);
+    if (fromLabel && toLabel) return `${fromLabel} - ${toLabel}`;
+    if (fromLabel) return `Since ${fromLabel}`;
+    if (toLabel) return `Until ${toLabel}`;
+    return "All time";
+  })();
+  const selectedRange: DateRange | undefined = hasRange
+    ? { from: fromDate, to: toDate }
+    : undefined;
+  const today = new Date();
+  const toIso = (date: Date) => format(date, "yyyy-MM-dd");
+  const applyRange = (range?: DateRange) => {
+    onChangeFrom(range?.from ? toIso(range.from) : "");
+    onChangeTo(range?.to ? toIso(range.to) : "");
+  };
+  const presets = [
+    { label: "Today", from: today, to: today },
+    { label: "Last 7 days", from: subDays(today, 6), to: today },
+    { label: "Last 30 days", from: subDays(today, 29), to: today },
+    { label: "This month", from: startOfMonth(today), to: endOfMonth(today) },
+    { label: "YTD", from: startOfYear(today), to: today },
+  ];
+
+  useEffect(() => {
+    if (!open) return;
+    const handler = (e: MouseEvent) => {
+      if (!wrapRef.current) return;
+      if (wrapRef.current.contains(e.target as Node)) return;
+      setOpen(false);
+    };
+    document.addEventListener("mousedown", handler);
+    return () => document.removeEventListener("mousedown", handler);
+  }, [open]);
+
+  return (
+    <div className="relative flex flex-col gap-1" ref={wrapRef}>
+      <label className="text-xs font-medium text-[color:var(--color-text)]/70">
+        {label}
+      </label>
+      <div className="relative">
+        <button
+          type="button"
+          className="input h-10 w-full text-left"
+          onClick={() => setOpen((v) => !v)}
+        >
+          <span
+            className={
+              hasRange
+                ? "text-[color:var(--color-text)]"
+                : "text-[color:var(--color-text)]/50"
+            }
+          >
+            {display}
+          </span>
+        </button>
+        {hasRange ? (
+          <button
+            type="button"
+            className="absolute right-2 top-1/2 -translate-y-1/2 text-xs text-[color:var(--color-text)]/50 hover:text-[color:var(--color-text)]"
+            onClick={(e) => {
+              e.stopPropagation();
+              onClear();
+            }}
+            aria-label={`Clear ${label} range`}
+            title="Clear"
+          >
+            x
+          </button>
+        ) : null}
+      </div>
+      {open ? (
+        <div className="absolute left-0 top-[calc(100%+6px)] z-50 w-[560px] rounded-xl border border-[color:var(--color-border)] bg-[color:var(--color-surface)] p-4 shadow-xl ring-1 ring-black/5">
+          <div className="flex flex-wrap gap-2">
+            {presets.map((preset) => (
+              <button
+                key={preset.label}
+                type="button"
+                className="rounded-lg border border-[color:var(--color-border)] bg-[color:var(--color-surface-2)] px-3 py-1.5 text-xs font-medium text-[color:var(--color-text)]/80 hover:bg-[color:var(--color-surface-2)]/80"
+                onClick={() => {
+                  applyRange({ from: preset.from, to: preset.to });
+                  setOpen(false);
+                }}
+              >
+                {preset.label}
+              </button>
+            ))}
+          </div>
+          <div className="mt-3 rounded-lg border border-[color:var(--color-border)] bg-white/60 p-2 overflow-hidden">
+            <DayPicker
+              mode="range"
+              numberOfMonths={2}
+              selected={selectedRange}
+              defaultMonth={fromDate || toDate || today}
+              onSelect={(range) => applyRange(range)}
+              showOutsideDays
+              classNames={{
+                root: "relative text-sm",
+                months: "flex gap-4 pt-6",
+                month: "min-w-[224px] space-y-2",
+                month_caption: "flex items-center justify-center gap-2",
+                caption_label: "text-sm font-semibold",
+                nav: "absolute left-2 right-2 top-2 flex items-center justify-between",
+                button_previous:
+                  "h-7 w-7 rounded-md border border-[color:var(--color-border)] bg-white hover:bg-[color:var(--color-surface-2)]",
+                button_next:
+                  "h-7 w-7 rounded-md border border-[color:var(--color-border)] bg-white hover:bg-[color:var(--color-surface-2)]",
+                month_grid: "w-full border-collapse",
+                weekdays: "flex",
+                weekday:
+                  "w-8 text-center text-[10px] font-semibold uppercase text-[color:var(--color-text)]/50",
+                weeks: "flex flex-col gap-1",
+                week: "flex w-full",
+                day: "h-8 w-8 p-0 text-center",
+                day_button:
+                  "h-8 w-8 rounded-md text-xs hover:bg-[color:var(--color-surface-2)] focus:outline-none focus-visible:ring-2 focus-visible:ring-[color:var(--color-primary)]/40",
+                range_start:
+                  "bg-[color:var(--color-primary)] text-white font-semibold rounded-full ring-2 ring-white shadow-sm hover:bg-[color:var(--color-primary)]",
+                range_end:
+                  "bg-[color:var(--color-primary)] text-white font-semibold rounded-full ring-2 ring-white shadow-sm hover:bg-[color:var(--color-primary)]",
+                range_middle:
+                  "bg-[color:var(--color-primary)]/10 text-[color:var(--color-text)]/80",
+                selected:
+                  "bg-[color:var(--color-primary)] text-white hover:bg-[color:var(--color-primary)]",
+                today: "font-semibold text-[color:var(--color-text)]",
+                outside: "text-[color:var(--color-text)]/30",
+              }}
+            />
+          </div>
+          <div className="mt-3 flex items-center justify-between">
+            <button
+              type="button"
+              className="btn-ghost h-8 px-3 text-xs border border-[color:var(--color-border)] bg-[color:var(--color-surface-2)]/70 text-[color:var(--color-text)]/80 hover:text-[color:var(--color-text)]"
+              onClick={onClear}
+            >
+              Clear
+            </button>
+            <button
+              type="button"
+              className="btn-primary h-8 px-3 text-xs"
+              onClick={() => setOpen(false)}
+            >
+              Done
+            </button>
+          </div>
+        </div>
       ) : null}
     </div>
   );
@@ -229,7 +463,7 @@ const renderStatusBadge = (status: string) => {
   const cls = STATUS_COLORS[status] || "bg-slate-100 text-slate-700";
   return (
     <span
-      className={`inline-flex items-center rounded-full px-2 py-0.5 text-xs font-semibold ${cls}`}
+      className={`dq-badge dq-status-badge inline-flex items-center rounded-full px-2 py-0.5 text-xs font-semibold ${cls}`}
     >
       {status}
     </span>
@@ -240,11 +474,197 @@ const renderPriorityBadge = (priority: string) => {
   const cls = PRIORITY_COLORS[priority] || "bg-slate-100 text-slate-700";
   return (
     <span
-      className={`inline-flex items-center rounded-full px-2 py-0.5 text-xs font-semibold ${cls}`}
+      className={`dq-badge dq-priority-badge inline-flex items-center rounded-full px-2 py-0.5 text-[10px] font-medium ${cls}`}
     >
       {priority}
     </span>
   );
+};
+
+const TITLE_TAG_LIMIT = 4;
+
+const parseTitleParts = (rawTitle: string) => {
+  const trimmed = rawTitle.trim();
+  const tags: string[] = [];
+  let remainder = trimmed;
+  const tagBlock = trimmed.match(/^(\s*\[[^\]]+\]\s*)+/);
+  if (tagBlock) {
+    const matches = Array.from(tagBlock[0].matchAll(/\[([^\]]+)\]/g));
+    matches.forEach((match) => {
+      const value = match[1]?.trim();
+      if (value) tags.push(value);
+    });
+    remainder = trimmed.slice(tagBlock[0].length).trim();
+  }
+  let main = remainder;
+  let meta: string | null = null;
+  const metaMatch = remainder.match(/^(.*?)(?:\s*-\s*)([^-]+?)\s*-\s*(\d{4})\s*$/);
+  if (metaMatch) {
+    main = metaMatch[1]?.trim();
+    const metaPart = metaMatch[2]?.trim();
+    const year = metaMatch[3]?.trim();
+    if (metaPart && year) meta = `${metaPart} ${year}`;
+  }
+  return {
+    tags: tags.slice(0, TITLE_TAG_LIMIT),
+    main: main || remainder,
+    meta,
+  };
+};
+
+const TitleCell = ({
+  title,
+  needsEffort,
+}: {
+  title?: string | null;
+  needsEffort?: boolean;
+}) => {
+  if (!title) return renderPlaceholder();
+  const { tags, main, meta } = parseTitleParts(title);
+  const showMeta = tags.length > 0 || Boolean(meta) || needsEffort;
+  return (
+    <div className="title-cell" title={title}>
+      <div className="title-main">{main || title}</div>
+      {showMeta ? (
+        <div className="title-meta">
+          {needsEffort ? (
+            <span
+              className="title-flag"
+              title="Changed to Validation/Done on last sync with no effort logged"
+            >
+              Effort missing
+            </span>
+          ) : null}
+          {tags.map((tag) => (
+            <span key={tag} className="title-chip">
+              {tag}
+            </span>
+          ))}
+          {meta ? <span className="title-meta-text">{meta}</span> : null}
+        </div>
+      ) : null}
+    </div>
+  );
+};
+
+type DueSeverity = "done" | "neutral" | "warn" | "critical";
+
+const getDueSeverity = (status: string, daysToDueValue: number | null): DueSeverity => {
+  if (status === "Done") return "done";
+  if (daysToDueValue == null) return "neutral";
+  if (daysToDueValue > 0) return "neutral";
+  if (daysToDueValue >= -15) return "warn";
+  return "critical";
+};
+
+const isZeroValue = (value?: number | string | null) => {
+  if (value == null) return false;
+  if (typeof value === "number") return value === 0;
+  const parsed = Number.parseFloat(value);
+  return Number.isFinite(parsed) && parsed === 0;
+};
+
+const normalizeWorkstream = (value?: string | null) => {
+  const trimmed = value?.trim();
+  return trimmed ? trimmed : DEFAULT_WORKSTREAM;
+};
+
+const normalizePersonKey = (value?: string | null) =>
+  value?.trim().toLowerCase() ?? "";
+
+const stripTypePrefix = (value?: string | null) => {
+  if (!value) return "";
+  const trimmed = value.trim();
+  const match = trimmed.match(/^[A-Z]{2,6}-\d+\s+(.*)$/);
+  const cleaned = match?.[1]?.trim();
+  return cleaned || trimmed;
+};
+
+const getTicketContributions = (ticket: DataQualityTicket) => {
+  const contribs =
+    ticket.contributions && ticket.contributions.length > 0
+      ? ticket.contributions
+      : [
+          {
+            owner: ticket.owner,
+            personId: null,
+            workHours: ticket.workHours,
+            prepHours: ticket.prepHours,
+            workstream: DEFAULT_WORKSTREAM,
+          },
+        ];
+  return contribs.map((c) => ({
+    ...c,
+    workHours: c.workHours ?? 0,
+    prepHours: c.prepHours ?? null,
+    workstream: normalizeWorkstream(c.workstream),
+    personId: c.personId ?? null,
+    notes: c.notes ?? null,
+  }));
+};
+
+const getTicketTotalHours = (ticket: DataQualityTicket) => {
+  const contribs = getTicketContributions(ticket);
+  const totalWork = contribs.reduce((acc, c) => acc + (c.workHours ?? 0), 0);
+  const totalPrep = contribs.reduce(
+    (acc, c) =>
+      acc + (c.prepHours != null ? c.prepHours : (c.workHours ?? 0) * 0.35),
+    0,
+  );
+  return totalWork + totalPrep;
+};
+
+const COMPACT_VIEW_STORAGE_KEY = "dq.compactView";
+
+const readBool = (key: string, defaultValue: boolean) => {
+  if (typeof window === "undefined") return defaultValue;
+  try {
+    const raw = window.localStorage.getItem(key);
+    if (raw == null) return defaultValue;
+    const parsed = JSON.parse(raw);
+    if (typeof parsed === "boolean") return parsed;
+    if (typeof parsed === "string") return parsed === "true";
+    return defaultValue;
+  } catch {
+    return defaultValue;
+  }
+};
+
+const sanitizeVisibleColumns = (
+  ids: string[],
+  validIds: Set<string>,
+  fallback: string[],
+) => {
+  const unique = new Set<string>();
+  ids.forEach((id) => {
+    if (validIds.has(id)) unique.add(id);
+  });
+  const filtered = Array.from(unique);
+  return filtered.length > 0 ? filtered : fallback;
+};
+
+const readVisibleColumns = (
+  primaryKey: string,
+  legacyKey: string | null,
+  validIds: Set<string>,
+  fallback: string[],
+) => {
+  if (typeof window === "undefined") return fallback;
+  const readKey = (key: string) => {
+    try {
+      const raw = window.localStorage.getItem(key);
+      if (!raw) return null;
+      const parsed = JSON.parse(raw);
+      return Array.isArray(parsed) ? parsed.filter((id) => typeof id === "string") : null;
+    } catch {
+      return null;
+    }
+  };
+  const stored =
+    readKey(primaryKey) ??
+    (legacyKey ? readKey(legacyKey) : null);
+  if (!stored) return fallback;
+  return sanitizeVisibleColumns(stored, validIds, fallback);
 };
 
 type SortKey =
@@ -265,7 +685,7 @@ export default function CrmDataQualityView() {
   const pathname = usePathname();
   const segments = pathname?.split("/").filter(Boolean) ?? [];
   const clientSlug = segments[1] || "emg";
-  const { isEditor, isAdmin } = useAuth();
+  const { isEditor, isAdmin, loading: authLoading } = useAuth();
 
   const [filters, setFilters] = useState<Filters>({
     status: [],
@@ -279,16 +699,21 @@ export default function CrmDataQualityView() {
     dueFrom: "",
     dueTo: "",
     daysBucket: "",
+    needsEffort: false,
+    workstream: [],
   });
   const [rows, setRows] = useState<DataQualityTicket[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [openAdd, setOpenAdd] = useState(false);
+  type ModalStep = "details" | "effort";
+  const [modalStep, setModalStep] = useState<ModalStep>("details");
   const [submitting, setSubmitting] = useState(false);
-  type CatalogItem = { id: string; label: string };
+  type CatalogItem = { id: string; label: string; personId?: string | null };
   const [ownerItems, setOwnerItems] = useState<CatalogItem[]>(
-    OWNER_DEFAULTS.map((o) => ({ id: `default-owner-${o}`, label: o })),
+    OWNER_DEFAULTS.map((o) => ({ id: `default-owner-${o}`, label: o, personId: null })),
   );
+  const [peopleDirectory, setPeopleDirectory] = useState<PersonDirectoryItem[]>([]);
   const [typeItems, setTypeItems] = useState<CatalogItem[]>(
     TYPE_DEFAULTS.map((t) => ({ id: `default-type-${t}`, label: t })),
   );
@@ -297,7 +722,14 @@ export default function CrmDataQualityView() {
   const [editRow, setEditRow] = useState<DataQualityTicket | null>(null);
   const [openMenuId, setOpenMenuId] = useState<string | null>(null);
   const [syncingJira, setSyncingJira] = useState(false);
-  const [compact, setCompact] = useState(false);
+  const [lastSyncChangedIds, setLastSyncChangedIds] = useState<Set<string>>(
+    new Set(),
+  );
+  const [showNeedsEffortNudge, setShowNeedsEffortNudge] = useState(false);
+  const rowsRef = useRef<DataQualityTicket[]>([]);
+  const [compact, setCompact] = useState(() =>
+    readBool(COMPACT_VIEW_STORAGE_KEY, true),
+  );
   const [ownerRates, setOwnerRates] = useState<
     Record<string, { dailyRate: number; currency: string; id?: string }>
   >({});
@@ -319,9 +751,80 @@ export default function CrmDataQualityView() {
     comments: "",
   });
   const [formContribs, setFormContribs] = useState<
-    { id: string; owner: string; workHours: string; prepHours: string }[]
-  >([{ id: "c-0", owner: "", workHours: "", prepHours: "" }]);
+    {
+      id: string;
+      effortDate: string;
+      owner: string;
+      personId: string | null;
+      workHours: string;
+      prepHours: string;
+      workstream: string;
+    }[]
+  >([
+    {
+      id: "c-0",
+      effortDate: todaysIsoDate(),
+      owner: "",
+      personId: null,
+      workHours: "",
+      prepHours: "",
+      workstream: DEFAULT_WORKSTREAM,
+    },
+  ]);
   const [formError, setFormError] = useState<string | null>(null);
+  const peopleById = useMemo(() => {
+    const map = new Map<string, string>();
+    peopleDirectory.forEach((person) => {
+      if (person.personId) map.set(person.personId, person.displayName);
+    });
+    return map;
+  }, [peopleDirectory]);
+  const aliasToPersonId = useMemo(() => {
+    const map = new Map<string, string>();
+    peopleDirectory.forEach((person) => {
+      if (!person.personId) return;
+      const aliases = new Set([person.displayName, ...(person.aliases || [])]);
+      aliases.forEach((alias) => {
+        const key = normalizePersonKey(alias);
+        if (key) map.set(key, person.personId);
+      });
+    });
+    return map;
+  }, [peopleDirectory]);
+  const resolvePersonKey = useCallback(
+    (label?: string | null, personId?: string | null) => {
+      if (personId) return personId;
+      const key = normalizePersonKey(label);
+      if (!key) return "";
+      return aliasToPersonId.get(key) ?? (label ?? "");
+    },
+    [aliasToPersonId],
+  );
+  const labelForPersonKey = useCallback(
+    (key: string) => peopleById.get(key) ?? key,
+    [peopleById],
+  );
+  useEffect(() => {
+    if (aliasToPersonId.size === 0) return;
+    setFilters((prev) => {
+      const mapValues = (vals: string[]) => {
+        const next = vals
+          .map((val) => aliasToPersonId.get(normalizePersonKey(val)) ?? val)
+          .filter(Boolean);
+        return Array.from(new Set(next));
+      };
+      const nextOwner = mapValues(prev.owner);
+      const nextAssignee = mapValues(prev.assignee);
+      const sameOwner =
+        prev.owner.length === nextOwner.length &&
+        prev.owner.every((val, idx) => val === nextOwner[idx]);
+      const sameAssignee =
+        prev.assignee.length === nextAssignee.length &&
+        prev.assignee.every((val, idx) => val === nextAssignee[idx]);
+      if (sameOwner && sameAssignee) return prev;
+      return { ...prev, owner: nextOwner, assignee: nextAssignee };
+    });
+  }, [aliasToPersonId]);
   const typeOptions = useMemo(() => {
     const existing = new Set(typeItems.map((t) => t.label));
     const list = [...typeItems];
@@ -332,7 +835,9 @@ export default function CrmDataQualityView() {
   }, [typeItems, form.type]);
 
   /* ===== Column visibility ===== */
-  const COLVIS_STORAGE_KEY = "dq_colvis_v2";
+  const COLVIS_STORAGE_KEY = "dq.visibleColumns";
+  const LEGACY_COLVIS_STORAGE_KEY = "dq_colvis_v2";
+  const ACTIONS_HIDDEN_STORAGE_KEY = "dq.actionsHidden";
   const columnOptions = useMemo(
     () =>
       [
@@ -363,30 +868,88 @@ export default function CrmDataQualityView() {
     () => columnOptions.map((c) => c.id),
     [columnOptions],
   );
+  const validColumnIds = useMemo(
+    () => new Set(columnOptions.map((c) => c.id)),
+    [columnOptions],
+  );
   const [showColumnPicker, setShowColumnPicker] = useState(false);
   const [visibleCols, setVisibleCols] = useState<Set<string>>(
     new Set(defaultVisible),
   );
+  const [columnsReady, setColumnsReady] = useState(false);
 
   useEffect(() => {
-    const raw = localStorage.getItem(COLVIS_STORAGE_KEY);
-    if (!raw) return;
+    if (authLoading) return;
+    const stored = readVisibleColumns(
+      COLVIS_STORAGE_KEY,
+      LEGACY_COLVIS_STORAGE_KEY,
+      validColumnIds,
+      defaultVisible,
+    );
+    let next = stored;
+    if ((isEditor || isAdmin) && validColumnIds.has("actions")) {
+      try {
+        const raw = window.localStorage.getItem(ACTIONS_HIDDEN_STORAGE_KEY);
+        const hideActions = raw ? JSON.parse(raw) === true : false;
+        if (!hideActions && !next.includes("actions")) {
+          next = [...next, "actions"];
+        }
+      } catch {
+        /* ignore storage errors */
+      }
+    }
+    setVisibleCols(new Set(next));
+    setColumnsReady(true);
+    if (COLVIS_STORAGE_KEY !== LEGACY_COLVIS_STORAGE_KEY) {
+      try {
+        window.localStorage.setItem(
+          COLVIS_STORAGE_KEY,
+          JSON.stringify(next),
+        );
+      } catch {
+        /* ignore storage errors */
+      }
+    }
+  }, [authLoading, defaultVisible, validColumnIds, isEditor, isAdmin]);
+
+  useEffect(() => {
+    if (authLoading || !columnsReady) return;
+    const next = sanitizeVisibleColumns(
+      Array.from(visibleCols),
+      validColumnIds,
+      defaultVisible,
+    );
     try {
-      const parsed = JSON.parse(raw);
-      if (Array.isArray(parsed) && parsed.length > 0) {
-        setVisibleCols(new Set(parsed));
+      window.localStorage.setItem(
+        COLVIS_STORAGE_KEY,
+        JSON.stringify(next),
+      );
+      if ((isEditor || isAdmin) && validColumnIds.has("actions")) {
+        const hideActions = !next.includes("actions");
+        window.localStorage.setItem(
+          ACTIONS_HIDDEN_STORAGE_KEY,
+          JSON.stringify(hideActions),
+        );
       }
     } catch {
-      /* ignore bad cache */
+      /* ignore storage errors */
     }
-  }, []);
+  }, [authLoading, columnsReady, visibleCols, validColumnIds, defaultVisible, isEditor, isAdmin]);
 
   useEffect(() => {
-    localStorage.setItem(
-      COLVIS_STORAGE_KEY,
-      JSON.stringify(Array.from(visibleCols)),
-    );
-  }, [visibleCols]);
+    try {
+      window.localStorage.setItem(
+        COMPACT_VIEW_STORAGE_KEY,
+        JSON.stringify(compact),
+      );
+    } catch {
+      /* ignore storage errors */
+    }
+  }, [compact]);
+
+  useEffect(() => {
+    rowsRef.current = rows;
+  }, [rows]);
 
   const showCol = useCallback(
     (id: string) => {
@@ -409,6 +972,19 @@ export default function CrmDataQualityView() {
   const [groupBy] = useState<GroupBy>("none");
   const [page, setPage] = useState(0);
   const pageSize = 20;
+  const workstreamFilter = useMemo(
+    () => new Set(filters.workstream.map((value) => normalizeWorkstream(value))),
+    [filters.workstream],
+  );
+  const filterContributionsByWorkstream = useCallback(
+    (contribs: ReturnType<typeof getTicketContributions>) => {
+      if (workstreamFilter.size === 0) return contribs;
+      return contribs.filter((c) =>
+        workstreamFilter.has(normalizeWorkstream(c.workstream)),
+      );
+    },
+    [workstreamFilter],
+  );
 
   useEffect(() => {
     const handler = (e: MouseEvent) => {
@@ -437,6 +1013,35 @@ export default function CrmDataQualityView() {
     }
   };
 
+  const contribDateInputRefs = useRef<Record<string, HTMLInputElement | null>>({});
+
+  const openContribDatePicker = (id: string) => {
+    const el = contribDateInputRefs.current[id];
+    if (!el) return;
+    el.focus();
+    // @ts-expect-error showPicker is not yet in lib.dom.d.ts everywhere
+    if (typeof el.showPicker === "function") {
+      try {
+        // @ts-expect-error showPicker is not yet in lib.dom.d.ts everywhere
+        el.showPicker();
+      } catch {
+        el.click();
+      }
+    } else {
+      el.click();
+    }
+  };
+
+  const isNeedsEffortTicket = useCallback(
+    (ticket: DataQualityTicket) => {
+      if (!lastSyncChangedIds.has(ticket.id)) return false;
+      if (!NEEDS_EFFORT_STATUSES.has(ticket.status)) return false;
+      const totalHours = getTicketTotalHours(ticket);
+      return isZeroValue(totalHours);
+    },
+    [lastSyncChangedIds],
+  );
+
   const rowMatches = useCallback((t: DataQualityTicket, exclude?: keyof Filters) => {
     if (
       exclude !== "status" &&
@@ -447,13 +1052,23 @@ export default function CrmDataQualityView() {
     if (
       exclude !== "owner" &&
       filters.owner.length > 0 &&
-      !filters.owner.includes(t.owner)
-    )
+      (() => {
+        const contribs = filterContributionsByWorkstream(getTicketContributions(t));
+        const owners = contribs
+          .map((c) => resolvePersonKey(c.owner, c.personId))
+          .filter(Boolean);
+        return owners.some((owner) => filters.owner.includes(owner));
+      })() === false
+    ) {
       return false;
+    }
     if (
       exclude !== "assignee" &&
       filters.assignee.length > 0 &&
-      !filters.assignee.includes(t.jiraAssignee || "")
+      (() => {
+        const key = resolvePersonKey(t.jiraAssignee || "", null);
+        return Boolean(key) && filters.assignee.includes(key);
+      })() === false
     )
       return false;
     if (
@@ -513,8 +1128,42 @@ export default function CrmDataQualityView() {
           break;
       }
     }
+    if (exclude !== "workstream" && filters.workstream.length > 0) {
+      const selected = new Set(
+        filters.workstream.map((value) => normalizeWorkstream(value)),
+      );
+      const contribStreams = getTicketContributions(t).map((c) =>
+        normalizeWorkstream(c.workstream),
+      );
+      if (!contribStreams.some((stream) => selected.has(stream))) return false;
+    }
+    if (exclude !== "needsEffort" && filters.needsEffort) {
+      if (!isNeedsEffortTicket(t)) return false;
+    }
     return true;
-  }, [filters.assignedFrom, filters.assignedTo, filters.assignee, filters.daysBucket, filters.dueFrom, filters.dueTo, filters.owner, filters.priority, filters.search, filters.status, filters.type]);
+  }, [
+    filters.assignedFrom,
+    filters.assignedTo,
+    filters.assignee,
+    filters.daysBucket,
+    filters.dueFrom,
+    filters.dueTo,
+    filters.needsEffort,
+    filters.owner,
+    filters.priority,
+    filters.search,
+    filters.status,
+    filters.type,
+    filters.workstream,
+    filterContributionsByWorkstream,
+    isNeedsEffortTicket,
+    resolvePersonKey,
+  ]);
+
+  const needsEffortCount = useMemo(
+    () => rows.filter((ticket) => isNeedsEffortTicket(ticket)).length,
+    [rows, isNeedsEffortTicket],
+  );
 
   const activeChips = useMemo(() => {
     const chips: { label: string; onClear: () => void }[] = [];
@@ -525,12 +1174,12 @@ export default function CrmDataQualityView() {
       });
     if (filters.owner.length)
       chips.push({
-        label: `Contributors: ${filters.owner.join(", ")}`,
+        label: `Contributors: ${filters.owner.map(labelForPersonKey).join(", ")}`,
         onClear: () => handleChange("owner", []),
       });
     if (filters.assignee.length)
       chips.push({
-        label: `Assignee (JIRA): ${filters.assignee.join(", ")}`,
+        label: `Assignee (JIRA): ${filters.assignee.map(labelForPersonKey).join(", ")}`,
         onClear: () => handleChange("assignee", []),
       });
     if (filters.priority.length)
@@ -540,26 +1189,42 @@ export default function CrmDataQualityView() {
       });
     if (filters.type.length)
       chips.push({
-        label: `Type: ${filters.type.join(", ")}`,
+        label: `Type: ${filters.type.map(stripTypePrefix).join(", ")}`,
         onClear: () => handleChange("type", []),
+      });
+    if (filters.workstream.length)
+      chips.push({
+        label: `Workstream: ${filters.workstream.join(", ")}`,
+        onClear: () => handleChange("workstream", []),
       });
     if (filters.daysBucket)
       chips.push({
         label: `Days: ${filters.daysBucket}`,
         onClear: () => handleChange("daysBucket", ""),
       });
-    if (filters.assignedFrom || filters.assignedTo) {
+    if (filters.needsEffort)
       chips.push({
-        label: `Created: ${formatDate(filters.assignedFrom) || "--"} -> ${formatDate(filters.assignedTo) || "--"}`,
+        label: `Needs effort${needsEffortCount ? `: ${needsEffortCount}` : ""}`,
+        onClear: () => handleChange("needsEffort", false),
+      });
+    const createdLabel = formatRangeLabel(
+      "Created",
+      filters.assignedFrom,
+      filters.assignedTo,
+    );
+    if (createdLabel) {
+      chips.push({
+        label: createdLabel,
         onClear: () => {
           handleChange("assignedFrom", "");
           handleChange("assignedTo", "");
         },
       });
     }
-    if (filters.dueFrom || filters.dueTo) {
+    const dueLabel = formatRangeLabel("Due", filters.dueFrom, filters.dueTo);
+    if (dueLabel) {
       chips.push({
-        label: `Due: ${formatDate(filters.dueFrom) || "--"} -> ${formatDate(filters.dueTo) || "--"}`,
+        label: dueLabel,
         onClear: () => {
           handleChange("dueFrom", "");
           handleChange("dueTo", "");
@@ -572,7 +1237,7 @@ export default function CrmDataQualityView() {
         onClear: () => handleChange("search", ""),
       });
     return chips;
-  }, [filters]);
+  }, [filters, needsEffortCount, labelForPersonKey]);
 
   const fetchTickets = useCallback(async () => {
     setLoading(true);
@@ -602,7 +1267,12 @@ export default function CrmDataQualityView() {
       const detail = (evt as CustomEvent<{ target?: string; client?: string }>)
         ?.detail;
       if (detail?.client && detail.client !== clientSlug) return;
-      if (detail?.target && detail.target !== "data-quality") return;
+      if (
+        detail?.target &&
+        detail.target !== "data-quality" &&
+        detail.target !== "ticket-reporting"
+      )
+        return;
       void fetchTickets();
     };
     window.addEventListener("crm:imported", handler);
@@ -622,18 +1292,49 @@ export default function CrmDataQualityView() {
     let active = true;
     const loadCatalogs = async () => {
       try {
-        const resOwners = await fetch(
-          `/api/crm/catalogs?client=${clientSlug}&kind=owner`,
-        );
+        let loadedPeople = false;
+        const resPeople = await fetch(`/api/crm/people?client=${clientSlug}`);
         const resTypes = await fetch(
           `/api/crm/catalogs?client=${clientSlug}&kind=type`,
         );
-        if (resOwners.ok) {
-          const body = await resOwners.json().catch(() => null);
-          if (active && Array.isArray(body?.items) && body.items.length > 0) {
+        if (resPeople.ok) {
+          const body = await resPeople.json().catch(() => null);
+          if (active && Array.isArray(body?.people) && body.people.length > 0) {
+            const people = body.people
+              .map((p: any) => ({
+                personId: String(p.personId ?? ""),
+                displayName: String(p.displayName ?? "").trim(),
+                aliases: Array.isArray(p.aliases)
+                  ? p.aliases.map((alias: any) => String(alias ?? "").trim()).filter(Boolean)
+                  : [],
+              }))
+              .filter((p: PersonDirectoryItem) => Boolean(p.personId) && Boolean(p.displayName));
+            setPeopleDirectory(people);
             setOwnerItems(
-              body.items.map((i: any) => ({ id: i.id, label: i.label })),
+              people.map((p) => ({
+                id: p.personId,
+                label: p.displayName,
+                personId: p.personId,
+              })),
             );
+            loadedPeople = true;
+          }
+        }
+        if (!loadedPeople) {
+          const resOwners = await fetch(
+            `/api/crm/catalogs?client=${clientSlug}&kind=owner`,
+          );
+          if (resOwners.ok) {
+            const body = await resOwners.json().catch(() => null);
+            if (active && Array.isArray(body?.items) && body.items.length > 0) {
+              setOwnerItems(
+                body.items.map((i: any) => ({
+                  id: i.id,
+                  label: i.label,
+                  personId: null,
+                })),
+              );
+            }
           }
         }
         if (resTypes.ok) {
@@ -670,11 +1371,15 @@ export default function CrmDataQualityView() {
           { dailyRate: number; currency: string; id?: string }
         > = {};
         body.rates.forEach((r) => {
-          map[r.owner] = {
+          const entry = {
             dailyRate: r.dailyRate,
             currency: r.currency || "EUR",
             id: r.id,
           };
+          if (r.personId) {
+            map[r.personId] = entry;
+          }
+          map[r.owner] = entry;
         });
         setOwnerRates(map);
       } catch {
@@ -697,9 +1402,10 @@ export default function CrmDataQualityView() {
     const rowsForAssignee = rows.filter((t) => rowMatches(t, "assignee"));
     const rowsForPriority = rows.filter((t) => rowMatches(t, "priority"));
     const rowsForType = rows.filter((t) => rowMatches(t, "type"));
+    const rowsForWorkstream = rows.filter((t) => rowMatches(t, "workstream"));
     const countBy = (
       list: DataQualityTicket[],
-      key: "status" | "owner" | "assignee" | "priority" | "type",
+      key: "status" | "priority" | "type",
     ) => {
       const acc: Record<string, number> = {};
       list.forEach((t) => {
@@ -709,19 +1415,88 @@ export default function CrmDataQualityView() {
       });
       return acc;
     };
+    const countAssignees = (list: DataQualityTicket[]) => {
+      const acc: Record<string, number> = {};
+      list.forEach((t) => {
+        const key = resolvePersonKey(t.jiraAssignee || "", null);
+        if (!key) return;
+        acc[key] = (acc[key] || 0) + 1;
+      });
+      return acc;
+    };
+    const countContributors = (list: DataQualityTicket[]) => {
+      const acc: Record<string, number> = {};
+      list.forEach((t) => {
+        const contribs = filterContributionsByWorkstream(getTicketContributions(t));
+        const owners = new Set(
+          contribs
+            .map((c) => resolvePersonKey(c.owner, c.personId))
+            .filter(Boolean),
+        );
+        owners.forEach((owner) => {
+          acc[owner] = (acc[owner] || 0) + 1;
+        });
+      });
+      return acc;
+    };
+    const countWorkstreams = (list: DataQualityTicket[]) => {
+      const acc: Record<string, number> = {};
+      list.forEach((t) => {
+        const streams = getTicketContributions(t).map((c) =>
+          normalizeWorkstream(c.workstream),
+        );
+        const uniqueStreams = new Set(streams);
+        uniqueStreams.forEach((stream) => {
+          acc[stream] = (acc[stream] || 0) + 1;
+        });
+      });
+      return acc;
+    };
+    const workstreamSet = new Set<string>(WORKSTREAM_DEFAULTS);
+    rowsForWorkstream.forEach((t) => {
+      getTicketContributions(t).forEach((c) => {
+        workstreamSet.add(normalizeWorkstream(c.workstream));
+      });
+    });
+    const contributorSet = new Set<string>();
+    rowsForOwner.forEach((t) => {
+      const contribs = filterContributionsByWorkstream(getTicketContributions(t));
+      contribs.forEach((c) => {
+        const key = resolvePersonKey(c.owner, c.personId);
+        if (key) contributorSet.add(key);
+      });
+    });
+    const assigneeSet = new Set<string>();
+    rowsForAssignee.forEach((t) => {
+      const key = resolvePersonKey(t.jiraAssignee || "", null);
+      if (key) assigneeSet.add(key);
+    });
+    const typeValues = unique(rowsForType.map((t) => t.type));
+    const typeOptions = typeValues.map((value) => ({
+      value,
+      label: stripTypePrefix(value),
+    }));
+    const ownerOptions = Array.from(contributorSet)
+      .map((key) => ({ value: key, label: labelForPersonKey(key) }))
+      .sort((a, b) => a.label.localeCompare(b.label));
+    const assigneeOptions = Array.from(assigneeSet)
+      .map((key) => ({ value: key, label: labelForPersonKey(key) }))
+      .sort((a, b) => a.label.localeCompare(b.label));
     return {
       status: unique(rowsForStatus.map((t) => t.status)),
-      owner: unique(rowsForOwner.map((t) => t.owner)),
-      assignee: unique(rowsForAssignee.map((t) => t.jiraAssignee)),
+      owner: ownerOptions,
+      assignee: assigneeOptions,
       priority: unique(rowsForPriority.map((t) => t.priority)),
-      type: unique(rowsForType.map((t) => t.type)),
+      type: typeOptions,
+      workstream: Array.from(workstreamSet),
       statusCounts: countBy(rowsForStatus, "status"),
-      ownerCounts: countBy(rowsForOwner, "owner"),
-      assigneeCounts: countBy(rowsForAssignee, "assignee"),
+      ownerCounts: countContributors(rowsForOwner),
+      assigneeCounts: countAssignees(rowsForAssignee),
       priorityCounts: countBy(rowsForPriority, "priority"),
       typeCounts: countBy(rowsForType, "type"),
+      workstreamCounts: countWorkstreams(rowsForWorkstream),
     };
-  }, [rows, rowMatches]);
+  }, [rows, rowMatches, filterContributionsByWorkstream, resolvePersonKey, labelForPersonKey]);
 
   const filtered = useMemo(
     () => rows.filter((t) => rowMatches(t)),
@@ -730,10 +1505,7 @@ export default function CrmDataQualityView() {
 
   const sortedRows = useMemo(() => {
     const withMeta = filtered.map((t) => {
-      const contribs =
-        t.contributions && t.contributions.length > 0
-          ? t.contributions
-          : [{ owner: t.owner, workHours: t.workHours, prepHours: t.prepHours }];
+      const contribs = filterContributionsByWorkstream(getTicketContributions(t));
       const totalWork = contribs.reduce((acc, c) => acc + (c.workHours ?? 0), 0);
       const totalPrep = contribs.reduce(
         (acc, c) => acc + (c.prepHours != null ? c.prepHours : (c.workHours ?? 0) * 0.35),
@@ -742,7 +1514,8 @@ export default function CrmDataQualityView() {
       const totalHours = totalWork + totalPrep;
       const totalDays = totalHours / 7;
       const budget = contribs.reduce((acc, c) => {
-        const rate = ownerRates[c.owner]?.dailyRate;
+        const rateKey = c.personId || c.owner;
+        const rate = ownerRates[rateKey]?.dailyRate;
         if (rate != null) {
           const work = c.workHours ?? 0;
           const prep = c.prepHours != null ? c.prepHours : work * 0.35;
@@ -795,7 +1568,7 @@ export default function CrmDataQualityView() {
       }
     };
     return withMeta.sort(cmp);
-  }, [filtered, sortKey, sortDir, ownerRates]);
+  }, [filtered, sortKey, sortDir, ownerRates, filterContributionsByWorkstream]);
 
   useEffect(() => {
     const maxPage = Math.max(Math.ceil(sortedRows.length / pageSize) - 1, 0);
@@ -819,12 +1592,17 @@ export default function CrmDataQualityView() {
     });
     return Array.from(groups.entries()).map(([key, list]) => ({
       key,
-      label: `${groupBy === "owner" ? "Owner" : "Type"}: ${key} (${list.length} tickets)`,
+      label: `${groupBy === "owner" ? "Owner" : "Type"}: ${
+        groupBy === "owner" ? key : stripTypePrefix(key)
+      } (${list.length} tickets)`,
       rows: list,
     }));
   }, [pagedRows, groupBy]);
 
-  const handleChange = (key: keyof Filters, value: string | string[]) => {
+  const handleChange = (
+    key: keyof Filters,
+    value: string | string[] | boolean,
+  ) => {
     setFilters((prev) => ({ ...prev, [key]: value as any }));
   };
 
@@ -841,6 +1619,8 @@ export default function CrmDataQualityView() {
       dueFrom: "",
       dueTo: "",
       daysBucket: "",
+      needsEffort: false,
+      workstream: [],
     });
     setSearchInput("");
     setPage(0);
@@ -851,28 +1631,27 @@ export default function CrmDataQualityView() {
     let totalDays = 0;
     let totalBudget = 0;
     filtered.forEach((t) => {
-      const contribs =
-        t.contributions && t.contributions.length > 0
-          ? t.contributions
-          : [{ owner: t.owner, workHours: t.workHours, prepHours: t.prepHours }];
+      const contribs = filterContributionsByWorkstream(getTicketContributions(t));
       contribs.forEach((c) => {
         const prep = (c.prepHours ?? c.workHours * 0.35) || 0;
         const hours = c.workHours + prep;
         const days = hours / 7;
         totalHours += hours;
         totalDays += days;
-        const rate = ownerRates[c.owner]?.dailyRate;
+        const rateKey = c.personId || c.owner;
+        const rate = ownerRates[rateKey]?.dailyRate;
         if (rate != null) totalBudget += days * rate;
       });
     });
     return { totalHours, totalDays, totalBudget };
-  }, [filtered, ownerRates]);
+  }, [filtered, ownerRates, filterContributionsByWorkstream]);
 
   const handleChangeForm = (key: keyof typeof form, value: string) => {
     setForm((prev) => ({ ...prev, [key]: value }));
   };
 
   const openAddModal = () => {
+    setModalStep("details");
     setEditRow(null);
     setForm({
       status: STATUS_OPTIONS[0],
@@ -891,11 +1670,25 @@ export default function CrmDataQualityView() {
       etaDate: "",
       comments: "",
     });
-    setFormContribs([{ id: `c-${Date.now()}`, owner: "", workHours: "", prepHours: "" }]);
+    setFormContribs([
+      {
+        id: `c-${Date.now()}`,
+        effortDate: todaysIsoDate(),
+        owner: "",
+        personId: null,
+        workHours: "",
+        prepHours: "",
+        workstream: DEFAULT_WORKSTREAM,
+      },
+    ]);
     setOpenAdd(true);
   };
 
-  const openEditModal = (row: DataQualityTicket) => {
+  const openEditModal = (
+    row: DataQualityTicket,
+    startStep: ModalStep = "details",
+  ) => {
+    setModalStep(startStep);
     setEditRow(row);
     setForm({
       status: row.status,
@@ -918,18 +1711,27 @@ export default function CrmDataQualityView() {
       row.contributions && row.contributions.length > 0
         ? row.contributions.map((c, idx) => ({
             id: `c-${row.ticketId}-${idx}`,
+            effortDate:
+              c.effortDate && isIsoDate(c.effortDate)
+                ? c.effortDate
+                : defaultEffortDateForAssignedDate(row.assignedDate || todaysIsoDate()),
             owner: c.owner,
+            personId: c.personId ?? null,
             workHours: String(c.workHours ?? ""),
             prepHours:
               c.prepHours != null ? String(c.prepHours) : String((c.workHours ?? 0) * 0.35),
+            workstream: normalizeWorkstream(c.workstream),
           }))
         : [
             {
               id: `c-${row.ticketId}-0`,
+              effortDate: defaultEffortDateForAssignedDate(row.assignedDate || todaysIsoDate()),
               owner: row.owner,
+              personId: null,
               workHours: String(row.workHours ?? ""),
               prepHours:
                 row.prepHours != null ? String(row.prepHours) : String((row.workHours ?? 0) * 0.35),
+              workstream: DEFAULT_WORKSTREAM,
             },
           ];
     setFormContribs(contribs);
@@ -949,13 +1751,46 @@ export default function CrmDataQualityView() {
     if (sortKey !== key) return null;
     return sortDir === "asc" ? "^" : "v";
   };
+
+  const jiraPattern = /^https:\/\/europcarmobility\.atlassian\.net\/browse\/[A-Z0-9-]+$/i;
+
+  const canProceedToEffort = useMemo(() => {
+    const requiredFields = [
+      form.status,
+      form.assignedDate,
+      form.ticketId,
+      form.title,
+      form.priority,
+      form.type,
+      form.jiraUrl,
+    ];
+    if (requiredFields.some((f) => !String(f || "").trim())) return false;
+    if (form.jiraUrl && !jiraPattern.test(form.jiraUrl.trim())) return false;
+    return true;
+  }, [form.assignedDate, form.jiraUrl, form.priority, form.status, form.ticketId, form.title, form.type]);
+
+  const hasContributionOwner = useMemo(
+    () => formContribs.some((c) => c.owner.trim()),
+    [formContribs],
+  );
+
+  const goToDetailsStep = () => setModalStep("details");
+
+  const goToEffortStep = () => {
+    if (!canProceedToEffort) return;
+    setModalStep("effort");
+  };
+
   const handleSubmit = async () => {
     setSubmitting(true);
     setError(null);
     setFormError(null);
     try {
+      const fallbackEffortDate = defaultEffortDateForAssignedDate(form.assignedDate);
       const contributions = formContribs
         .map((c) => {
+          const rawEffort = (c.effortDate || "").trim();
+          const effortDate = rawEffort && isIsoDate(rawEffort) ? rawEffort : fallbackEffortDate;
           const w = Number(c.workHours || "0");
           const pRaw = c.prepHours;
           const p =
@@ -964,8 +1799,11 @@ export default function CrmDataQualityView() {
               : Number(pRaw);
           return {
             owner: c.owner.trim(),
+            personId: c.personId || null,
+            effortDate,
             workHours: Number.isFinite(w) && w >= 0 ? w : 0,
             prepHours: Number.isFinite(p) && p >= 0 ? p : w * 0.35,
+            workstream: normalizeWorkstream(c.workstream),
           };
         })
         .filter((c) => c.owner);
@@ -992,8 +1830,6 @@ export default function CrmDataQualityView() {
       if (requiredFields.some((f) => !String(f || "").trim())) {
         throw new Error("Please fill all required fields.");
       }
-      const jiraPattern =
-        /^https:\/\/europcarmobility\.atlassian\.net\/browse\/[A-Z0-9-]+$/i;
       if (form.jiraUrl && !jiraPattern.test(form.jiraUrl.trim())) {
         throw new Error(
           "JIRA URL must follow https://europcarmobility.atlassian.net/browse/CRM-XXXX",
@@ -1030,6 +1866,7 @@ export default function CrmDataQualityView() {
           body?.error || `Failed to create ticket (${res.status})`,
         );
       }
+      setModalStep("details");
       setOpenAdd(false);
       setForm({
         status: STATUS_OPTIONS[0],
@@ -1048,7 +1885,17 @@ export default function CrmDataQualityView() {
         etaDate: "",
         comments: "",
       });
-      setFormContribs([{ id: `c-${Date.now()}`, owner: "", workHours: "", prepHours: "" }]);
+      setFormContribs([
+        {
+          id: `c-${Date.now()}`,
+          effortDate: todaysIsoDate(),
+          owner: "",
+          personId: null,
+          workHours: "",
+          prepHours: "",
+          workstream: DEFAULT_WORKSTREAM,
+        },
+      ]);
       setLoading(true);
       const reload = await fetch(`/api/crm/data-quality?client=${clientSlug}`);
       const reloadBody = await reload.json().catch(() => null);
@@ -1091,98 +1938,65 @@ export default function CrmDataQualityView() {
   };
   return (
     <div className="space-y-6">
-      <header className="flex flex-col gap-3 rounded-3xl border border-[color:var(--color-border)] bg-[color:var(--color-surface)] px-5 py-6 shadow-sm sm:flex-row sm:items-center sm:justify-between">
-        <div className="space-y-1">
-          <div className="flex items-center gap-3">
-            <p className="text-xs uppercase tracking-[0.3em] text-[color:var(--color-text)]/65">
-              Data Quality
-            </p>
-            <span className="rounded-full bg-[color:var(--color-surface-2)] px-3 py-1 text-xs font-semibold text-[color:var(--color-text)]/80">
-              {clientSlug?.toUpperCase()} - CRM Ops
-            </span>
+      <header className="flex flex-col gap-3 rounded-3xl border border-[color:var(--color-border)] bg-[color:var(--color-surface)] px-5 py-6 shadow-sm">
+        <div className="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
+          <div className="space-y-1">
+            <div className="flex items-center gap-3">
+              <p className="text-xs uppercase tracking-[0.3em] text-[color:var(--color-text)]/65">
+                Ticket Reporting
+              </p>
+              <span className="rounded-full bg-[color:var(--color-surface-2)] px-3 py-1 text-xs font-semibold text-[color:var(--color-text)]/80">
+                {clientSlug?.toUpperCase()} - CRM Ops
+              </span>
+            </div>
+            <h1
+              className="text-2xl font-semibold text-[color:var(--color-text)]"
+              title="JIRA tickets for this client. Track workload, SLAs and priorities in one place."
+            >
+              Ticket Reporting
+            </h1>
           </div>
-          <h1
-            className="text-2xl font-semibold text-[color:var(--color-text)]"
-            title="JIRA tickets for this client. Track workload, SLAs and priorities in one place."
-          >
-            Data Quality Reporting
-          </h1>
-        </div>
-        <div className="flex gap-2">
-          {(isEditor || isAdmin) && (
-            <button
-              className="btn-primary"
-              type="button"
-              onClick={openAddModal}
-            >
-              Add ticket
-            </button>
-          )}
-          {(isEditor || isAdmin) && (
-            <button
-              className="btn-ghost"
-              type="button"
-              onClick={async () => {
-                setSyncingJira(true);
-                try {
-                  const res = await fetch(
-                    `/api/admin/jira-sync?client=${clientSlug}`,
-                    { method: "POST" },
-                  );
-                  const body = await res.json().catch(() => null);
-                  if (!res.ok)
-                    throw new Error(
-                      body?.error || `JIRA sync failed (${res.status})`,
-                    );
-                  showSuccess(`JIRA synced: ${body?.imported ?? 0} tickets`);
-                  setLoading(true);
-                  const reload = await fetch(
-                    `/api/crm/data-quality?client=${clientSlug}`,
-                  );
-                  const reloadBody = await reload.json().catch(() => null);
-                  if (reload.ok && Array.isArray(reloadBody?.tickets)) {
-                    setRows(reloadBody.tickets);
-                  }
-                  setLoading(false);
-                } catch (err) {
-                  const message =
-                    err instanceof Error
-                      ? err.message
-                      : typeof err === "object" &&
-                          err &&
-                          "error" in (err as any)
-                        ? String((err as any).error)
-                        : "JIRA sync failed";
-                  showError(message);
-                  setLoading(false);
-                } finally {
-                  setSyncingJira(false);
-                }
-              }}
-              disabled={syncingJira}
-            >
-              {syncingJira ? (
-                <span className="flex items-center gap-2">
-                  {/* eslint-disable-next-line @next/next/no-img-element */}
-                  <img
-                    src="/animations/data-sync.gif"
-                    alt="Syncing JIRA"
-                    className="h-6 w-6 rounded-full border border-[color:var(--color-border)] bg-white/70 shadow-sm"
-                  />
-                  <span>Syncing JIRA...</span>
-                </span>
-              ) : (
-                "Sync JIRA"
-              )}
-            </button>
-          )}
+          <div className="grid grid-cols-2 gap-x-4 gap-y-2 text-sm text-[color:var(--color-text)] lg:grid-cols-4">
+            <div>
+              <span className="text-xs uppercase text-[color:var(--color-text)]/60">
+                Tickets
+              </span>
+              <div className="text-lg font-semibold text-[color:var(--color-text)]">
+                {filtered.length}
+              </div>
+            </div>
+            <div>
+              <span className="text-xs uppercase text-[color:var(--color-text)]/60">
+                Hours
+              </span>
+              <div className="text-lg font-semibold text-[color:var(--color-text)]">
+                {totals.totalHours.toFixed(2)}
+              </div>
+            </div>
+            <div>
+              <span className="text-xs uppercase text-[color:var(--color-text)]/60">
+                Days
+              </span>
+              <div className="text-lg font-semibold text-[color:var(--color-text)]">
+                {totals.totalDays.toFixed(2)}
+              </div>
+            </div>
+            <div>
+              <span className="text-xs uppercase text-[color:var(--color-text)]/60">
+                Budget (€)
+              </span>
+              <div className="text-lg font-semibold text-[color:var(--color-text)]">
+                {formatCurrency(totals.totalBudget, "EUR")}
+              </div>
+            </div>
+          </div>
         </div>
       </header>
 
       <div className="rounded-2xl border border-[color:var(--color-border)] bg-[color:var(--color-surface-2)]/60 px-4 py-3">
         <div className="flex flex-col gap-3">
           <div className="flex flex-wrap items-end gap-3">
-            <div className="flex min-w-[220px] flex-1 flex-col gap-1">
+            <div className="flex min-w-[260px] flex-[2] flex-col gap-1">
               <label className="text-xs font-medium text-[color:var(--color-text)]/70">
                 Search
               </label>
@@ -1193,7 +2007,7 @@ export default function CrmDataQualityView() {
                 placeholder="Ticket ID or title"
               />
             </div>
-            <div className="min-w-[200px] flex-1">
+            <div className="min-w-[180px] flex-1">
               <MultiSelect
                 label="Status"
                 options={STATUS_OPTIONS.map((s) => ({ label: s, value: s }))}
@@ -1202,213 +2016,360 @@ export default function CrmDataQualityView() {
                 onChange={(vals) => handleChange("status", vals)}
               />
             </div>
-            <div className="min-w-[200px] flex-1">
-              <MultiSelect
-                label="Contributors"
-                options={options.owner.map((s) => ({ label: s, value: s }))}
-                values={filters.owner}
-                counts={options.ownerCounts}
-                onChange={(vals) => handleChange("owner", vals)}
-              />
-            </div>
-            <div className="min-w-[200px] flex-1">
+            <div className="min-w-[180px] flex-1">
               <MultiSelect
                 label="Assignee (JIRA)"
-                options={options.assignee.map((s) => ({ label: s, value: s }))}
+                options={options.assignee}
                 values={filters.assignee}
                 counts={options.assigneeCounts}
                 onChange={(vals) => handleChange("assignee", vals)}
               />
             </div>
-            <div className="flex flex-wrap items-center gap-2 ml-auto">
+            <div className="min-w-[180px] flex-1">
+              <MultiSelect
+                label="Contributors"
+                options={options.owner}
+                values={filters.owner}
+                counts={options.ownerCounts}
+                onChange={(vals) => handleChange("owner", vals)}
+              />
+            </div>
+            <div className="ml-auto flex flex-wrap items-center gap-2">
               <button
-                className="btn-ghost h-10"
+                className={`btn-ghost h-10 w-10 ${openAdvanced ? "bg-[color:var(--color-surface)]/70" : ""}`}
+                style={{ padding: 0 }}
                 type="button"
                 onClick={() => setOpenAdvanced((v) => !v)}
+                aria-label="More filters"
+                title={openAdvanced ? "Hide filters" : "More filters"}
               >
-                {openAdvanced ? "Hide filters" : "More filters"}
+                {/* eslint-disable-next-line @next/next/no-img-element */}
+                <img
+                  src="/icons/ui/settings-sliders.svg"
+                  alt=""
+                  className="h-6 w-6 shrink-0 object-contain opacity-70"
+                />
                 {filters.daysBucket ||
                 filters.assignedFrom ||
                 filters.assignedTo ||
                 filters.dueFrom ||
-                filters.dueTo
-                  ? " *"
-                  : ""}
+                filters.dueTo ? (
+                  <span
+                    className="absolute -right-1 -top-1 h-2.5 w-2.5 rounded-full bg-[color:var(--color-primary)]"
+                    aria-hidden="true"
+                  />
+                ) : null}
               </button>
               <button
-                className="btn-ghost h-10"
                 type="button"
-                onClick={() => setShowColumnPicker(true)}
+                className={[
+                  "inline-flex items-center gap-2 rounded-full border px-3 py-1.5 text-xs font-semibold transition",
+                  filters.needsEffort
+                    ? "border-amber-300 bg-amber-50 text-amber-900"
+                    : "border-[color:var(--color-border)] bg-[color:var(--color-surface)] text-[color:var(--color-text)]/70",
+                  needsEffortCount === 0
+                    ? "cursor-not-allowed opacity-50"
+                    : "hover:bg-[color:var(--color-surface-2)]/80",
+                ].join(" ")}
+                onClick={() => handleChange("needsEffort", !filters.needsEffort)}
+                disabled={needsEffortCount === 0}
+                aria-pressed={filters.needsEffort}
+                title="Show tickets moved to Validation/Done in the last sync without effort"
               >
-                Columns
+                Needs effort: {needsEffortCount}
               </button>
-              <button
-                className="btn-ghost h-10"
-                type="button"
-                onClick={clearFilters}
-              >
-                Clear filters
-              </button>
-              <label className="flex items-center gap-2 text-xs text-[color:var(--color-text)]/80">
-                <input
-                  type="checkbox"
-                  checked={compact}
-                  onChange={(e) => setCompact(e.target.checked)}
-                  className="h-4 w-4"
-                />
-                Compact view
-              </label>
+              {isEditor || isAdmin ? (
+                <>
+                  <div
+                    className="mx-1 h-6 w-px bg-[color:var(--color-border)]/60"
+                    aria-hidden="true"
+                  />
+                  <button
+                    className="btn-primary h-10"
+                    type="button"
+                    title="Sync tickets from JIRA"
+                    onClick={async () => {
+                      const previousRows = rowsRef.current;
+                      const previousStatusMap = new Map(
+                        previousRows.map((row) => [row.id, row.status]),
+                      );
+                      setSyncingJira(true);
+                      try {
+                        const res = await fetch(
+                          `/api/admin/jira-sync?client=${clientSlug}`,
+                          { method: "POST" },
+                        );
+                        const body = await res.json().catch(() => null);
+                        if (!res.ok)
+                          throw new Error(
+                            body?.error || `JIRA sync failed (${res.status})`,
+                          );
+                        showSuccess(
+                          `JIRA synced: ${body?.imported ?? 0} tickets`,
+                        );
+                        setLoading(true);
+                        const reload = await fetch(
+                          `/api/crm/data-quality?client=${clientSlug}`,
+                        );
+                        const reloadBody = await reload.json().catch(() => null);
+                        if (reload.ok && Array.isArray(reloadBody?.tickets)) {
+                          const nextRows = reloadBody.tickets as DataQualityTicket[];
+                          setRows(nextRows);
+                          const changedIds = new Set<string>();
+                          nextRows.forEach((ticket) => {
+                            const prevStatus = previousStatusMap.get(ticket.id);
+                            if (!prevStatus || prevStatus === ticket.status) return;
+                            if (!NEEDS_EFFORT_STATUSES.has(ticket.status)) return;
+                            const totalHours = getTicketTotalHours(ticket);
+                            if (!isZeroValue(totalHours)) return;
+                            changedIds.add(ticket.id);
+                          });
+                          setLastSyncChangedIds(changedIds);
+                          setShowNeedsEffortNudge(changedIds.size > 0);
+                        }
+                        setLoading(false);
+                      } catch (err) {
+                        const message =
+                          err instanceof Error
+                            ? err.message
+                            : typeof err === "object" &&
+                                err &&
+                                "error" in (err as any)
+                              ? String((err as any).error)
+                              : "JIRA sync failed";
+                        showError(message);
+                        setLoading(false);
+                      } finally {
+                        setSyncingJira(false);
+                      }
+                    }}
+                    disabled={syncingJira}
+                  >
+                    <span className="flex items-center gap-2">
+                      {syncingJira ? (
+                        <>
+                          {/* eslint-disable-next-line @next/next/no-img-element */}
+                          <img
+                            src="/animations/data-sync.gif"
+                            alt="Syncing JIRA"
+                            className="h-8 w-8 rounded-full border border-[color:var(--color-border)] bg-white/70 shadow-sm"
+                          />
+                          <span>Syncing...</span>
+                        </>
+                      ) : (
+                        <span>Sync JIRA</span>
+                      )}
+                    </span>
+                  </button>
+                </>
+              ) : null}
+              <div className="relative">
+                <button
+                  id="actions-btn-dq-actions"
+                  className="btn-ghost h-10 w-10"
+                  style={{ padding: 0 }}
+                  type="button"
+                  onClick={() =>
+                    setOpenMenuId((prev) =>
+                      prev === "dq-actions" ? null : "dq-actions",
+                    )
+                  }
+                  aria-label="Actions"
+                  title="Actions"
+                >
+                  {/* eslint-disable-next-line @next/next/no-img-element */}
+                  <img
+                    src="/icons/ui/menu-dots-vertical.svg"
+                    alt=""
+                    className="h-5 w-5 shrink-0 object-contain opacity-70"
+                  />
+                </button>
+                {openMenuId === "dq-actions" ? (
+                  <div
+                    id="actions-menu-dq-actions"
+                    className="absolute right-0 top-11 z-50 w-56 rounded-lg border border-[color:var(--color-border)] bg-[color:var(--color-surface)] shadow-xl ring-1 ring-black/5"
+                  >
+                    <div className="px-3 pt-2 text-[10px] font-semibold uppercase tracking-wide text-[color:var(--color-text)]/60">
+                      Display
+                    </div>
+                    <label className="flex items-center justify-between gap-3 px-3 py-2 text-sm font-medium hover:bg-[color:var(--color-surface-2)]">
+                      <span>Compact view</span>
+                      <input
+                        type="checkbox"
+                        checked={compact}
+                        onChange={(e) => setCompact(e.target.checked)}
+                        className="h-4 w-4 accent-[color:var(--color-primary)]"
+                      />
+                    </label>
+                    <div
+                      className="my-1 h-px bg-[color:var(--color-border)]/70"
+                      aria-hidden="true"
+                    />
+                    <button
+                      className="flex w-full items-center gap-2 px-3 py-2 text-left text-sm font-medium hover:bg-[color:var(--color-surface-2)]"
+                      onClick={() => {
+                        setOpenMenuId(null);
+                        setShowColumnPicker(true);
+                      }}
+                    >
+                      <svg
+                        aria-hidden="true"
+                        viewBox="0 0 20 20"
+                        fill="currentColor"
+                        className="h-4 w-4 text-[color:var(--color-text)]/70"
+                      >
+                        <path d="M4 6.5A1.5 1.5 0 0 1 5.5 5h9a1.5 1.5 0 1 1 0 3h-9A1.5 1.5 0 0 1 4 6.5Zm0 7A1.5 1.5 0 0 1 5.5 12h5a1.5 1.5 0 1 1 0 3h-5A1.5 1.5 0 0 1 4 13.5Zm8-1.75a.75.75 0 0 1 1.06 0l2.72 2.72a.75.75 0 1 1-1.06 1.06l-.47-.47-.72.72a.75.75 0 0 1-1.06-1.06l.72-.72-.47-.47a.75.75 0 0 1 0-1.06Z" />
+                      </svg>
+                      Customize columns
+                    </button>
+                    {isEditor || isAdmin ? (
+                      <>
+                        <div
+                          className="my-1 h-px bg-[color:var(--color-border)]/70"
+                          aria-hidden="true"
+                        />
+                        <button
+                          className="block w-full px-3 py-2 text-left text-sm hover:bg-[color:var(--color-surface-2)]"
+                          onClick={() => {
+                            setOpenMenuId(null);
+                            openAddModal();
+                          }}
+                        >
+                          Add ticket (manual)
+                        </button>
+                      </>
+                    ) : null}
+                  </div>
+                ) : null}
+              </div>
             </div>
           </div>
         </div>
         {openAdvanced ? (
-          <div className="mt-3 grid grid-cols-[repeat(auto-fit,minmax(200px,1fr))] gap-3">
-            <MultiSelect
-              label="Priority"
-              options={options.priority.map((s) => ({ label: s, value: s }))}
-              values={filters.priority}
-              counts={options.priorityCounts}
-              onChange={(vals) => handleChange("priority", vals)}
-            />
-            <MultiSelect
-              label="Type"
-              options={options.type.map((s) => ({ label: s, value: s }))}
-              values={filters.type}
-              counts={options.typeCounts}
-              onChange={(vals) => handleChange("type", vals)}
-            />
-            <div className="flex flex-col gap-1">
-              <label className="text-xs font-medium text-[color:var(--color-text)]/70">
-                Created from
-              </label>
-              <input
-                type="date"
-                className="input input-date h-10 placeholder:text-[color:var(--color-text)]/50"
-                value={filters.assignedFrom}
-                onChange={(e) => handleChange("assignedFrom", e.target.value)}
-                onFocus={openDatePicker}
-                onMouseDown={openDatePicker}
-                placeholder="dd/mm/aaaa"
-              />
+          <div className="mt-3 space-y-2">
+            <div className="flex items-center gap-3 text-[10px] uppercase tracking-[0.18em] text-[color:var(--color-text)]/60">
+              <span>Advanced filters</span>
+              <div className="h-px flex-1 bg-[color:var(--color-border)]/60" aria-hidden="true" />
             </div>
-            <div className="flex flex-col gap-1">
-              <label className="text-xs font-medium text-[color:var(--color-text)]/70">
-                Created to
-              </label>
-              <input
-                type="date"
-                className="input input-date h-10 placeholder:text-[color:var(--color-text)]/50"
-                value={filters.assignedTo}
-                onChange={(e) => handleChange("assignedTo", e.target.value)}
-                onFocus={openDatePicker}
-                onMouseDown={openDatePicker}
-                placeholder="dd/mm/aaaa"
+            <div className="grid grid-cols-[repeat(auto-fit,minmax(200px,1fr))] gap-3">
+              <MultiSelect
+                label="Priority"
+                options={options.priority.map((s) => ({ label: s, value: s }))}
+                values={filters.priority}
+                counts={options.priorityCounts}
+                onChange={(vals) => handleChange("priority", vals)}
               />
-            </div>
-            <div className="flex flex-col gap-1">
-              <label className="text-xs font-medium text-[color:var(--color-text)]/70">
-                Due from
-              </label>
-              <input
-                type="date"
-                className="input input-date h-10 placeholder:text-[color:var(--color-text)]/50"
-                value={filters.dueFrom}
-                onChange={(e) => handleChange("dueFrom", e.target.value)}
-                onFocus={openDatePicker}
-                onMouseDown={openDatePicker}
-                placeholder="dd/mm/aaaa"
+              <MultiSelect
+                label="Type"
+                options={options.type}
+                values={filters.type}
+                counts={options.typeCounts}
+                onChange={(vals) => handleChange("type", vals)}
               />
-            </div>
-            <div className="flex flex-col gap-1">
-              <label className="text-xs font-medium text-[color:var(--color-text)]/70">
-                Due to
-              </label>
-              <input
-                type="date"
-                className="input input-date h-10 placeholder:text-[color:var(--color-text)]/50"
-                value={filters.dueTo}
-                onChange={(e) => handleChange("dueTo", e.target.value)}
-                onFocus={openDatePicker}
-                onMouseDown={openDatePicker}
-                placeholder="dd/mm/aaaa"
+              <MultiSelect
+                label="Workstream"
+                options={options.workstream.map((s) => ({ label: s, value: s }))}
+                values={filters.workstream}
+                counts={options.workstreamCounts}
+                onChange={(vals) => handleChange("workstream", vals)}
               />
+              <DateRangeField
+                label="Created date"
+                from={filters.assignedFrom}
+                to={filters.assignedTo}
+                onChangeFrom={(value) => handleChange("assignedFrom", value)}
+                onChangeTo={(value) => handleChange("assignedTo", value)}
+                onClear={() => {
+                  handleChange("assignedFrom", "");
+                  handleChange("assignedTo", "");
+                }}
+              />
+              <DateRangeField
+                label="Due date"
+                from={filters.dueFrom}
+                to={filters.dueTo}
+                onChangeFrom={(value) => handleChange("dueFrom", value)}
+                onChangeTo={(value) => handleChange("dueTo", value)}
+                onClear={() => {
+                  handleChange("dueFrom", "");
+                  handleChange("dueTo", "");
+                }}
+              />
+              <div className="flex flex-col gap-1">
+                <label className="text-xs font-medium text-[color:var(--color-text)]/70">
+                  Days to due
+                </label>
+                <select
+                  value={filters.daysBucket}
+                  onChange={(e) => handleChange("daysBucket", e.target.value)}
+                  className="input h-10"
+                >
+                  <option value="">All</option>
+                  <option value="overdue">Overdue</option>
+                  <option value="today">Today</option>
+                  <option value="next7">Next 7 days</option>
+                  <option value="next30">Next 30 days</option>
+                  <option value="no-due">No due date</option>
+                </select>
+              </div>
             </div>
-            <div className="flex flex-col gap-1">
-              <label className="text-xs font-medium text-[color:var(--color-text)]/70">
-                Days to due
-              </label>
-              <select
-                value={filters.daysBucket}
-                onChange={(e) => handleChange("daysBucket", e.target.value)}
-                className="input h-10"
+        </div>
+        ) : null}
+      </div>
+        {activeChips.length > 0 ? (
+          <div className="flex flex-wrap items-center gap-2 text-xs sm:text-sm text-[color:var(--color-text)]/80">
+            {activeChips.map((chip, idx) => (
+              <span
+                key={idx}
+                className="inline-flex items-center gap-2 rounded-full border border-[color:var(--color-border)] bg-[color:var(--color-surface-2)] px-2.5 py-1"
               >
-                <option value="">All</option>
-                <option value="overdue">Overdue</option>
-                <option value="today">Today</option>
-                <option value="next7">Next 7 days</option>
-                <option value="next30">Next 30 days</option>
-                <option value="no-due">No due date</option>
-              </select>
+                {chip.label}
+                <button
+                  className="text-[color:var(--color-accent)]"
+                  onClick={chip.onClear}
+                  aria-label="Clear filter"
+                >
+                  x
+                </button>
+              </span>
+            ))}
+            <button
+              className="text-xs font-medium text-[color:var(--color-text)]/70 hover:text-[color:var(--color-text)]"
+              type="button"
+              onClick={clearFilters}
+            >
+              Clear all
+            </button>
+          </div>
+        ) : null}
+        {showNeedsEffortNudge && needsEffortCount > 0 ? (
+          <div className="mt-3 flex flex-wrap items-center justify-between gap-3 rounded-xl border border-amber-200/70 bg-amber-50/70 px-3 py-2 text-sm text-amber-900">
+            <span>
+              {needsEffortCount} ticket
+              {needsEffortCount === 1 ? "" : "s"} moved to Done/Validation
+              without effort.
+            </span>
+            <div className="flex items-center gap-2">
+              <button
+                className="btn-primary h-8 px-3 text-xs"
+                type="button"
+                onClick={() => {
+                  handleChange("needsEffort", true);
+                  setShowNeedsEffortNudge(false);
+                }}
+              >
+                Review
+              </button>
+              <button
+                className="btn-ghost h-8 px-3 text-xs"
+                type="button"
+                onClick={() => setShowNeedsEffortNudge(false)}
+              >
+                Dismiss
+              </button>
             </div>
           </div>
         ) : null}
-      </div>
-      {activeChips.length > 0 ? (
-        <div className="flex flex-wrap gap-2 text-xs sm:text-sm text-[color:var(--color-text)]/80">
-          {activeChips.map((chip, idx) => (
-            <span
-              key={idx}
-              className="inline-flex items-center gap-2 rounded-full border border-[color:var(--color-border)] bg-[color:var(--color-surface-2)] px-2.5 py-1"
-            >
-              {chip.label}
-              <button
-                className="text-[color:var(--color-accent)]"
-                onClick={chip.onClear}
-                aria-label="Clear filter"
-              >
-                x
-              </button>
-            </span>
-          ))}
-        </div>
-      ) : null}
-
-      <div className="rounded-xl border border-[color:var(--color-border)] bg-[color:var(--color-surface-2)]/60 px-4 py-3 text-sm text-[color:var(--color-text)]/80">
-        <div className="flex flex-wrap items-center gap-4">
-          <div>
-            <span className="text-xs uppercase text-[color:var(--color-text)]/60">
-              Rows
-            </span>
-            <div className="text-lg font-semibold text-[color:var(--color-text)]">
-              {filtered.length}
-            </div>
-          </div>
-          <div>
-            <span className="text-xs uppercase text-[color:var(--color-text)]/60">
-              Hours
-            </span>
-            <div className="text-lg font-semibold text-[color:var(--color-text)]">
-              {totals.totalHours.toFixed(2)}
-            </div>
-          </div>
-          <div>
-            <span className="text-xs uppercase text-[color:var(--color-text)]/60">
-              Days
-            </span>
-            <div className="text-lg font-semibold text-[color:var(--color-text)]">
-              {totals.totalDays.toFixed(2)}
-            </div>
-          </div>
-          <div>
-            <span className="text-xs uppercase text-[color:var(--color-text)]/60">
-              Budget (€)
-            </span>
-            <div className="text-lg font-semibold text-[color:var(--color-text)]">
-              {formatCurrency(totals.totalBudget, "EUR")}
-            </div>
-          </div>
-        </div>
-      </div>
 
       <div className="overflow-visible rounded-2xl border border-[color:var(--color-border)] bg-[color:var(--color-surface)]">
         {error ? (
@@ -1617,11 +2578,29 @@ export default function CrmDataQualityView() {
                       </tr>
                     ) : null}
                     {group.rows.map((t) => {
-                      const contribs =
-                        t.contributions && t.contributions.length > 0
-                          ? t.contributions
-                          : [{ owner: t.owner, workHours: t.workHours, prepHours: t.prepHours }];
-                      const owners = contribs.map((c) => c.owner).filter(Boolean);
+                      const contribs = filterContributionsByWorkstream(
+                        getTicketContributions(t),
+                      );
+                      const contribsWithLabels = contribs.map((c) => {
+                        const key = resolvePersonKey(c.owner, c.personId);
+                        const label = key ? labelForPersonKey(key) : c.owner;
+                        return {
+                          ...c,
+                          ownerKey: key || c.owner,
+                          ownerLabel: label || c.owner,
+                        };
+                      });
+                      const owners = (() => {
+                        const uniqueOwners: string[] = [];
+                        const seen = new Set<string>();
+                        contribsWithLabels.forEach((c) => {
+                          const key = c.ownerKey || c.ownerLabel || "";
+                          if (!key || seen.has(key)) return;
+                          seen.add(key);
+                          uniqueOwners.push(c.ownerLabel || key);
+                        });
+                        return uniqueOwners;
+                      })();
                       const ownerLabel =
                         owners.length === 0
                           ? null
@@ -1640,8 +2619,13 @@ export default function CrmDataQualityView() {
                       );
                       const totalHours = totalWork + totalPrep;
                       const totalDays = totalHours / 7;
+                      const isZeroWork = isZeroValue(totalWork);
+                      const isZeroPrep = isZeroValue(totalPrep);
+                      const isZeroTotalHours = isZeroValue(totalHours);
+                      const isZeroTotalDays = isZeroValue(totalDays);
                       const budget = contribs.reduce((acc, c) => {
-                        const rate = ownerRates[c.owner]?.dailyRate;
+                        const rateKey = c.personId || c.owner;
+                        const rate = ownerRates[rateKey]?.dailyRate;
                         if (rate != null) {
                           const work = c.workHours ?? 0;
                           const prep = c.prepHours != null ? c.prepHours : work * 0.35;
@@ -1649,21 +2633,50 @@ export default function CrmDataQualityView() {
                         }
                         return acc;
                       }, 0);
-                      const budgetCurrency =
-                        (owners.length > 0 ? ownerRates[owners[0]]?.currency : null) || "EUR";
+                      const budgetCurrency = (() => {
+                        for (const c of contribs) {
+                          const rateKey = c.personId || c.owner;
+                          const currency = ownerRates[rateKey]?.currency;
+                          if (currency) return currency;
+                        }
+                        return "EUR";
+                      })();
+                      const typeRaw = t.type || "";
+                      const typeLabel = typeRaw ? stripTypePrefix(typeRaw) : "";
                       const daysRemaining = daysToDue(t.dueDate);
-                      const dueClass =
-                        daysRemaining == null
-                          ? ""
-                          : daysRemaining < 0
-                            ? "bg-rose-50 text-rose-800 font-semibold"
-                            : daysRemaining <= 7
-                              ? "bg-amber-50 text-amber-800 font-semibold"
-                              : "";
+                      const isDone = t.status === "Done";
+                      const needsEffort =
+                        lastSyncChangedIds.has(t.id) &&
+                        NEEDS_EFFORT_STATUSES.has(t.status) &&
+                        isZeroValue(getTicketTotalHours(t));
+                      const assigneeRaw = t.jiraAssignee || "";
+                      const assigneeKey = resolvePersonKey(assigneeRaw, null);
+                      const assigneeLabel = assigneeKey
+                        ? labelForPersonKey(assigneeKey)
+                        : assigneeRaw;
+                      const dueSeverity = getDueSeverity(t.status, daysRemaining);
+                      const dueSeverityClass =
+                        dueSeverity === "critical"
+                          ? "due--critical"
+                          : dueSeverity === "warn"
+                            ? "due--warn"
+                            : dueSeverity === "done"
+                              ? "due--done"
+                              : "due--neutral";
+                      const dueDisplay = isDone
+                        ? "—"
+                        : daysRemaining != null
+                          ? String(daysRemaining)
+                          : null;
+                      const rowClassName = [
+                        "dq-row",
+                        isDone ? "row--done" : "",
+                        needsEffort ? "row--needs-effort" : "",
+                      ].join(" ");
                       return (
                         <tr
                           key={t.ticketId}
-                          className="hover:bg-[color:var(--color-surface-2)]/40"
+                          className={rowClassName}
                         >
                           {showCol("status") ? (
                             <td className="px-3 py-3 font-semibold">
@@ -1676,24 +2689,34 @@ export default function CrmDataQualityView() {
                             </td>
                           ) : null}
                           {showCol("title") ? (
-                            <td
-                              className="px-3 py-3 max-w-[420px] truncate"
-                              title={t.title}
-                            >
-                              {t.title || renderPlaceholder()}
+                            <td className="px-3 py-3 max-w-[420px]">
+                              <TitleCell title={t.title} needsEffort={needsEffort} />
                             </td>
                           ) : null}
                           {showCol("type") ? (
-                            <td className="px-3 py-3 font-semibold">
-                              {t.type || renderPlaceholder()}
+                            <td
+                              className="px-3 py-3 font-semibold"
+                              title={
+                                typeRaw && typeLabel && typeLabel !== typeRaw
+                                  ? typeRaw
+                                  : undefined
+                              }
+                            >
+                              {typeLabel || renderPlaceholder()}
                             </td>
                           ) : null}
                           {showCol("assignee") ? (
                             <td
                               className="px-3 py-3 font-semibold"
-                              title={t.jiraAssignee || undefined}
+                              title={
+                                assigneeRaw
+                                  ? assigneeLabel && assigneeLabel !== assigneeRaw
+                                    ? `${assigneeLabel} (${assigneeRaw})`
+                                    : assigneeRaw
+                                  : undefined
+                              }
                             >
-                              {t.jiraAssignee || renderPlaceholder()}
+                              {assigneeLabel || renderPlaceholder()}
                             </td>
                           ) : null}
                           {showCol("contributors") ? (
@@ -1706,7 +2729,7 @@ export default function CrmDataQualityView() {
                                     <span>{owners[0]}</span>
                                     <div className="relative group">
                                       <span
-                                        className="inline-flex items-center rounded-full bg-[color:var(--color-surface-2)] px-2 py-0.5 text-xs font-semibold text-[color:var(--color-text)]/80 ring-1 ring-[color:var(--color-border)]"
+                                        className="dq-chip inline-flex items-center rounded-full bg-[color:var(--color-surface-2)] px-2 py-0.5 text-xs font-semibold text-[color:var(--color-text)]/80 ring-1 ring-[color:var(--color-border)]"
                                         tabIndex={0}
                                       >
                                         +{owners.length - 1}
@@ -1716,14 +2739,17 @@ export default function CrmDataQualityView() {
                                           Contributors ({owners.length})
                                         </p>
                                         <ul className="space-y-1">
-                                          {contribs.map((c, idx) => (
-                                            <li key={`${c.owner}-${idx}`} className="flex flex-col">
-                                              <span className="font-semibold">{c.owner}</span>
+                                          {contribsWithLabels.map((c, idx) => (
+                                            <li key={`${c.ownerLabel}-${idx}`} className="flex flex-col">
+                                              <span className="font-semibold">
+                                                {c.ownerLabel}
+                                              </span>
                                               <span className="text-[color:var(--color-text)]/70">
                                                 Work {c.workHours ?? 0}h · Prep{" "}
                                                 {c.prepHours != null
                                                   ? c.prepHours
-                                                  : ((c.workHours ?? 0) * 0.35).toFixed(2)}h
+                                                  : ((c.workHours ?? 0) * 0.35).toFixed(2)}h ·{" "}
+                                                {normalizeWorkstream(c.workstream)}
                                               </span>
                                             </li>
                                           ))}
@@ -1768,7 +2794,7 @@ export default function CrmDataQualityView() {
                           ) : null}
                           {showCol("dueDate") ? (
                             <td
-                              className={`px-3 py-3 bg-[color:var(--color-surface-2)]/30 ${dueClass}`}
+                              className="px-3 py-3 bg-[color:var(--color-surface-2)]/30"
                               aria-label={
                                 t.dueDate
                                   ? `Due date ${formatDate(t.dueDate)}`
@@ -1786,20 +2812,31 @@ export default function CrmDataQualityView() {
                           ) : null}
                           {showCol("daysToDue") ? (
                             <td
-                              className={`px-3 py-3 bg-[color:var(--color-surface-2)]/30 ${dueClass}`}
+                              className="px-3 py-3 bg-[color:var(--color-surface-2)]/30"
                               aria-label={
                                 daysRemaining != null
                                   ? `Days to due ${daysRemaining}`
                                   : "Days to due not available"
                               }
                             >
-                              {daysRemaining != null
-                                ? daysRemaining
-                                : renderPlaceholder()}
+                              {dueDisplay != null ? (
+                                <span
+                                  className={`due-pill ${dueSeverityClass}`}
+                                  title={
+                                    isDone && daysRemaining != null
+                                      ? `Days to due: ${daysRemaining}`
+                                      : undefined
+                                  }
+                                >
+                                  {dueDisplay}
+                                </span>
+                              ) : (
+                                renderPlaceholder()
+                              )}
                             </td>
                           ) : null}
                           {showCol("priority") ? (
-                            <td className="px-3 py-3 font-semibold">
+                            <td className="px-3 py-3">
                               {renderPriorityBadge(t.priority)}
                             </td>
                           ) : null}
@@ -1808,7 +2845,9 @@ export default function CrmDataQualityView() {
                               className="px-3 py-3 border-l border-[color:var(--color-border)] bg-[color:var(--color-surface-2)]/40"
                               aria-label={`Work hours ${totalWork.toFixed(2)}`}
                             >
-                              {totalWork.toFixed(2)}
+                              <span className={isZeroWork ? "cell--zero" : "cell--nonzero"}>
+                                {totalWork.toFixed(2)}
+                              </span>
                             </td>
                           ) : null}
                           {showCol("prep") ? (
@@ -1816,7 +2855,9 @@ export default function CrmDataQualityView() {
                               className="px-3 py-3 bg-[color:var(--color-surface-2)]/40"
                               aria-label={`Prep hours ${totalPrep.toFixed(2)}`}
                             >
-                              {totalPrep.toFixed(2)}
+                              <span className={isZeroPrep ? "cell--zero" : "cell--nonzero"}>
+                                {totalPrep.toFixed(2)}
+                              </span>
                             </td>
                           ) : null}
                           {showCol("totalHours") ? (
@@ -1824,7 +2865,9 @@ export default function CrmDataQualityView() {
                               className="px-3 py-3 bg-[color:var(--color-surface-2)]/40"
                               aria-label={`Total hours ${totalHours.toFixed(2)}`}
                             >
-                              {totalHours.toFixed(2)}
+                              <span className={isZeroTotalHours ? "cell--zero" : "cell--nonzero"}>
+                                {totalHours.toFixed(2)}
+                              </span>
                             </td>
                           ) : null}
                           {showCol("totalDays") ? (
@@ -1832,7 +2875,9 @@ export default function CrmDataQualityView() {
                               className="px-3 py-3 bg-[color:var(--color-surface-2)]/40"
                               aria-label={`Total days ${totalDays.toFixed(2)}`}
                             >
-                              {totalDays.toFixed(2)}
+                              <span className={isZeroTotalDays ? "cell--zero" : "cell--nonzero"}>
+                                {totalDays.toFixed(2)}
+                              </span>
                             </td>
                           ) : null}
                           {showCol("budget") ? (
@@ -1877,20 +2922,24 @@ export default function CrmDataQualityView() {
                             </td>
                           ) : null}
                           {showCol("jira") ? (
-                            <td className="px-3 py-3">
+                            <td className="px-3 py-3 dq-action-cell cell-jira">
                               {t.jiraUrl ? (
                                 <Link
                                   href={t.jiraUrl}
-                                  className="inline-flex h-8 w-8 items-center justify-center rounded-md hover:bg-[color:var(--color-surface-2)]/60"
+                                  className="jira-link group relative inline-flex h-8 w-8 items-center justify-center rounded-md hover:bg-[color:var(--color-surface-2)]/60"
                                   target="_blank"
                                   title="Open in JIRA"
+                                  aria-label="Open in JIRA"
                                 >
                                   {/* eslint-disable-next-line @next/next/no-img-element */}
                                   <img
                                     src="/icons/ui/jira.png"
                                     alt="Open in JIRA"
-                                    className="h-5 w-auto object-contain opacity-80"
+                                    className="dq-icon jira-icon h-5 w-auto object-contain opacity-70 transition-opacity group-hover:opacity-100"
                                   />
+                                  <span className="tooltip-panel pointer-events-none absolute right-0 top-[calc(100%+6px)] hidden whitespace-nowrap text-xs group-hover:block">
+                                    Open in JIRA
+                                  </span>
                                 </Link>
                               ) : (
                                 renderPlaceholder()
@@ -1899,10 +2948,10 @@ export default function CrmDataQualityView() {
                           ) : null}
                               {isEditor || isAdmin ? (
                             showCol("actions") ? (
-                              <td className="relative px-3 py-3 text-right">
+                              <td className="relative px-3 py-3 text-right dq-action-cell cell-actions">
                                 <button
                                   id={`actions-btn-${t.ticketId}`}
-                                  className="rounded-md p-1.5 text-[color:var(--color-text)]/70 hover:bg-[color:var(--color-surface-2)]"
+                                  className="row-action-btn rounded-md p-1.5 text-[color:var(--color-text)]/70 hover:bg-[color:var(--color-surface-2)]"
                                   onClick={() =>
                                     setOpenMenuId((prev) =>
                                       prev === t.ticketId ? null : t.ticketId,
@@ -1919,6 +2968,15 @@ export default function CrmDataQualityView() {
                                     id={`actions-menu-${t.ticketId}`}
                                     className="absolute right-2 top-10 z-50 w-36 rounded-lg border border-[color:var(--color-border)] bg-[color:var(--color-surface)] shadow-lg"
                                   >
+                                    <button
+                                      className="block w-full px-3 py-2 text-left text-sm hover:bg-[color:var(--color-surface-2)]"
+                                      onClick={() => {
+                                        setOpenMenuId(null);
+                                        openEditModal(t, "effort");
+                                      }}
+                                    >
+                                      Log effort
+                                    </button>
                                     <button
                                       className="block w-full px-3 py-2 text-left text-sm hover:bg-[color:var(--color-surface-2)]"
                                       onClick={() => {
@@ -2002,17 +3060,179 @@ export default function CrmDataQualityView() {
       </div>
       {openAdd ? (
         <MiniModal
-          onClose={() => setOpenAdd(false)}
-          title="Add ticket"
-          bodyClassName="max-h-[65vh] overflow-y-auto"
+          onClose={() => {
+            if (submitting) return;
+            setModalStep("details");
+            setOpenAdd(false);
+          }}
+          title={editRow ? "Edit ticket" : "Add ticket"}
+          widthClass="max-w-4xl"
+          bodyClassName="max-h-[70vh]"
+          footer={
+            modalStep === "details" ? (
+              <>
+                <button
+                  className="btn-ghost"
+                  type="button"
+                  onClick={() => {
+                    if (submitting) return;
+                    setModalStep("details");
+                    setOpenAdd(false);
+                  }}
+                  disabled={submitting}
+                >
+                  Cancel
+                </button>
+                <button
+                  className="btn-primary"
+                  type="button"
+                  onClick={goToEffortStep}
+                  disabled={submitting || !canProceedToEffort}
+                >
+                  Next
+                </button>
+              </>
+            ) : (
+              <>
+                <button className="btn-ghost" type="button" onClick={goToDetailsStep} disabled={submitting}>
+                  Back
+                </button>
+                <button
+                  className="btn-ghost"
+                  type="button"
+                  onClick={() => {
+                    if (submitting) return;
+                    setModalStep("details");
+                    setOpenAdd(false);
+                  }}
+                  disabled={submitting}
+                >
+                  Cancel
+                </button>
+                <button
+                  className="btn-primary"
+                  type="button"
+                  onClick={handleSubmit}
+                  disabled={submitting || !canProceedToEffort || !hasContributionOwner}
+                >
+                  {submitting ? "Saving..." : "Save ticket"}
+                </button>
+              </>
+            )
+          }
         >
           {formError ? (
             <div className="mb-3 rounded-lg border border-[color:var(--color-border)] bg-rose-50 px-3 py-2 text-sm text-rose-700">
               {formError}
             </div>
           ) : null}
-          <div className="space-y-3">
+          <div className="space-y-5 text-sm text-[color:var(--color-text)]">
+            <div className="rounded-xl bg-[color:var(--color-surface-2)]/60 px-3 py-2 text-xs text-[color:var(--color-text)]/80">
+              <div className="flex items-center justify-between gap-3">
+                <div className="flex items-center gap-3">
+                  <button
+                    type="button"
+                    className={[
+                      "inline-flex items-center gap-2 rounded-lg px-2 py-1 transition hover:bg-[color:var(--color-surface)]/70",
+                      modalStep === "details"
+                        ? "text-[color:var(--color-text)]"
+                        : "text-[color:var(--color-text)]/70",
+                    ].join(" ")}
+                    onClick={goToDetailsStep}
+                    aria-current={modalStep === "details" ? "step" : undefined}
+                  >
+                    <span
+                      className={[
+                        "inline-flex h-6 w-6 items-center justify-center rounded-full border text-[10px] font-semibold",
+                        canProceedToEffort && modalStep === "effort"
+                          ? "border-[color:var(--color-primary)] bg-[color:var(--color-primary)] text-white"
+                          : modalStep === "details"
+                            ? "border-[color:var(--color-primary)]/60 bg-[color:var(--color-primary)]/10 text-[color:var(--color-primary)]"
+                            : canProceedToEffort
+                              ? "border-[color:var(--color-primary)]/35 bg-[color:var(--color-surface)] text-[color:var(--color-primary)]/80"
+                              : "border-[color:var(--color-border)] bg-[color:var(--color-surface)] text-[color:var(--color-text)]/60",
+                      ].join(" ")}
+                      aria-hidden="true"
+                    >
+                      {canProceedToEffort && modalStep === "effort" ? (
+                        <svg
+                          aria-hidden="true"
+                          viewBox="0 0 20 20"
+                          fill="currentColor"
+                          className="h-3 w-3"
+                        >
+                          <path
+                            fillRule="evenodd"
+                            d="M16.704 5.29a1 1 0 0 1 0 1.414l-7.2 7.2a1 1 0 0 1-1.414 0l-3.2-3.2a1 1 0 1 1 1.414-1.414l2.493 2.493 6.493-6.493a1 1 0 0 1 1.414 0Z"
+                            clipRule="evenodd"
+                          />
+                        </svg>
+                      ) : (
+                        "1"
+                      )}
+                    </span>
+                    <span className="font-semibold">Ticket details</span>
+                  </button>
+
+                  <div
+                    className={[
+                      "h-px w-10",
+                      canProceedToEffort
+                        ? "bg-[color:var(--color-primary)]/25"
+                        : "bg-[color:var(--color-border)]/60",
+                    ].join(" ")}
+                    aria-hidden="true"
+                  />
+
+                  <button
+                    type="button"
+                    className={[
+                      "inline-flex items-center gap-2 rounded-lg px-2 py-1 transition hover:bg-[color:var(--color-surface)]/70 disabled:cursor-not-allowed disabled:opacity-60 disabled:hover:bg-transparent",
+                      modalStep === "effort"
+                        ? "text-[color:var(--color-text)]"
+                        : "text-[color:var(--color-text)]/70",
+                    ].join(" ")}
+                    onClick={goToEffortStep}
+                    disabled={!canProceedToEffort}
+                    aria-current={modalStep === "effort" ? "step" : undefined}
+                    title={
+                      canProceedToEffort
+                        ? "Effort & notes"
+                        : "Fill required fields to continue"
+                    }
+                  >
+                    <span
+                      className={[
+                        "inline-flex h-6 w-6 items-center justify-center rounded-full border text-[10px] font-semibold",
+                        modalStep === "effort"
+                          ? "border-[color:var(--color-primary)]/60 bg-[color:var(--color-primary)]/10 text-[color:var(--color-primary)]"
+                          : "border-[color:var(--color-border)] bg-[color:var(--color-surface)] text-[color:var(--color-text)]/60",
+                      ].join(" ")}
+                      aria-hidden="true"
+                    >
+                      2
+                    </span>
+                    <span className="font-semibold">Effort & notes</span>
+                  </button>
+                </div>
+
+                <span className="inline-flex items-center gap-1 rounded-full border border-[color:var(--color-border)] bg-[color:var(--color-surface)]/60 px-2 py-1 text-[10px] text-[color:var(--color-text)]/70">
+                  Client:{" "}
+                  <strong className="text-[color:var(--color-text)]">
+                    {clientSlug.toUpperCase()}
+                  </strong>
+                </span>
+              </div>
+
+              <div
+                className="mt-2 h-px bg-[color:var(--color-border)]/60"
+                aria-hidden="true"
+              />
+            </div>
+
             <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+              {modalStep === "details" ? (
+                <>
               <label className="flex flex-col gap-1 text-sm">
                 <span className="text-[color:var(--color-text)]/70">
                   Status
@@ -2101,91 +3321,205 @@ export default function CrmDataQualityView() {
                   placeholder="From JIRA sync"
                   title={form.jiraAssignee || "Synced from JIRA"}
                 />
-              </label>
-              <div className="sm:col-span-2 space-y-2 rounded-xl border border-[color:var(--color-border)] bg-[color:var(--color-surface-2)]/60 px-3 py-3">
+                </label>
+                </>
+              ) : null}
+              {modalStep === "effort" ? (
+                <div className="sm:col-span-2 rounded-xl border border-[color:var(--color-border)] bg-[color:var(--color-surface-2)]/60 px-3 py-3">
+                  <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
+                    <div className="space-y-1">
+                      <div className="text-[10px] uppercase tracking-[0.2em] text-[color:var(--color-text)]/60">
+                        Ticket
+                      </div>
+                      <div className="text-sm font-semibold text-[color:var(--color-text)]">
+                        {form.ticketId || "Ticket"}
+                      </div>
+                      <div className="text-xs text-[color:var(--color-text)]/70">
+                        {form.title || "—"}
+                      </div>
+                    </div>
+                    <div className="grid grid-cols-2 gap-x-6 gap-y-1 text-xs text-[color:var(--color-text)]/80">
+                      <div>
+                        Status:{" "}
+                        <strong className="text-[color:var(--color-text)]">
+                          {form.status}
+                        </strong>
+                      </div>
+                      <div>
+                        Priority:{" "}
+                        <strong className="text-[color:var(--color-text)]">
+                          {form.priority}
+                        </strong>
+                      </div>
+                      <div>
+                        Assigned:{" "}
+                        <strong className="text-[color:var(--color-text)]">
+                          {form.assignedDate}
+                        </strong>
+                      </div>
+                      <div>
+                        Due:{" "}
+                        <strong className="text-[color:var(--color-text)]">
+                          {form.dueDate || "—"}
+                        </strong>
+                      </div>
+                    </div>
+                  </div>
+                </div>
+              ) : null}
+              {modalStep === "effort" ? (
+                <div className="sm:col-span-2 space-y-2 rounded-xl border border-[color:var(--color-border)] bg-[color:var(--color-surface-2)]/60 px-3 py-3">
                 <div className="flex items-center justify-between">
-                  <span className="text-sm font-semibold text-[color:var(--color-text)]">
-                    Contributions
-                  </span>
+                  <span className="text-sm font-semibold text-[color:var(--color-text)]">Effort log</span>
                   <button
                     type="button"
                     className="btn-primary h-8 px-3 text-xs"
                     onClick={() =>
                       setFormContribs((prev) => [
                         ...prev,
-                        { id: `c-${Date.now()}`, owner: "", workHours: "", prepHours: "" },
+                        {
+                          id: `c-${Date.now()}`,
+                          effortDate: defaultEffortDateForAssignedDate(form.assignedDate),
+                          owner: "",
+                          personId: null,
+                          workHours: "",
+                          prepHours: "",
+                          workstream: DEFAULT_WORKSTREAM,
+                        },
                       ])
                     }
                   >
-                    Add
+                    Add entry
                   </button>
                 </div>
+
                 <div className="space-y-2">
                   {formContribs.map((c) => (
                     <div
                       key={c.id}
-                      className="grid grid-cols-1 gap-2 rounded-lg border border-[color:var(--color-border)] bg-[color:var(--color-surface)] px-3 py-2 sm:grid-cols-4 sm:items-center sm:gap-3"
+                      className="grid grid-cols-1 gap-2 rounded-lg border border-[color:var(--color-border)] bg-[color:var(--color-surface)] px-3 py-2 sm:grid-cols-6 sm:items-end sm:gap-3"
                     >
+                      <div>
+                        <label className="text-xs font-medium text-[color:var(--color-text)]/70">Date</label>
+                        <div className="relative w-full">
+                          <input
+                            ref={(el) => {
+                              contribDateInputRefs.current[c.id] = el;
+                            }}
+                            type="date"
+                            className="input input-date h-10 w-full pr-10"
+                            value={c.effortDate}
+                            onChange={(e) => {
+                              const val = e.target.value;
+                              setFormContribs((prev) =>
+                                prev.map((item) => (item.id === c.id ? { ...item, effortDate: val } : item)),
+                              );
+                            }}
+                            onClick={() => openContribDatePicker(c.id)}
+                          />
+                          <button
+                            type="button"
+                            className="absolute right-2 top-1/2 inline-flex h-7 w-7 -translate-y-1/2 items-center justify-center rounded-md text-[color:var(--color-text)]/70 hover:bg-[color:var(--color-surface-2)]/60 hover:text-[color:var(--color-text)] focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[color:var(--color-primary)]"
+                            aria-label="Open calendar"
+                            onClick={() => openContribDatePicker(c.id)}
+                          >
+                            <svg
+                              aria-hidden="true"
+                              viewBox="0 0 24 24"
+                              fill="none"
+                              stroke="currentColor"
+                              strokeWidth="2"
+                              strokeLinecap="round"
+                              strokeLinejoin="round"
+                              className="h-4 w-4"
+                            >
+                              <path d="M8 2v4" />
+                              <path d="M16 2v4" />
+                              <path d="M3 10h18" />
+                              <path d="M5 6h14a2 2 0 0 1 2 2v12a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2z" />
+                            </svg>
+                          </button>
+                        </div>
+                      </div>
+
                       <div className="sm:col-span-2">
-                        <label className="text-xs font-medium text-[color:var(--color-text)]/70">
-                          Owner
-                        </label>
+                        <label className="text-xs font-medium text-[color:var(--color-text)]/70">Owner</label>
                         <select
                           className="input h-10 w-full"
-                          value={c.owner}
+                          value={c.personId ?? c.owner}
                           onChange={(e) => {
                             const val = e.target.value;
+                            const match =
+                              ownerItems.find((o) => o.personId === val) ||
+                              ownerItems.find((o) => o.label === val);
+                            const personId = match?.personId ?? null;
+                            const owner = match?.label ?? val;
                             setFormContribs((prev) =>
                               prev.map((item) =>
-                                item.id === c.id ? { ...item, owner: val } : item,
+                                item.id === c.id ? { ...item, owner, personId } : item,
                               ),
                             );
                           }}
                         >
                           <option value="">Select owner</option>
                           {ownerItems.map((o) => (
-                            <option key={o.id} value={o.label}>
+                            <option key={o.personId ?? o.id} value={o.personId ?? o.label}>
                               {o.label}
                             </option>
                           ))}
                         </select>
                       </div>
+
                       <div>
-                <label className="text-xs font-medium text-[color:var(--color-text)]/70">
-                  Work (hrs)
-                </label>
-                <input
-                  className="input h-10 w-full"
-                  type="number"
-                  step="0.01"
-                  min="0"
-                  value={c.workHours}
-                  onChange={(e) => {
-                    const val = e.target.value;
-                    setFormContribs((prev) =>
-                      prev.map((item) => {
-                        if (item.id !== c.id) return item;
-                        const next = { ...item, workHours: val };
-                        const shouldAutoPrep =
-                          item.prepHours === "" ||
-                          Number(item.prepHours) === 0;
-                        if (shouldAutoPrep) {
-                          const wNum = Number(val);
-                          next.prepHours =
-                            Number.isFinite(wNum) && wNum >= 0
-                              ? String(wNum * 0.35)
-                              : "";
-                        }
-                        return next;
-                      }),
-                    );
-                  }}
-                />
-              </div>
+                        <label className="text-xs font-medium text-[color:var(--color-text)]/70">Workstream</label>
+                        <select
+                          className="input h-10 w-full"
+                          value={c.workstream}
+                          onChange={(e) => {
+                            const val = e.target.value;
+                            setFormContribs((prev) =>
+                              prev.map((item) =>
+                                item.id === c.id ? { ...item, workstream: val } : item,
+                              ),
+                            );
+                          }}
+                        >
+                          {options.workstream.map((stream) => (
+                            <option key={stream} value={stream}>
+                              {stream}
+                            </option>
+                          ))}
+                        </select>
+                      </div>
+
                       <div>
-                        <label className="text-xs font-medium text-[color:var(--color-text)]/70">
-                          Prep (hrs)
-                        </label>
+                        <label className="text-xs font-medium text-[color:var(--color-text)]/70">Work (hrs)</label>
+                        <input
+                          className="input h-10 w-full"
+                          type="number"
+                          step="0.01"
+                          min="0"
+                          value={c.workHours}
+                          onChange={(e) => {
+                            const val = e.target.value;
+                            setFormContribs((prev) =>
+                              prev.map((item) => {
+                                if (item.id !== c.id) return item;
+                                const next = { ...item, workHours: val };
+                                const shouldAutoPrep = item.prepHours === "" || Number(item.prepHours) === 0;
+                                if (shouldAutoPrep) {
+                                  const wNum = Number(val);
+                                  next.prepHours = Number.isFinite(wNum) && wNum >= 0 ? String(wNum * 0.35) : "";
+                                }
+                                return next;
+                              }),
+                            );
+                          }}
+                        />
+                      </div>
+
+                      <div>
+                        <label className="text-xs font-medium text-[color:var(--color-text)]/70">Prep (hrs)</label>
                         <input
                           className="input h-10 w-full"
                           type="number"
@@ -2196,22 +3530,19 @@ export default function CrmDataQualityView() {
                           onChange={(e) => {
                             const val = e.target.value;
                             setFormContribs((prev) =>
-                              prev.map((item) =>
-                                item.id === c.id ? { ...item, prepHours: val } : item,
-                              ),
+                              prev.map((item) => (item.id === c.id ? { ...item, prepHours: val } : item)),
                             );
                           }}
                         />
                       </div>
-                      <div className="flex justify-end sm:col-span-4">
+
+                      <div className="flex justify-end sm:col-span-6">
                         {formContribs.length > 1 ? (
                           <button
                             type="button"
                             className="text-xs text-[color:var(--color-accent)]"
                             onClick={() =>
-                              setFormContribs((prev) =>
-                                prev.filter((item) => item.id !== c.id),
-                              )
+                              setFormContribs((prev) => prev.filter((item) => item.id !== c.id))
                             }
                           >
                             Remove
@@ -2221,90 +3552,87 @@ export default function CrmDataQualityView() {
                     </div>
                   ))}
                 </div>
-              </div>
-              <label className="flex flex-col gap-1 text-sm">
-                <span className="text-[color:var(--color-text)]/70">
-                  Reporter
-                </span>
-                <input
-                  className="input h-10"
-                  value={form.reporter}
-                  onChange={(e) => handleChangeForm("reporter", e.target.value)}
-                  placeholder="Reporter name (optional)"
-                />
-              </label>
-              <label className="flex flex-col gap-1 text-sm">
-                <span className="text-[color:var(--color-text)]/70">
-                  Type (parent)
-                </span>
-                <select
-                  className="input h-10"
-                  value={form.type}
-                  onChange={(e) => handleChangeForm("type", e.target.value)}
-                >
-                  <option value="">Select type</option>
-                  {typeOptions.map((t) => (
-                    <option key={t.id} value={t.label}>
-                      {t.label}
-                    </option>
-                  ))}
-                </select>
-              </label>
-              <label className="flex flex-col gap-1 text-sm">
-                <span className="text-[color:var(--color-text)]/70">
-                  JIRA URL
-                </span>
-                <input
-                  className="input h-10"
-                  value={form.jiraUrl}
-                  onChange={(e) => {
-                    const url = e.target.value;
-                    handleChangeForm("jiraUrl", url);
-                    const match = url.match(/browse\/([A-Z0-9-]+)$/i);
-                    handleChangeForm("ticketId", match?.[1] ?? "");
-                  }}
-                  placeholder="https://europcarmobility.atlassian.net/browse/CRM-1234"
-                />
-              </label>
-              <label className="flex flex-col gap-1 text-sm">
-                <span className="text-[color:var(--color-text)]/70">ETA</span>
-                <input
-                  type="date"
-                  className="input input-date h-10"
-                  value={form.etaDate}
-                  onChange={(e) => handleChangeForm("etaDate", e.target.value)}
-                  onFocus={openDatePicker}
-                  onMouseDown={openDatePicker}
-                />
-              </label>
-              <label className="flex flex-col gap-1 text-sm sm:col-span-2">
-                <span className="text-[color:var(--color-text)]/70">
-                  Comments
-                </span>
-                <textarea
-                  className="input min-h-[80px]"
-                  value={form.comments}
-                  onChange={(e) => handleChangeForm("comments", e.target.value)}
-                />
-              </label>
-            </div>
-            <div className="flex justify-end gap-2 pt-2">
-              <button
-                className="btn-ghost"
-                type="button"
-                onClick={() => setOpenAdd(false)}
-                disabled={submitting}
-              >
-                Cancel
-              </button>
-              <button
-                className="btn-primary"
-                type="button"
-                onClick={handleSubmit}
-                disabled={submitting}
-              >
-                {submitting ? "Saving..." : "Save ticket"}
-              </button>
+                </div>
+              ) : null}
+              {modalStep === "details" ? (
+                <>
+                  <label className="flex flex-col gap-1 text-sm">
+                    <span className="text-[color:var(--color-text)]/70">
+                      Reporter
+                    </span>
+                    <input
+                      className="input h-10"
+                      value={form.reporter}
+                      onChange={(e) =>
+                        handleChangeForm("reporter", e.target.value)
+                      }
+                      placeholder="Reporter name (optional)"
+                    />
+                  </label>
+                  <label className="flex flex-col gap-1 text-sm">
+                    <span className="text-[color:var(--color-text)]/70">
+                      Type (parent)
+                    </span>
+                    <select
+                      className="input h-10"
+                      value={form.type}
+                      onChange={(e) => handleChangeForm("type", e.target.value)}
+                    >
+                      <option value="">Select type</option>
+                      {typeOptions.map((t) => (
+                        <option key={t.id} value={t.label}>
+                          {t.label}
+                        </option>
+                      ))}
+                    </select>
+                  </label>
+                  <label className="flex flex-col gap-1 text-sm sm:col-span-2">
+                    <span className="text-[color:var(--color-text)]/70">
+                      JIRA URL
+                    </span>
+                    <input
+                      className="input h-10"
+                      value={form.jiraUrl}
+                      onChange={(e) => {
+                        const url = e.target.value;
+                        handleChangeForm("jiraUrl", url);
+                        const match = url.match(/browse\/([A-Z0-9-]+)$/i);
+                        handleChangeForm("ticketId", match?.[1] ?? "");
+                      }}
+                      placeholder="https://europcarmobility.atlassian.net/browse/CRM-1234"
+                    />
+                  </label>
+                  <label className="flex flex-col gap-1 text-sm">
+                    <span className="text-[color:var(--color-text)]/70">
+                      ETA
+                    </span>
+                    <input
+                      type="date"
+                      className="input input-date h-10"
+                      value={form.etaDate}
+                      onChange={(e) =>
+                        handleChangeForm("etaDate", e.target.value)
+                      }
+                      onFocus={openDatePicker}
+                      onMouseDown={openDatePicker}
+                    />
+                  </label>
+                </>
+              ) : null}
+
+              {modalStep === "effort" ? (
+                <label className="flex flex-col gap-1 text-sm sm:col-span-2">
+                  <span className="text-[color:var(--color-text)]/70">
+                    Comments
+                  </span>
+                  <textarea
+                    className="input min-h-[110px]"
+                    value={form.comments}
+                    onChange={(e) => handleChangeForm("comments", e.target.value)}
+                    placeholder="Optional notes"
+                  />
+                </label>
+              ) : null}
             </div>
           </div>
         </MiniModal>

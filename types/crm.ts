@@ -19,8 +19,11 @@ export type DataQualityTicket = {
   hasContributions?: boolean;
   contributions?: {
     owner: string;
+    personId?: string | null;
+    effortDate?: string | null;
     workHours: number;
     prepHours: number | null;
+    workstream?: string | null;
     notes?: string | null;
   }[];
   createdAt?: string;
@@ -31,6 +34,7 @@ export type CrmOwnerRate = {
   id: string;
   clientSlug: string;
   owner: string;
+  personId?: string | null;
   dailyRate: number;
   currency: string;
 };

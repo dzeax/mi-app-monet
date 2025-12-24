@@ -7,6 +7,9 @@ import Link from "next/link";
 import ColumnPicker from "@/components/ui/ColumnPicker";
 import GeoFlag from "@/components/GeoFlag";
 import CrmGenerateUnitsModal from "@/components/crm/CrmGenerateUnitsModal";
+import CrmBulkEditUnitsModal, {
+  type CampaignUnitsBulkPatch,
+} from "@/components/crm/CrmBulkEditUnitsModal";
 import { showError, showSuccess } from "@/utils/toast";
 
 type Row = {
@@ -23,6 +26,7 @@ type Row = {
   segment: string | null;
   touchpoint: string | null;
   owner: string;
+  personId?: string | null;
   jiraTicket: string;
   status: string;
   hoursTotal: number;
@@ -74,11 +78,19 @@ const formatLocalDate = (d: Date) => {
   return `${y}-${m}-${day}`;
 };
 
+const normalizePersonKey = (value?: string | null) =>
+  value?.trim().toLowerCase() ?? "";
+
 const effortHeaderCls =
   "bg-[color:var(--color-surface-2)]/70 border-l border-[color:var(--color-border)]/70";
 const effortCellCls = "bg-[color:var(--color-surface-2)]/40";
 
 type Option = { label: string; value: string };
+type PersonDirectoryItem = {
+  personId: string;
+  displayName: string;
+  aliases: string[];
+};
 
 function MultiSelect({
   label,
@@ -229,12 +241,16 @@ export default function CrmCampaignReportingView() {
   const currentYearStart = `${new Date().getFullYear()}-01-01`;
 
   const [rows, setRows] = useState<Row[]>([]);
-  const [rates, setRates] = useState<Record<string, number>>({});
+  const [ratesByOwner, setRatesByOwner] = useState<Record<string, number>>({});
+  const [ratesByPerson, setRatesByPerson] = useState<Record<string, number>>({});
+  const [peopleDirectory, setPeopleDirectory] = useState<PersonDirectoryItem[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [exporting, setExporting] = useState(false);
   const [deleting, setDeleting] = useState(false);
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
+  const [openBulkEdit, setOpenBulkEdit] = useState(false);
+  const [bulkEditIds, setBulkEditIds] = useState<string[]>([]);
   const [filters, setFilters] = useState<Filters>({
     search: "",
     brand: [],
@@ -257,6 +273,52 @@ export default function CrmCampaignReportingView() {
   const [sortDir, setSortDir] = useState<SortDir>("desc");
   const [compact, setCompact] = useState(false);
   const [openGenerate, setOpenGenerate] = useState(false);
+  const peopleById = useMemo(() => {
+    const map = new Map<string, string>();
+    peopleDirectory.forEach((person) => {
+      if (person.personId) map.set(person.personId, person.displayName);
+    });
+    return map;
+  }, [peopleDirectory]);
+  const aliasToPersonId = useMemo(() => {
+    const map = new Map<string, string>();
+    peopleDirectory.forEach((person) => {
+      if (!person.personId) return;
+      const aliases = new Set([person.displayName, ...(person.aliases || [])]);
+      aliases.forEach((alias) => {
+        const key = normalizePersonKey(alias);
+        if (key) map.set(key, person.personId);
+      });
+    });
+    return map;
+  }, [peopleDirectory]);
+  const resolveOwnerKey = useCallback(
+    (label?: string | null, personId?: string | null) => {
+      if (personId) return personId;
+      const key = normalizePersonKey(label);
+      if (!key) return "";
+      return aliasToPersonId.get(key) ?? (label ?? "");
+    },
+    [aliasToPersonId],
+  );
+  const labelForOwnerKey = useCallback(
+    (key: string) => peopleById.get(key) ?? key,
+    [peopleById],
+  );
+  useEffect(() => {
+    if (aliasToPersonId.size === 0) return;
+    setFilters((prev) => {
+      const nextOwner = prev.owner
+        .map((val) => aliasToPersonId.get(normalizePersonKey(val)) ?? val)
+        .filter(Boolean);
+      const uniqueOwner = Array.from(new Set(nextOwner));
+      const same =
+        prev.owner.length === uniqueOwner.length &&
+        prev.owner.every((val, idx) => val === uniqueOwner[idx]);
+      if (same) return prev;
+      return { ...prev, owner: uniqueOwner };
+    });
+  }, [aliasToPersonId]);
   const COLVIS_STORAGE_KEY = "campaign_colvis_v1";
   const columnOptions = useMemo(
     () =>
@@ -304,10 +366,33 @@ export default function CrmCampaignReportingView() {
       setLoading(true);
       setError(null);
       try {
-        const resRates = await fetch(`/api/crm/campaign-owner-rates?client=${clientSlug}`);
+        const resPeople = await fetch(`/api/crm/people?client=${clientSlug}`);
+        const bodyPeople = await resPeople.json().catch(() => null);
+        if (resPeople.ok && Array.isArray(bodyPeople?.people) && active) {
+          const people = bodyPeople.people
+            .map((p: any) => ({
+              personId: String(p.personId ?? ""),
+              displayName: String(p.displayName ?? "").trim(),
+              aliases: Array.isArray(p.aliases)
+                ? p.aliases.map((alias: any) => String(alias ?? "").trim()).filter(Boolean)
+                : [],
+            }))
+            .filter((p: PersonDirectoryItem) => Boolean(p.personId) && Boolean(p.displayName));
+          setPeopleDirectory(people);
+        }
+
+        const resRates = await fetch(`/api/crm/rates?client=${clientSlug}`);
         const bodyRates = await resRates.json().catch(() => null);
-        if (resRates.ok && bodyRates?.rates && active) {
-          setRates(bodyRates.rates as Record<string, number>);
+        if (resRates.ok && Array.isArray(bodyRates?.rates) && active) {
+          const nextByOwner: Record<string, number> = {};
+          const nextByPerson: Record<string, number> = {};
+          bodyRates.rates.forEach((r: any) => {
+            const rate = Number(r.dailyRate ?? 0);
+            if (r.owner) nextByOwner[r.owner] = rate;
+            if (r.personId) nextByPerson[r.personId] = rate;
+          });
+          setRatesByOwner(nextByOwner);
+          setRatesByPerson(nextByPerson);
         }
 
         const params = new URLSearchParams({ client: clientSlug });
@@ -332,6 +417,7 @@ export default function CrmCampaignReportingView() {
               segment: r.segment ?? null,
               touchpoint: r.touchpoint ?? null,
               owner: r.owner || "",
+              personId: r.personId ?? null,
               jiraTicket: r.jiraTicket || "",
               status: r.status || "",
               hoursTotal: Number(r.hoursTotal ?? 0),
@@ -373,7 +459,10 @@ export default function CrmCampaignReportingView() {
       if (exclude !== "scope" && filters.scope.length && !filters.scope.includes(r.scope || "")) return false;
       if (exclude !== "segment" && filters.segment.length && !filters.segment.includes(r.segment || "")) return false;
       if (exclude !== "touchpoint" && filters.touchpoint.length && !filters.touchpoint.includes(r.touchpoint || "")) return false;
-      if (exclude !== "owner" && filters.owner.length && !filters.owner.includes(r.owner || "")) return false;
+      if (exclude !== "owner" && filters.owner.length) {
+        const key = resolveOwnerKey(r.owner, r.personId);
+        if (!key || !filters.owner.includes(key)) return false;
+      }
       if (exclude !== "status" && filters.status.length && !filters.status.includes(r.status || "")) return false;
       if (exclude !== "search" && filters.search) {
         const term = filters.search.toLowerCase();
@@ -391,7 +480,7 @@ export default function CrmCampaignReportingView() {
       }
       return true;
     },
-    [filters, dateFrom, dateTo],
+    [filters, dateFrom, dateTo, resolveOwnerKey],
   );
 
   const filterOptions = useMemo(() => {
@@ -407,6 +496,11 @@ export default function CrmCampaignReportingView() {
     };
 
     const subset = (exclude: keyof Filters) => rows.filter((r) => rowMatchesFilters(r, exclude));
+    const ownerValues = uniq(subset("owner").map((r) => resolveOwnerKey(r.owner, r.personId)));
+    const ownerCounts = countEntries(subset("owner").map((r) => resolveOwnerKey(r.owner, r.personId)));
+    const ownerOptions = ownerValues
+      .map((key) => ({ value: key, label: labelForOwnerKey(key) }))
+      .sort((a, b) => a.label.localeCompare(b.label));
 
     return {
       brand: {
@@ -430,15 +524,32 @@ export default function CrmCampaignReportingView() {
         counts: countEntries(subset("touchpoint").map((r) => r.touchpoint)),
       },
       owner: {
-        values: uniq(subset("owner").map((r) => r.owner)),
-        counts: countEntries(subset("owner").map((r) => r.owner)),
+        options: ownerOptions,
+        counts: ownerCounts,
       },
       status: {
         values: uniq(subset("status").map((r) => r.status)),
         counts: countEntries(subset("status").map((r) => r.status)),
       },
     };
-  }, [rows, rowMatchesFilters]);
+  }, [rows, rowMatchesFilters, resolveOwnerKey, labelForOwnerKey]);
+
+  const bulkEditOwnerOptions = useMemo(() => {
+    const set = new Set<string>();
+    Object.keys(ratesByOwner).forEach((o) => set.add(o));
+    rows.forEach((r) => {
+      if (r.owner) set.add(r.owner);
+    });
+    return Array.from(set).sort((a, b) => a.localeCompare(b));
+  }, [ratesByOwner, rows]);
+
+  const bulkEditStatusOptions = useMemo(() => {
+    const set = new Set<string>(["Planned", "Done", "Sent"]);
+    rows.forEach((r) => {
+      if (r.status) set.add(r.status);
+    });
+    return Array.from(set).sort((a, b) => a.localeCompare(b));
+  }, [rows]);
 
   const handleFilterChange = useCallback((key: keyof Filters, value: string | string[]) => {
     setFilters((prev) => ({ ...prev, [key]: value as any }));
@@ -467,11 +578,11 @@ export default function CrmCampaignReportingView() {
 
   const computedRows = useMemo<ComputedRow[]>(() => {
     return filteredRows.map((r) => {
-      const rate = rates[r.owner];
+      const rate = r.personId ? ratesByPerson[r.personId] : ratesByOwner[r.owner];
       const budgetValue = rate != null ? r.daysTotal * rate : r.budgetEur ?? 0;
       return { ...r, budgetValue };
     });
-  }, [filteredRows, rates]);
+  }, [filteredRows, ratesByOwner, ratesByPerson]);
 
   const activeChips = useMemo(() => {
     const chips: { label: string; onClear: () => void }[] = [];
@@ -484,7 +595,11 @@ export default function CrmCampaignReportingView() {
     if (filters.segment.length) addChip(`Segment: ${filters.segment.join(", ")}`, () => handleFilterChange("segment", []));
     if (filters.touchpoint.length)
       addChip(`Touchpoint: ${filters.touchpoint.join(", ")}`, () => handleFilterChange("touchpoint", []));
-    if (filters.owner.length) addChip(`Owner: ${filters.owner.join(", ")}`, () => handleFilterChange("owner", []));
+    if (filters.owner.length)
+      addChip(
+        `Owner: ${filters.owner.map(labelForOwnerKey).join(", ")}`,
+        () => handleFilterChange("owner", []),
+      );
     if (filters.status.length) addChip(`Status: ${filters.status.join(", ")}`, () => handleFilterChange("status", []));
     if (filters.search) addChip(`Search: ${filters.search}`, () => handleFilterChange("search", ""));
     if ((dateFrom && dateFrom !== startOfThisMonth) || dateTo !== endOfThisMonth)
@@ -512,6 +627,7 @@ export default function CrmCampaignReportingView() {
     endOfThisMonth,
     handleFilterChange,
     makeClearAndResetPage,
+    labelForOwnerKey,
   ]);
 
   useEffect(() => {
@@ -802,7 +918,7 @@ export default function CrmCampaignReportingView() {
       ];
       const escape = (val: string) => `"${val.replace(/"/g, '""')}"`;
       const lines = sortedRows.map((r) => {
-        const rate = rates[r.owner];
+        const rate = r.personId ? ratesByPerson[r.personId] : ratesByOwner[r.owner];
         const budget =
           rate != null ? r.daysTotal * rate : r.budgetEur ?? r.daysTotal * 0;
         return [
@@ -924,7 +1040,7 @@ export default function CrmCampaignReportingView() {
             <div className="min-w-[180px] flex-1">
               <MultiSelect
                 label="Owner"
-                options={filterOptions.owner.values.map((s) => ({ label: s, value: s }))}
+                options={filterOptions.owner.options}
                 values={filters.owner}
                 counts={filterOptions.owner.counts}
                 onChange={(vals) => handleFilterChange("owner", vals)}
@@ -1121,6 +1237,17 @@ export default function CrmCampaignReportingView() {
           <span>{selectedCount.toLocaleString()} email unit(s) selected</span>
           <div className="flex flex-wrap items-center gap-2">
             <button
+              className="btn-ghost h-9 px-3"
+              type="button"
+              onClick={() => {
+                setBulkEditIds(Array.from(selectedIds));
+                setOpenBulkEdit(true);
+              }}
+              disabled={deleting}
+            >
+              Edit units
+            </button>
+            <button
               className="btn-primary h-9 px-3"
               type="button"
               onClick={deleteSelected}
@@ -1194,7 +1321,7 @@ export default function CrmCampaignReportingView() {
           <table className={`min-w-full text-sm ${tableDensityClass}`}>
             <thead className="bg-[color:var(--color-surface-2)]/60 text-left text-[color:var(--color-text)]/80">
               <tr>
-                <th className="w-10 px-3 py-3">
+                <th className="w-10 px-3 py-3 border-l-2 border-transparent">
                   <input
                     ref={headerSelectRef}
                     type="checkbox"
@@ -1326,9 +1453,27 @@ export default function CrmCampaignReportingView() {
                   </td>
                 </tr>
               ) : (
-                pagedRows.map((r) => (
-                  <tr key={r.id} className="hover:bg-[color:var(--color-surface-2)]/40">
-                    <td className="px-3 py-3">
+                pagedRows.map((r) => {
+                  const ownerKey = resolveOwnerKey(r.owner, r.personId);
+                  const ownerLabel = ownerKey ? labelForOwnerKey(ownerKey) : r.owner;
+                  const ownerTitle =
+                    r.owner && ownerLabel && ownerLabel !== r.owner
+                      ? `${ownerLabel} (${r.owner})`
+                      : ownerLabel || r.owner;
+                  return (
+                    <tr
+                      key={r.id}
+                      aria-selected={selectedIds.has(r.id)}
+                      className={[
+                        "transition-colors",
+                        selectedIds.has(r.id)
+                          ? "bg-[color:var(--color-surface-2)]/85 hover:bg-[color:var(--color-surface-2)]/95"
+                          : "hover:bg-[color:var(--color-surface-2)]/40",
+                      ].join(" ")}
+                    >
+                    <td
+                      className={`px-3 py-3 border-l-2 ${selectedIds.has(r.id) ? "border-[color:var(--color-text)]/20" : "border-transparent"}`}
+                    >
                       <input
                         type="checkbox"
                         className="h-4 w-4"
@@ -1391,8 +1536,11 @@ export default function CrmCampaignReportingView() {
                     ) : null}
                     {showCol("owner") ? (
                       <td className="px-3 py-3">
-                        <span className="inline-flex items-center rounded-full bg-[color:var(--color-surface-2)] px-2 py-0.5 text-xs font-semibold text-[color:var(--color-text)]">
-                          {r.owner || "n/a"}
+                        <span
+                          className="inline-flex items-center rounded-full bg-[color:var(--color-surface-2)] px-2 py-0.5 text-xs font-semibold text-[color:var(--color-text)]"
+                          title={ownerTitle || undefined}
+                        >
+                          {ownerLabel || "n/a"}
                         </span>
                       </td>
                     ) : null}
@@ -1409,17 +1557,17 @@ export default function CrmCampaignReportingView() {
                       </td>
                     ) : null}
                     {showCol("hours") ? (
-                      <td className={`px-3 py-3 text-right ${effortCellCls}`}>
+                      <td className={`px-3 py-3 text-right ${selectedIds.has(r.id) ? "bg-inherit" : effortCellCls}`}>
                         {formatNumber(r.hoursTotal)}
                       </td>
                     ) : null}
                     {showCol("days") ? (
-                      <td className={`px-3 py-3 text-right ${effortCellCls}`}>
+                      <td className={`px-3 py-3 text-right ${selectedIds.has(r.id) ? "bg-inherit" : effortCellCls}`}>
                         {formatNumber(r.daysTotal)}
                       </td>
                     ) : null}
                     {showCol("budget") ? (
-                      <td className={`px-3 py-3 text-right ${effortCellCls}`}>
+                      <td className={`px-3 py-3 text-right ${selectedIds.has(r.id) ? "bg-inherit" : effortCellCls}`}>
                         {formatNumber(r.budgetValue)} €
                       </td>
                     ) : null}
@@ -1444,8 +1592,9 @@ export default function CrmCampaignReportingView() {
                         )}
                       </td>
                     ) : null}
-                  </tr>
-                ))
+                    </tr>
+                  );
+                })
               )}
               {!loading && rows.length === 0 ? (
                 <tr>
@@ -1519,6 +1668,36 @@ export default function CrmCampaignReportingView() {
           defaults={defaultVisible}
           onChange={(next) => setVisibleCols(new Set(next))}
           onClose={() => setShowColumnPicker(false)}
+        />
+      ) : null}
+
+      {openBulkEdit ? (
+        <CrmBulkEditUnitsModal
+          clientSlug={clientSlug}
+          ids={bulkEditIds}
+          ownerOptions={bulkEditOwnerOptions}
+          statusOptions={bulkEditStatusOptions}
+          onApplied={(patch: CampaignUnitsBulkPatch) => {
+            const idSet = new Set(bulkEditIds);
+            setRows((prev) =>
+              prev.map((r) =>
+                idSet.has(r.id)
+                  ? {
+                      ...r,
+                      sendDate: patch.sendDate ?? r.sendDate,
+                      owner: patch.owner ?? r.owner,
+                      status: patch.status ?? r.status,
+                    }
+                  : r,
+              ),
+            );
+            setSelectedIds(new Set());
+            showSuccess("Email units updated");
+          }}
+          onClose={() => {
+            setOpenBulkEdit(false);
+            setBulkEditIds([]);
+          }}
         />
       ) : null}
 

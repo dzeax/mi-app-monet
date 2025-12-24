@@ -30,7 +30,7 @@ const cards: HubCard[] = [
   {
     unit: "crm",
     title: "CRM Operations",
-    description: "Track CRM effort and data quality per client.",
+    description: "Track CRM effort and ticket reporting per client.",
     href: "/crm/operations",
     highlightLabel: "Clients",
     highlightValue: "Start with EMG (more coming soon).",
@@ -50,7 +50,7 @@ export default function OperationsHub() {
       { label: "Campaign Planning", href: "/campaign-planning", unit: "monetization" as const },
       { label: "CRM Operations", href: "/crm/operations", unit: "crm" as const },
       { label: "CRM Campaigns (EMG)", href: "/crm/emg/campaigns", unit: "crm" as const },
-      { label: "CRM Data Quality (EMG)", href: "/crm/emg/data-quality", unit: "crm" as const },
+      { label: "CRM Ticket Reporting (EMG)", href: "/crm/emg/ticket-reporting", unit: "crm" as const },
       { label: "Import CSV (CRM)", href: "/crm/emg/campaigns#import", unit: "crm" as const },
     ],
     [],

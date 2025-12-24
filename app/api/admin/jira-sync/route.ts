@@ -29,9 +29,26 @@ const PRIORITY_MAP: Record<string, 'P1' | 'P2' | 'P3'> = {
 };
 
 const TEAM_OWNERS = [
+  'adrianna bienko',
+  'bela hanif',
   'david zea',
-  'stephane rabarinala',
+  'extern.adrianna.bienko@europcar.com',
+  'extern.bela.hanif@europcar.com',
+  'extern.david.zea@europcar.com',
+  'extern.gina.reyes',
+  'extern.gina.reyes@europcar.com',
+  'extern.judit.jover@europcar.com',
+  'extern.louis.bouquerel@europcar.com',
   'extern.lucas.vialatte',
+  'extern.lucas.vialatte@europcar.com',
+  'extern.pierre.gasnier',
+  'extern.pierre.gasnier@europcar.com',
+  'extern.stephane.rabarinala@europcar.com',
+  'gina reyes',
+  'judit jover',
+  'louis bouquerel',
+  'pierre gasnier',
+  'stephane rabarinala',
 ];
 
 function mapStatus(input?: string | null) {
@@ -46,11 +63,24 @@ function mapPriority(input?: string | null): 'P1' | 'P2' | 'P3' {
   return PRIORITY_MAP[key] || 'P3';
 }
 
+function normalizeAssignee(value?: string | null) {
+  return value
+    ? value
+        .normalize('NFD')
+        .replace(/[\u0300-\u036f]/g, '')
+        .toLowerCase()
+        .trim()
+    : '';
+}
+
 function isTeamOwner(assignee?: { displayName?: string | null; emailAddress?: string | null }) {
   if (!assignee) return false;
-  const display = assignee.displayName?.toLowerCase().trim();
-  const email = assignee.emailAddress?.toLowerCase().trim();
-  return TEAM_OWNERS.some((name) => (display?.includes(name) ?? false) || (email?.includes(name) ?? false));
+  const display = normalizeAssignee(assignee.displayName);
+  const email = normalizeAssignee(assignee.emailAddress);
+  return TEAM_OWNERS.some((name) => {
+    const token = normalizeAssignee(name);
+    return (display && display.includes(token)) || (email && email.includes(token));
+  });
 }
 
 type JiraIssueFields = {

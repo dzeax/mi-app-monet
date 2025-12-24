@@ -1,8 +1,7 @@
 export type CrmModuleType =
   | 'data_quality'
   | 'campaign_reporting'
-  | 'runbook'
-  | 'insights'
+  | 'budget'
   | 'playbooks'
   | 'kpi_dashboard';
 
@@ -29,10 +28,10 @@ export const CRM_CLIENTS: CrmClient[] = [
     label: 'EMG',
     modules: [
       {
-        slug: 'data-quality',
+        slug: 'ticket-reporting',
         type: 'data_quality',
-        label: 'Data Quality Reporting',
-        description: 'Tickets and quality controls synced from JIRA.',
+        label: 'Ticket Reporting',
+        description: 'CRM tickets synced from JIRA.',
         icon: 'table',
       },
       {
@@ -43,20 +42,11 @@ export const CRM_CLIENTS: CrmClient[] = [
         icon: 'table',
       },
       {
-        slug: 'runbooks',
-        type: 'runbook',
-        label: 'Runbooks & SLAs',
-        description: 'Execution guides and SLA tracking.',
-        icon: 'runbook',
-        comingSoon: true,
-      },
-      {
-        slug: 'insights',
-        type: 'insights',
-        label: 'Insights',
-        description: 'Signals and alerts across pipelines.',
-        icon: 'insight',
-        comingSoon: true,
+        slug: 'budget',
+        type: 'budget',
+        label: 'Budget',
+        description: 'Annual budget planning and tracking.',
+        icon: 'chart',
       },
     ],
   },

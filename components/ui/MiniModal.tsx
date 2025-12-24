@@ -5,6 +5,7 @@ import { createPortal } from 'react-dom';
 
 export default function MiniModal({
   title,
+  headerActions,
   onClose,
   children,
   footer,
@@ -22,6 +23,7 @@ export default function MiniModal({
   solid = true,
 }: {
   title: string;
+  headerActions?: React.ReactNode;
   onClose: () => void;
   children: React.ReactNode;
   footer?: React.ReactNode;
@@ -108,9 +110,9 @@ export default function MiniModal({
       <div
         ref={trapRef}
         className={[
-          'relative card w-full',
+          'relative card flex w-full flex-col',
           widthClass,
-          'max-h-[90vh] overflow-hidden border border-[--color-border] shadow-xl',
+          'max-h-[85vh] overflow-hidden border border-[--color-border] shadow-xl',
           panelClassName,
         ].join(' ')}
         style={solid ? { background: 'var(--color-surface)' } : undefined}
@@ -125,12 +127,19 @@ export default function MiniModal({
           ].join(' ')}
         >
           {accentStrip ? <div className="accent-strip" aria-hidden /> : null}
-          <h3 id={titleId} className="text-base font-semibold">{title}</h3>
+          <div className="flex min-w-0 flex-1 items-center gap-3">
+            <h3 id={titleId} className="truncate text-base font-semibold">{title}</h3>
+            {headerActions ? (
+              <div className="ml-auto flex items-center gap-2">
+                {headerActions}
+              </div>
+            ) : null}
+          </div>
           <button className="btn-ghost" onClick={onClose} aria-label="Close">✕</button>
         </div>
 
         {/* Body (scroll) */}
-        <div className={['px-5 py-4 overflow-y-auto', bodyClassName].join(' ')}>
+        <div className={['px-5 py-4 flex-1 min-h-0 overflow-y-auto', bodyClassName].join(' ')}>
           {edgeFades && (
             <div
               aria-hidden

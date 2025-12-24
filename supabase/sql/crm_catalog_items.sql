@@ -11,15 +11,8 @@ create table if not exists public.crm_catalog_items (
 );
 
 -- Unique label per client/kind (case-insensitive)
-do $$
-begin
-  if not exists (
-    select 1 from pg_constraint where conname = 'crm_catalog_items_client_kind_label_key'
-  ) then
-    alter table public.crm_catalog_items
-      add constraint crm_catalog_items_client_kind_label_key unique (client_slug, kind, lower(label));
-  end if;
-end$$;
+create unique index if not exists crm_catalog_items_client_kind_label_lower_idx
+  on public.crm_catalog_items (client_slug, kind, lower(label));
 
 -- Update timestamp trigger
 create or replace function public.trigger_set_timestamp()

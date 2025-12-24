@@ -17,10 +17,10 @@ const clients: CrmClientCard[] = [
     name: "EMG · Europcar Mobility Group",
     slug: "emg",
     status: "active",
-    description: "Campaign and data quality reporting for EMG.",
+    description: "Campaign and ticket reporting for EMG.",
     kpis: [
       { label: "Campaigns (month)", value: "—" },
-      { label: "Data quality tickets", value: "—" },
+      { label: "Ticket reporting", value: "—" },
     ],
     logoSrc: "/logos/emg-logo.png",
   },
@@ -31,7 +31,7 @@ const clients: CrmClientCard[] = [
     description: "CRM reporting for Bouygues Telecom.",
     kpis: [
       { label: "Campaigns (month)", value: "—" },
-      { label: "Data quality tickets", value: "—" },
+      { label: "Ticket reporting", value: "—" },
     ],
     logoSrc: "/logos/bouygues-logo.png",
   },
@@ -42,7 +42,7 @@ const clients: CrmClientCard[] = [
     description: "CRM reporting for Taittinger.",
     kpis: [
       { label: "Campaigns (month)", value: "—" },
-      { label: "Data quality tickets", value: "—" },
+      { label: "Ticket reporting", value: "—" },
     ],
     logoSrc: "/logos/taittinger-logo.png",
   },
@@ -53,7 +53,7 @@ const clients: CrmClientCard[] = [
     description: "CRM reporting for Ponant.",
     kpis: [
       { label: "Campaigns (month)", value: "—" },
-      { label: "Data quality tickets", value: "—" },
+      { label: "Ticket reporting", value: "—" },
     ],
     logoSrc: "/logos/ponant-logo.png",
   },
@@ -64,7 +64,7 @@ const clients: CrmClientCard[] = [
     description: "CRM reporting for Petit Forestier.",
     kpis: [
       { label: "Campaigns (month)", value: "—" },
-      { label: "Data quality tickets", value: "—" },
+      { label: "Ticket reporting", value: "—" },
     ],
     logoSrc: "/logos/petit-forestier.png",
   },
@@ -75,7 +75,7 @@ const clients: CrmClientCard[] = [
     description: "CRM reporting for SFR.",
     kpis: [
       { label: "Campaigns (month)", value: "—" },
-      { label: "Data quality tickets", value: "—" },
+      { label: "Ticket reporting", value: "—" },
     ],
     logoSrc: "/logos/sfr-logo.png",
   },
@@ -89,7 +89,7 @@ export default function CrmOperationsOverview() {
         <p className="text-xs uppercase tracking-[0.3em] text-[color:var(--color-text)]/65">CRM Operations</p>
         <h1 className="mt-2 text-3xl font-semibold text-[color:var(--color-text)]">Clients</h1>
         <p className="mt-3 max-w-3xl text-sm text-[color:var(--color-text)]/75">
-          Select a client to access Campaign Reporting and Data Quality. More clients will appear here as they join CRM Ops.
+          Select a client to access Campaign Reporting and Ticket Reporting. More clients will appear here as they join CRM Ops.
         </p>
         <div className="mt-4 flex flex-wrap gap-2 text-sm">
           <Link href="/" className="btn-ghost">
@@ -150,8 +150,8 @@ export default function CrmOperationsOverview() {
               <Link href={`/crm/${client.slug}/campaigns`} className="btn-primary">
                 Campaign Reporting
               </Link>
-              <Link href={`/crm/${client.slug}/data-quality`} className="btn-ghost">
-                Data Quality
+              <Link href={`/crm/${client.slug}/ticket-reporting`} className="btn-ghost">
+                Ticket Reporting
               </Link>
             </div>
           </article>

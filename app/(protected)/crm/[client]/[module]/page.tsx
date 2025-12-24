@@ -1,6 +1,7 @@
-import { notFound } from 'next/navigation';
+import { notFound, redirect } from 'next/navigation';
 import CrmDataQualityView from '@/components/crm/CrmDataQualityView';
 import CrmCampaignReportingView from '@/components/crm/CrmCampaignReportingView';
+import CrmBudgetView from '@/components/crm/CrmBudgetView';
 import CrmOperationsOverview from '@/components/crm/CrmOperationsOverview';
 import { getCrmClient, getCrmModule } from '@/lib/crm/clients';
 
@@ -13,6 +14,9 @@ type Props = {
 
 export default async function CrmModulePage({ params }: Props) {
   const { client: clientSlug, module: moduleSlug } = await params;
+  if (moduleSlug === 'data-quality') {
+    redirect(`/crm/${clientSlug}/ticket-reporting`);
+  }
   const client = getCrmClient(clientSlug);
   const moduleConfig = getCrmModule(client, moduleSlug);
 
@@ -26,9 +30,11 @@ export default async function CrmModulePage({ params }: Props) {
   if (moduleConfig.type === 'campaign_reporting') {
     return <CrmCampaignReportingView />;
   }
-
+  if (moduleConfig.type === 'budget') {
+    return <CrmBudgetView />;
+  }
   // Temporary placeholders for modules not yet implemented
-  if (moduleConfig.type === 'runbook' || moduleConfig.type === 'insights' || moduleConfig.comingSoon) {
+  if (moduleConfig.comingSoon) {
     return <CrmOperationsOverview />;
   }
 
