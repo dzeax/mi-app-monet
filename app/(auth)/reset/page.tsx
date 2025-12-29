@@ -1,11 +1,19 @@
 'use client';
 
-import { useMemo, useState, type FormEvent } from 'react';
+import { Suspense, useMemo, useState, type FormEvent } from 'react';
 import Image from 'next/image';
 import { useSearchParams } from 'next/navigation';
 import { createClientComponentClient } from '@supabase/auth-helpers-nextjs';
 
 export default function ResetPasswordPage() {
+  return (
+    <Suspense fallback={<ResetFallback />}>
+      <ResetPasswordForm />
+    </Suspense>
+  );
+}
+
+function ResetPasswordForm() {
   const supabase = useMemo(() => createClientComponentClient(), []);
   const searchParams = useSearchParams();
   const redirect = searchParams.get('redirect') || '/';
@@ -93,6 +101,17 @@ export default function ResetPasswordPage() {
             {busy ? 'Sending...' : 'Send reset link'}
           </button>
         </form>
+      </div>
+    </div>
+  );
+}
+
+function ResetFallback() {
+  return (
+    <div className="min-h-screen flex items-center justify-center bg-[--color-surface] text-[--color-text] px-4">
+      <div className="max-w-md w-full rounded-lg border border-[--color-border] bg-[--color-surface-2] p-6 text-center space-y-3 shadow-lg">
+        <h1 className="text-xl font-semibold">Loading...</h1>
+        <p className="text-sm opacity-70">Preparing reset form.</p>
       </div>
     </div>
   );
