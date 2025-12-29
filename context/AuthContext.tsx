@@ -75,6 +75,22 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
 
   // Carga inicial de sesión + perfil y suscripción a cambios
   useEffect(() => {
+    if (typeof window !== 'undefined') {
+      const { hash, pathname } = window.location;
+      if (hash && pathname !== '/set-password' && pathname !== '/auth/callback') {
+        const hashString = hash.startsWith('#') ? hash.slice(1) : hash;
+        const hashParams = new URLSearchParams(hashString);
+        const flow = hashParams.get('type');
+        const hasImplicitTokens =
+          hashParams.has('access_token') || hashParams.has('refresh_token');
+
+        if (flow === 'recovery' && hasImplicitTokens) {
+          window.location.replace(`/set-password#${hashString}`);
+          return;
+        }
+      }
+    }
+
     let mounted = true;
     let inFlight: Promise<void> | null = null;
 

@@ -2,7 +2,6 @@
 
 import { Suspense, useMemo, useState, type FormEvent } from 'react';
 import Image from 'next/image';
-import { useSearchParams } from 'next/navigation';
 import { createClient } from '@supabase/supabase-js';
 
 export default function ResetPasswordPage() {
@@ -29,9 +28,6 @@ function ResetPasswordForm() {
       },
     });
   }, []);
-  const searchParams = useSearchParams();
-  const redirect = searchParams.get('redirect') || '/';
-
   const [email, setEmail] = useState('');
   const [busy, setBusy] = useState(false);
   const [info, setInfo] = useState<string | null>(null);
@@ -46,7 +42,7 @@ function ResetPasswordForm() {
 
     try {
       const origin = window.location.origin;
-      const redirectTo = `${origin}/set-password?redirect=${encodeURIComponent(redirect)}`;
+      const redirectTo = `${origin}/set-password`;
 
       const { error: resetError } = await supabase.auth.resetPasswordForEmail(email, {
         redirectTo,
