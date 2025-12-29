@@ -301,24 +301,24 @@ export type CatalogsCtx = {
   resolveInvoiceOfficeMerged: (geo?: string, partner?: string) => InvoiceOffice;
 
   // CRUD (APIs existentes - compat)
-  addCampaignRef: (c: CampaignIn) => void;
-  addPartnerRef:  (p: PartnerIn) => void;
-  addDatabaseRef: (d: DatabaseIn) => void;
-  addTheme: (t: string) => void;
-  addType:  (t: string) => void;
+  addCampaignRef: (c: CampaignIn) => Promise<void>;
+  addPartnerRef:  (p: PartnerIn) => Promise<void>;
+  addDatabaseRef: (d: DatabaseIn) => Promise<void>;
+  addTheme: (t: string) => Promise<void>;
+  addType:  (t: string) => Promise<void>;
   saveOverridesNow: () => Promise<void>;
 
-  updateCampaignRef: (name: string, patch: Partial<CampaignIn>) => void;
-  removeCampaignRef: (name: string) => void;
+  updateCampaignRef: (name: string, patch: Partial<CampaignIn>) => Promise<void>;
+  removeCampaignRef: (name: string) => Promise<void>;
 
-  updatePartnerRef: (name: string, patch: Partial<PartnerIn>) => void;
-  removePartnerRef: (name: string) => void;
+  updatePartnerRef: (name: string, patch: Partial<PartnerIn>) => Promise<void>;
+  removePartnerRef: (name: string) => Promise<void>;
 
-  updateDatabaseRef: (name: string, patch: Partial<DatabaseIn>) => void;
-  removeDatabaseRef: (name: string) => void;
+  updateDatabaseRef: (name: string, patch: Partial<DatabaseIn>) => Promise<void>;
+  removeDatabaseRef: (name: string) => Promise<void>;
 
-  removeTheme: (t: string) => void;
-  removeType:  (t: string) => void;
+  removeTheme: (t: string) => Promise<void>;
+  removeType:  (t: string) => Promise<void>;
 
   // Info remota
   loading: boolean;
@@ -368,6 +368,8 @@ export function CatalogOverridesProvider({ children }: { children: React.ReactNo
   const skipNextSaveRef = useRef(false);
   const saveTimerRef = useRef<number | null>(null);
   const overridesRef = useRef<OverridesShape>({});
+  const changeVersionRef = useRef(0);
+  const lastSavedVersionRef = useRef(0);
 
   useEffect(() => {
     overridesRef.current = overrides;
@@ -377,8 +379,22 @@ export function CatalogOverridesProvider({ children }: { children: React.ReactNo
   useEffect(() => {
     let active = true;
 
+    if (saveTimerRef.current) {
+      window.clearTimeout(saveTimerRef.current);
+      saveTimerRef.current = null;
+    }
+    changeVersionRef.current = 0;
+    lastSavedVersionRef.current = 0;
+
+    if (!user?.id) {
+      setLoading(false);
+      setSyncing(false);
+      return () => { active = false; };
+    }
+
     (async () => {
       try {
+        setLoading(true);
         setSyncing(true);
         const { data, error } = await supabase
           .from(S_TABLE)
@@ -392,6 +408,7 @@ export function CatalogOverridesProvider({ children }: { children: React.ReactNo
           const remote = normalizeOverrides(data.data);
           if (hasAnyOverrides(remote)) {
             skipNextSaveRef.current = true;
+            overridesRef.current = remote;
             setOverrides(remote);
             setLastSyncedAt(data.updated_at ?? new Date().toISOString());
           }
@@ -412,7 +429,7 @@ export function CatalogOverridesProvider({ children }: { children: React.ReactNo
     return () => {
       active = false;
     };
-  }, [supabase]);
+  }, [supabase, user?.id]);
 
   /* --------------------------- Suscripción realtime ------------------------ */
   useEffect(() => {
@@ -428,6 +445,9 @@ export function CatalogOverridesProvider({ children }: { children: React.ReactNo
           if (!hasAnyOverrides(remote)) return; // ignora vacíos para no borrar local
           // Aplicar remoto y evitar eco
           skipNextSaveRef.current = true;
+          changeVersionRef.current = 0;
+          lastSavedVersionRef.current = 0;
+          overridesRef.current = remote;
           setOverrides(remote);
           setLastSyncedAt(row.updated_at ?? new Date().toISOString());
           setError(null);
@@ -478,7 +498,9 @@ export function CatalogOverridesProvider({ children }: { children: React.ReactNo
       window.clearTimeout(saveTimerRef.current);
       saveTimerRef.current = null;
     }
+    const versionAtSave = changeVersionRef.current;
     await upsertRemote(overridesRef.current);
+    lastSavedVersionRef.current = Math.max(lastSavedVersionRef.current, versionAtSave);
   }, [canWriteShared, loading, upsertRemote]);
 
   // Debounce: cada cambio local (user action) -> upsert remoto (si procede)
@@ -489,10 +511,16 @@ export function CatalogOverridesProvider({ children }: { children: React.ReactNo
       return;
     }
     if (!canWriteShared) return; // viewers no suben
+    if (changeVersionRef.current <= lastSavedVersionRef.current) return;
 
     if (saveTimerRef.current) window.clearTimeout(saveTimerRef.current);
+    const versionAtSchedule = changeVersionRef.current;
     saveTimerRef.current = window.setTimeout(() => {
-      upsertRemote(overrides).catch(() => {});
+      upsertRemote(overridesRef.current)
+        .then(() => {
+          lastSavedVersionRef.current = Math.max(lastSavedVersionRef.current, versionAtSchedule);
+        })
+        .catch(() => {});
       saveTimerRef.current = null;
     }, 300);
 
@@ -533,15 +561,45 @@ export function CatalogOverridesProvider({ children }: { children: React.ReactNo
 
   /* ---------------------------- Mutadores (compat) ------------------------- */
   const setLocal = useCallback(
-    (updater: (prev: OverridesShape) => OverridesShape) => {
-      if (loading || error) return;
-      setOverrides(prev => updater(prev));
+    (
+      updater: (prev: OverridesShape) => OverridesShape,
+      options?: { skipAutoSave?: boolean },
+    ) => {
+      if (loading || error) return null;
+      const prev = overridesRef.current;
+      const next = updater(prev);
+      if (next === prev) return null;
+      overridesRef.current = next;
+      changeVersionRef.current += 1;
+      if (options?.skipAutoSave) {
+        skipNextSaveRef.current = true;
+      }
+      setOverrides(next);
+      return next;
     },
     [loading, error],
   );
 
-  const addCampaignRef = useCallback((c: CampaignIn) => {
-    setLocal(prev => {
+  const setLocalAndSave = useCallback(
+    async (updater: (prev: OverridesShape) => OverridesShape) => {
+      if (loading) throw new Error('Shared catalogs are still loading.');
+      if (error) throw new Error(error);
+      const next = setLocal(updater, { skipAutoSave: true });
+      if (!next) return;
+      if (!canWriteShared) return;
+      if (saveTimerRef.current) {
+        window.clearTimeout(saveTimerRef.current);
+        saveTimerRef.current = null;
+      }
+      const versionAtSave = changeVersionRef.current;
+      await upsertRemote(next);
+      lastSavedVersionRef.current = Math.max(lastSavedVersionRef.current, versionAtSave);
+    },
+    [loading, error, canWriteShared, setLocal, upsertRemote],
+  );
+
+  const addCampaignRef = useCallback(async (c: CampaignIn) => {
+    await setLocalAndSave(prev => {
       const list = [...(prev.campaigns || [])];
       const key = norm(c.name);
       const exists =
@@ -552,13 +610,14 @@ export function CatalogOverridesProvider({ children }: { children: React.ReactNo
           name: trimCollapse(c.name),
           advertiser: trimCollapse(c.advertiser || 'White Label'),
         });
+        return { ...prev, campaigns: list };
       }
-      return { ...prev, campaigns: list };
+      return prev;
     });
-  }, [CAMPAIGNS, setLocal]);
+  }, [CAMPAIGNS, setLocalAndSave]);
 
-  const addPartnerRef = useCallback((p: PartnerIn) => {
-    setLocal(prev => {
+  const addPartnerRef = useCallback(async (p: PartnerIn) => {
+    await setLocalAndSave(prev => {
       const list = [...(prev.partners || [])];
       const key = norm(p.name);
       const exists =
@@ -566,13 +625,14 @@ export function CatalogOverridesProvider({ children }: { children: React.ReactNo
         PARTNERS.some((x) => norm(x.name) === key);
       if (!exists) {
         list.push({ name: trimCollapse(p.name), invoiceOffice: p.invoiceOffice });
+        return { ...prev, partners: list };
       }
-      return { ...prev, partners: list };
+      return prev;
     });
-  }, [PARTNERS, setLocal]);
+  }, [PARTNERS, setLocalAndSave]);
 
-  const addDatabaseRef = useCallback((d: DatabaseIn) => {
-    setLocal(prev => {
+  const addDatabaseRef = useCallback(async (d: DatabaseIn) => {
+    await setLocalAndSave(prev => {
       const list = [...(prev.databases || [])];
 
       // Dedupe por nombre (case-insensitive)
@@ -607,33 +667,39 @@ export function CatalogOverridesProvider({ children }: { children: React.ReactNo
       });
       return { ...prev, databases: list };
     });
-  }, [DATABASES, setLocal]);
+  }, [DATABASES, setLocalAndSave]);
 
-  const addTheme = useCallback((t: string) => {
-    setLocal(prev => {
+  const addTheme = useCallback(async (t: string) => {
+    await setLocalAndSave(prev => {
       const list = Array.isArray(prev.themes) ? [...prev.themes] : [];
       const label = trimCollapse(t);
       if (!label) return prev;
       const exists = list.some((x) => trimCollapse(x) === label) || THEMES.includes(label);
-      if (!exists) list.push(label);
-      return { ...prev, themes: list };
+      if (!exists) {
+        list.push(label);
+        return { ...prev, themes: list };
+      }
+      return prev;
     });
-  }, [THEMES, setLocal]);
+  }, [THEMES, setLocalAndSave]);
 
-  const addType = useCallback((t: string) => {
-    setLocal(prev => {
+  const addType = useCallback(async (t: string) => {
+    await setLocalAndSave(prev => {
       const list = [...(prev.types || [])];
       const v = trimCollapse(t).toUpperCase();
       if (!v) return prev;
       const exists = list.includes(v) || TYPES.includes(v);
-      if (!exists) list.push(v);
-      return { ...prev, types: list };
+      if (!exists) {
+        list.push(v);
+        return { ...prev, types: list };
+      }
+      return prev;
     });
-  }, [TYPES, setLocal]);
+  }, [TYPES, setLocalAndSave]);
 
-  const updateCampaignRef = useCallback((name: string, patch: Partial<CampaignIn>) => {
+  const updateCampaignRef = useCallback(async (name: string, patch: Partial<CampaignIn>) => {
     const key = norm(name);
-    setLocal(prev => {
+    await setLocalAndSave(prev => {
       const list = [...(prev.campaigns || [])];
       const idx = list.findIndex((x) => norm(x.name) === key);
       if (idx >= 0) {
@@ -650,19 +716,19 @@ export function CatalogOverridesProvider({ children }: { children: React.ReactNo
       }
       return { ...prev, campaigns: list };
     });
-  }, [setLocal]);
+  }, [setLocalAndSave]);
 
-  const removeCampaignRef = useCallback((name: string) => {
+  const removeCampaignRef = useCallback(async (name: string) => {
     const key = norm(name);
-    setLocal(prev => ({
+    await setLocalAndSave(prev => ({
       ...prev,
       campaigns: (prev.campaigns || []).filter((x) => norm(x.name) !== key),
     }));
-  }, [setLocal]);
+  }, [setLocalAndSave]);
 
-  const updatePartnerRef = useCallback((name: string, patch: Partial<PartnerIn>) => {
+  const updatePartnerRef = useCallback(async (name: string, patch: Partial<PartnerIn>) => {
     const key = norm(name);
-    setLocal(prev => {
+    await setLocalAndSave(prev => {
       const list = [...(prev.partners || [])];
       const idx = list.findIndex((x) => norm(x.name) === key);
       const invoiceOffice = patch.invoiceOffice ?? list[idx]?.invoiceOffice ?? 'DAT';
@@ -677,19 +743,19 @@ export function CatalogOverridesProvider({ children }: { children: React.ReactNo
       }
       return { ...prev, partners: list };
     });
-  }, [setLocal]);
+  }, [setLocalAndSave]);
 
-  const removePartnerRef = useCallback((name: string) => {
+  const removePartnerRef = useCallback(async (name: string) => {
     const key = norm(name);
-    setLocal(prev => ({
+    await setLocalAndSave(prev => ({
       ...prev,
       partners: (prev.partners || []).filter((x) => norm(x.name) !== key),
     }));
-  }, [setLocal]);
+  }, [setLocalAndSave]);
 
-  const updateDatabaseRef = useCallback((name: string, patch: Partial<DatabaseIn>) => {
+  const updateDatabaseRef = useCallback(async (name: string, patch: Partial<DatabaseIn>) => {
     const key = norm(name);
-    setLocal(prev => {
+    await setLocalAndSave(prev => {
       const list = [...(prev.databases || [])];
       const idx = list.findIndex((x) => norm(x.name) === key);
 
@@ -733,31 +799,31 @@ export function CatalogOverridesProvider({ children }: { children: React.ReactNo
       }
       return { ...prev, databases: list };
     });
-  }, [DATABASES, setLocal]);
+  }, [DATABASES, setLocalAndSave]);
 
-  const removeDatabaseRef = useCallback((name: string) => {
+  const removeDatabaseRef = useCallback(async (name: string) => {
     const key = norm(name);
-    setLocal(prev => ({
+    await setLocalAndSave(prev => ({
       ...prev,
       databases: (prev.databases || []).filter((x) => norm(x.name) !== key),
     }));
-  }, [setLocal]);
+  }, [setLocalAndSave]);
 
-  const removeTheme = useCallback((t: string) => {
+  const removeTheme = useCallback(async (t: string) => {
     const lbl = trimCollapse(t);
-    setLocal(prev => ({
+    await setLocalAndSave(prev => ({
       ...prev,
       themes: (prev.themes || []).filter((x) => trimCollapse(x) !== lbl),
     }));
-  }, [setLocal]);
+  }, [setLocalAndSave]);
 
-  const removeType = useCallback((t: string) => {
+  const removeType = useCallback(async (t: string) => {
     const v = trimCollapse(t).toUpperCase();
-    setLocal(prev => ({
+    await setLocalAndSave(prev => ({
       ...prev,
       types: (prev.types || []).filter((x) => x !== v),
     }));
-  }, [setLocal]);
+  }, [setLocalAndSave]);
 
   const value: CatalogsCtx = {
     CAMPAIGNS,

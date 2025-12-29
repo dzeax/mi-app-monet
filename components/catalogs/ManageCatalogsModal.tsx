@@ -1,7 +1,7 @@
 'use client';
 
 import { createPortal } from 'react-dom';
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useCatalogs } from '@/context/CatalogOverridesContext';
 import RowActions from '@/components/table/RowActions';
 import { useAuth } from '@/context/AuthContext'; // 🆕 roles
@@ -44,6 +44,7 @@ export default function ManageCatalogsModal({ onClose }: { onClose: () => void }
 
   const trapRef = useRef<HTMLDivElement>(null);
   const [tab, setTab] = useState<TabKey>('campaigns');
+  const [saveError, setSaveError] = useState<string | null>(null);
 
   const canModify = canEdit && !loading && !error;
 
@@ -53,6 +54,20 @@ export default function ManageCatalogsModal({ onClose }: { onClose: () => void }
     document.addEventListener('keydown', onKey);
     return () => document.removeEventListener('keydown', onKey);
   }, [onClose]);
+
+  useEffect(() => {
+    if (error) setSaveError(null);
+  }, [error]);
+
+  const runAction = useCallback(async (action: () => Promise<void>) => {
+    try {
+      await action();
+      setSaveError(null);
+    } catch (err) {
+      const message = err instanceof Error ? err.message : 'Unable to sync shared catalogs.';
+      setSaveError(message);
+    }
+  }, []);
 
 
   const statusText = error
@@ -111,6 +126,11 @@ export default function ManageCatalogsModal({ onClose }: { onClose: () => void }
               {error}
             </div>
           )}
+          {saveError && !error && (
+            <div className="rounded-lg border px-3 py-2 text-sm border-[--color-accent]/50 bg-[--color-accent]/10 text-[--color-accent]">
+              {saveError}
+            </div>
+          )}
 
           {/* resumen (tiles tipo KPI/subcard) */}
           <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-5 gap-3">
@@ -130,15 +150,17 @@ export default function ManageCatalogsModal({ onClose }: { onClose: () => void }
               items={CAMPAIGNS}
               onAdd={(name, advertiser) => {
                 if (!canModify) return;
-                addCampaignRef({ name, advertiser });
+                void runAction(() => addCampaignRef({ name, advertiser }));
               }}
               onUpdate={(oldName, patch) => {
                 if (!canModify) return;
-                updateCampaignRef(oldName, patch);
+                void runAction(() => updateCampaignRef(oldName, patch));
               }}
               onRemove={(name) => {
                 if (!canModify) return;
-                if (confirm(`Remove override for campaign "${name}"?`)) removeCampaignRef(name);
+                if (confirm(`Remove override for campaign "${name}"?`)) {
+                  void runAction(() => removeCampaignRef(name));
+                }
               }}
               disabled={!canModify}
             />
@@ -149,15 +171,17 @@ export default function ManageCatalogsModal({ onClose }: { onClose: () => void }
               items={PARTNERS}
               onAdd={(name, invoiceOffice) => {
                 if (!canModify) return;
-                addPartnerRef({ name, invoiceOffice });
+                void runAction(() => addPartnerRef({ name, invoiceOffice }));
               }}
               onUpdate={(oldName, patch) => {
                 if (!canModify) return;
-                updatePartnerRef(oldName, patch);
+                void runAction(() => updatePartnerRef(oldName, patch));
               }}
               onRemove={(name) => {
                 if (!canModify) return;
-                if (confirm(`Remove override for partner "${name}"?`)) removePartnerRef(name);
+                if (confirm(`Remove override for partner "${name}"?`)) {
+                  void runAction(() => removePartnerRef(name));
+                }
               }}
               disabled={!canModify}
             />
@@ -168,15 +192,17 @@ export default function ManageCatalogsModal({ onClose }: { onClose: () => void }
               items={DATABASES}
               onAdd={(payload) => {
                 if (!canModify) return;
-                addDatabaseRef(payload);
+                void runAction(() => addDatabaseRef(payload));
               }}
               onUpdate={(oldName, patch) => {
                 if (!canModify) return;
-                updateDatabaseRef(oldName, patch);
+                void runAction(() => updateDatabaseRef(oldName, patch));
               }}
               onRemove={(name) => {
                 if (!canModify) return;
-                if (confirm(`Remove override for database "${name}"?`)) removeDatabaseRef(name);
+                if (confirm(`Remove override for database "${name}"?`)) {
+                  void runAction(() => removeDatabaseRef(name));
+                }
               }}
               disabled={!canModify}
             />
@@ -187,11 +213,13 @@ export default function ManageCatalogsModal({ onClose }: { onClose: () => void }
               items={THEMES}
               onAdd={(t) => {
                 if (!canModify) return;
-                addTheme(t);
+                void runAction(() => addTheme(t));
               }}
               onRemove={(t) => {
                 if (!canModify) return;
-                if (confirm(`Remove theme "${t}"?`)) removeTheme(t);
+                if (confirm(`Remove theme "${t}"?`)) {
+                  void runAction(() => removeTheme(t));
+                }
               }}
               disabled={!canModify}
             />
@@ -202,11 +230,13 @@ export default function ManageCatalogsModal({ onClose }: { onClose: () => void }
               items={TYPES}
               onAdd={(t) => {
                 if (!canModify) return;
-                addType(t);
+                void runAction(() => addType(t));
               }}
               onRemove={(t) => {
                 if (!canModify) return;
-                if (confirm(`Remove type "${t}"?`)) removeType(t);
+                if (confirm(`Remove type "${t}"?`)) {
+                  void runAction(() => removeType(t));
+                }
               }}
               disabled={!canModify}
             />

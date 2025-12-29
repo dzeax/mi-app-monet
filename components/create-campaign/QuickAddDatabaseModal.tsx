@@ -45,6 +45,7 @@ export default function QuickAddDatabaseModal({
   const [geo, setGeo] = useState('ES');
   const [dbType, setDbType] = useState<DBType>('B2B');
   const [err, setErr] = useState<string>('');
+  const [saving, setSaving] = useState(false);
 
   const nameRef = useRef<HTMLInputElement | null>(null);
   useEffect(() => {
@@ -58,7 +59,7 @@ export default function QuickAddDatabaseModal({
   const hasErr = Boolean(err);
   const errId = 'quick-add-db-error';
 
-  const submit = () => {
+  const submit = async () => {
     const n = trimCollapse(name);
     if (!n) { setErr('Name is required'); return; }
     if (loading) { setErr('Shared catalogs are still loading'); return; }
@@ -74,13 +75,24 @@ export default function QuickAddDatabaseModal({
     const existsByName = DATABASES.some(d => norm(d.name) === norm(n));
     if (existsByName) { setErr('Database already exists'); return; }
 
-    addDatabaseRef({
-      name: n,
-      geo: geoNormalized!,          // ya validado (incluye UK→GB y MULTI)
-      dbType,
-    });
-    onCreated(n);
-    onClose();
+    try {
+      setSaving(true);
+      await addDatabaseRef({
+        name: n,
+        geo: geoNormalized!,          // ya validado (incluye UK→GB y MULTI)
+        dbType,
+      });
+      onCreated(n);
+      onClose();
+    } catch (submissionError) {
+      const message =
+        submissionError instanceof Error
+          ? submissionError.message || 'Unable to sync shared catalogs'
+          : 'Unable to sync shared catalogs';
+      setErr(message);
+    } finally {
+      setSaving(false);
+    }
   };
 
   const onKeyDown: React.KeyboardEventHandler<HTMLDivElement> = (e) => {
@@ -100,9 +112,9 @@ export default function QuickAddDatabaseModal({
           <button
             className="btn-primary disabled:opacity-50 disabled:pointer-events-none"
             onClick={submit}
-            disabled={loading || !!error || !trimCollapse(name) || !geoValid}
+            disabled={loading || !!error || !trimCollapse(name) || !geoValid || saving}
           >
-            Add
+            {saving ? 'Saving...' : 'Add'}
           </button>
         </>
       )}

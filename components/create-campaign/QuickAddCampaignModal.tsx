@@ -20,7 +20,6 @@ export default function QuickAddCampaignModal({
     addCampaignRef,
     loading,
     error: catalogError,
-    saveOverridesNow,
   } = useCatalogOverrides();
   const [name, setName] = useState('');
   const [advertiser, setAdvertiser] = useState('');
@@ -47,8 +46,7 @@ export default function QuickAddCampaignModal({
 
     try {
       setSaving(true);
-      addCampaignRef({ name: n, advertiser: a });
-      await saveOverridesNow();
+      await addCampaignRef({ name: n, advertiser: a });
       onCreated(n);
       onClose();
     } catch (submissionError) {

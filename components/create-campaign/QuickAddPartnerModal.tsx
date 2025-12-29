@@ -18,6 +18,7 @@ export default function QuickAddPartnerModal({
   const [name, setName] = useState('');
   const [office, setOffice] = useState<InvoiceOffice>('DAT');
   const [err, setErr] = useState<string>('');
+  const [saving, setSaving] = useState(false);
 
   const nameRef = useRef<HTMLInputElement | null>(null);
   useEffect(() => {
@@ -28,7 +29,7 @@ export default function QuickAddPartnerModal({
   const hasErr = Boolean(err);
   const errId = 'quick-add-partner-error';
 
-  const submit = () => {
+  const submit = async () => {
     const n = trimCollapse(name);
     if (!n) { setErr('Name is required'); return; }
     if (loading) { setErr('Shared catalogs are still loading'); return; }
@@ -38,9 +39,20 @@ export default function QuickAddPartnerModal({
     const existsByName = PARTNERS.some(p => norm(p.name) === norm(n));
     if (existsByName) { setErr('Partner already exists'); return; }
 
-    addPartnerRef({ name: n, invoiceOffice: office });
-    onCreated(n);
-    onClose();
+    try {
+      setSaving(true);
+      await addPartnerRef({ name: n, invoiceOffice: office });
+      onCreated(n);
+      onClose();
+    } catch (submissionError) {
+      const message =
+        submissionError instanceof Error
+          ? submissionError.message || 'Unable to sync shared catalogs'
+          : 'Unable to sync shared catalogs';
+      setErr(message);
+    } finally {
+      setSaving(false);
+    }
   };
 
   const onKeyDown: React.KeyboardEventHandler<HTMLDivElement> = (e) => {
@@ -60,9 +72,9 @@ export default function QuickAddPartnerModal({
           <button
             className="btn-primary disabled:opacity-50 disabled:pointer-events-none"
             onClick={submit}
-            disabled={loading || !!error || !trimCollapse(name)}
+            disabled={loading || !!error || !trimCollapse(name) || saving}
           >
-            Add
+            {saving ? 'Saving...' : 'Add'}
           </button>
         </>
       )}
