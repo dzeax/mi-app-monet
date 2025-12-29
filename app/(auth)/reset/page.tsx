@@ -3,7 +3,7 @@
 import { Suspense, useMemo, useState, type FormEvent } from 'react';
 import Image from 'next/image';
 import { useSearchParams } from 'next/navigation';
-import { createClientComponentClient } from '@supabase/auth-helpers-nextjs';
+import { createClient } from '@supabase/supabase-js';
 
 export default function ResetPasswordPage() {
   return (
@@ -14,7 +14,21 @@ export default function ResetPasswordPage() {
 }
 
 function ResetPasswordForm() {
-  const supabase = useMemo(() => createClientComponentClient(), []);
+  const supabase = useMemo(() => {
+    const url = process.env.NEXT_PUBLIC_SUPABASE_URL as string | undefined;
+    const anon = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY as string | undefined;
+    if (!url || !anon) {
+      throw new Error('Missing Supabase public environment variables.');
+    }
+    return createClient(url, anon, {
+      auth: {
+        flowType: 'implicit',
+        autoRefreshToken: false,
+        detectSessionInUrl: false,
+        persistSession: false,
+      },
+    });
+  }, []);
   const searchParams = useSearchParams();
   const redirect = searchParams.get('redirect') || '/';
 
