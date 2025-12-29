@@ -21,11 +21,7 @@ import { useAuth } from '@/context/AuthContext'; // ðŸ†• roles para quick-
 // ======================= Utils =======================
 
 const fmtEUR = new Intl.NumberFormat('es-ES', { style: 'currency', currency: 'EUR' });
-const fmtPct = new Intl.NumberFormat('es-ES', { style: 'percent', maximumFractionDigits: 2 });
-const fmtNum = new Intl.NumberFormat('es-ES', { maximumFractionDigits: 2 });
 
-const SYMBOL_MULTIPLY = '\u00D7';
-const SYMBOL_MINUS = '\u2212';
 const CURRENCY_EUR = 'EUR' as const;
 
 function parseNum(v: unknown): number {
@@ -326,6 +322,19 @@ export default function CreateCampaignModal({
     return isSubmitted || Boolean(touched) || Boolean(dirty);
   };
 
+  const campaignError =
+    showErr('campaign') ? errors.campaign : showErr('advertiser') ? errors.advertiser : undefined;
+  const partnerError =
+    showErr('partner') ? errors.partner : showErr('invoiceOffice') ? errors.invoiceOffice : undefined;
+  const databaseError =
+    showErr('database')
+      ? errors.database
+      : showErr('geo')
+      ? errors.geo
+      : showErr('databaseType')
+      ? errors.databaseType
+      : undefined;
+
   const firstRef = useRef<HTMLInputElement>(null);
   const formRef = useRef<HTMLFormElement>(null);
   const trapRef = useRef<HTMLDivElement>(null);
@@ -356,9 +365,12 @@ export default function CreateCampaignModal({
 
   // Watches
   const campaign = watch('campaign');
+  const advertiser = watch('advertiser');
   const database = watch('database');
   const geo = watch('geo');
+  const databaseType = watch('databaseType');
   const partner = watch('partner');
+  const invoiceOffice = watch('invoiceOffice');
   const themeValue = watch('theme');
   const price = watch('price');
   const qty = watch('qty');
@@ -366,7 +378,6 @@ export default function CreateCampaignModal({
   const watchTurnover = watch('turnover');
   const watchMargin = watch('margin');
   const watchEcpm = watch('ecpm');
-  const watchMarginPct = watch('marginPct');
 
   // === Reglas automÃƒÂ¡ticas con catÃƒÂ¡logos dinÃƒÂ¡micos ===
 
@@ -572,32 +583,7 @@ export default function CreateCampaignModal({
     return () => node.removeEventListener('keydown', handle);
   }, []);
 
-  const marginTextClass =
-    watchMargin > 0
-      ? 'text-[--color-primary]'
-      : watchMargin < 0
-      ? 'text-[--color-accent]'
-      : 'text-[color:var(--color-text)]/70';
-
-  // Inputs de solo lectura â€” compacto + contraste
-  const roInput = 'input h-10 border-dotted bg-[color:var(--color-surface-2)]/70';
-  const roErr = (bad?: boolean) => `${roInput} ${bad ? 'input-error' : ''}`;
   const errId = (name: string) => `err-${name}`;
-
-  const routingHint =
-    vSent > 0 ? `${fmtNum.format(vSent)}/1000 ${SYMBOL_MULTIPLY} 0.18` : `vSent / 1000 ${SYMBOL_MULTIPLY} 0.18`;
-  const turnoverHint =
-    qty > 0 || price > 0
-      ? `${fmtNum.format(qty || 0)} ${SYMBOL_MULTIPLY} ${fmtNum.format(price || 0)}`
-      : `qty ${SYMBOL_MULTIPLY} price`;
-  const marginHint =
-    watchTurnover > 0 || (watch('routingCosts') ?? 0) > 0
-      ? `${fmtEUR.format(watchTurnover || 0)} ${SYMBOL_MINUS} ${fmtEUR.format(watch('routingCosts') || 0)}`
-      : `turnover ${SYMBOL_MINUS} routing`;
-  const ecpmHint =
-    vSent > 0
-      ? `(${fmtEUR.format(watchTurnover || 0)} / ${fmtNum.format(vSent)}) ${SYMBOL_MULTIPLY} 1000`
-      : `(turnover / vSent) ${SYMBOL_MULTIPLY} 1000`;
 
   // === UI ===
   const modal = (
@@ -617,7 +603,7 @@ export default function CreateCampaignModal({
       {/* Card */}
       <div
         ref={trapRef}
-        className="relative card w-full max-w-[76rem] max-h-[90vh] overflow-hidden border border-[--color-border] shadow-xl"
+        className="relative card w-full max-w-4xl max-h-[90vh] overflow-hidden border border-[--color-border] shadow-xl"
         style={{ background: 'var(--color-surface)' }}
         onMouseDown={(e) => {
           // Evita que el click dentro del card burbujee al backdrop
@@ -625,32 +611,34 @@ export default function CreateCampaignModal({
         }}
       >
         {/* Header sticky */}
-        <div className="sticky top-0 z-10 modal-chrome modal-header px-5 py-2.5">
-          <div className="accent-strip" aria-hidden />
+        <div className="sticky top-0 z-10 modal-header bg-slate-50 backdrop-blur-md border-b border-slate-200 px-5 py-3 shadow-sm">
           <div className="flex items-center justify-between gap-3">
-            <h3 className="text-lg font-semibold">
+            <h3 className="text-lg font-bold text-slate-800">
               {mode === 'edit' ? 'Edit campaign' : 'Create campaign'}
             </h3>
-            <button className="btn-ghost h-9 w-9 p-0" onClick={requestClose} aria-label="Close modal">
+            <button
+              className="flex h-9 w-9 items-center justify-center rounded-full text-slate-500 transition-colors hover:bg-slate-200"
+              onClick={requestClose}
+              aria-label="Close modal"
+            >
               <span aria-hidden className="text-xl leading-none">&times;</span>
             </button>
           </div>
         </div>
 
         {/* Body */}
-        <div className="modal-body overflow-y-auto px-5 pt-6 pb-5 relative">
-          <div className="edge-fade edge-top" aria-hidden />
-
+        <div className="modal-body overflow-y-auto bg-slate-50 px-5 pt-6 pb-5 relative">
           <form
             ref={formRef}
             id="create-edit-campaign-form"
+            data-variant="clean-tech"
             onSubmit={handleSubmit(
               (formData) => persistCampaign(formData, submitIntentRef.current),
               onInvalid
             )}
-            className="grid gap-4 xl:grid-cols-12 items-start"
+            className="flex flex-col"
           >
-            <div className="col-span-12 xl:col-span-7 flex flex-col gap-4">
+            <div className="mx-auto flex w-full max-w-4xl flex-col">
               {/* A) Basics */}
             <Section title="Basics" highContrast={highContrast}>
               <div className="grid grid-cols-12 gap-x-4 gap-y-4">
@@ -712,65 +700,17 @@ export default function CreateCampaignModal({
                       </div>
                     </FieldWithAddon>
 
-                    <Err
-                      id={errId('campaign')}
-                      e={showErr('campaign') ? errors.campaign : undefined}
-                    />
-                  </Field>
-                </div>
-                <div className="col-span-12 md:col-span-6">
-                  <Field label="Advertiser" badge="AUTO" hint="Auto-filled from campaign name">
-                    <div className="relative">
-                      <input
-                        type="text"
-                        {...register('advertiser')}
-                        readOnly
-                        aria-invalid={showErr('advertiser') || undefined}
-                        aria-describedby={showErr('advertiser') ? errId('advertiser') : undefined}
-                        className={roErr(showErr('advertiser'))}
-                      />
-                      {showErr('advertiser') && (
-                        <Tooltip
-                          content={errors.advertiser?.message}
-                          className="absolute right-2 inset-y-0 flex items-center"
-                        >
-                          <span aria-hidden className="text-[--color-accent] text-sm">âš </span>
-                        </Tooltip>
-                      )}
-                    </div>
-                    <Err
-                      id={errId('advertiser')}
-                      e={showErr('advertiser') ? errors.advertiser : undefined}
-                    />
-                  </Field>
-                </div>
-
-                <div className="col-span-12 md:col-span-6">
-                  <Field label="Invoice office" badge="AUTO" hint="Auto-selected from partner and geo">
-                    <div className="relative">
-                      <input
-                        type="text"
-                        {...register('invoiceOffice')}
-                        readOnly
-                        aria-invalid={showErr('invoiceOffice') || undefined}
-                        aria-describedby={
-                          showErr('invoiceOffice') ? errId('invoiceOffice') : undefined
-                        }
-                        className={roErr(showErr('invoiceOffice'))}
-                      />
-                      {showErr('invoiceOffice') && (
-                        <Tooltip
-                          content={errors.invoiceOffice?.message}
-                          className="absolute right-2 inset-y-0 flex items-center"
-                        >
-                          <span aria-hidden className="text-[--color-accent] text-sm">âš </span>
-                        </Tooltip>
-                      )}
-                    </div>
-                    <Err
-                      id={errId('invoiceOffice')}
-                      e={showErr('invoiceOffice') ? errors.invoiceOffice : undefined}
-                    />
+                    {advertiser ? (
+                      <div className="mt-1 flex items-center gap-2 text-xs font-medium text-gray-500">
+                        <span
+                          aria-hidden
+                          className="h-1.5 w-1.5 rounded-full bg-gray-400"
+                        />
+                        <span>Advertiser: {advertiser}</span>
+                      </div>
+                    ) : null}
+                    <input type="hidden" {...register('advertiser')} />
+                    <Err id={errId('campaign')} e={campaignError} />
                   </Field>
                 </div>
 
@@ -802,7 +742,16 @@ export default function CreateCampaignModal({
                         />
                       </div>
                     </FieldWithAddon>
-                    <Err id={errId('partner')} e={showErr('partner') ? errors.partner : undefined} />
+                    {invoiceOffice && (partner || geo) ? (
+                      <div className="mt-1 flex items-center gap-2 text-xs text-gray-500">
+                        <span>Invoice office</span>
+                        <span className="rounded bg-blue-50 px-2 py-0.5 text-xs text-blue-700">
+                          {invoiceOffice}
+                        </span>
+                      </div>
+                    ) : null}
+                    <input type="hidden" {...register('invoiceOffice')} />
+                    <Err id={errId('partner')} e={partnerError} />
                   </Field>
                 </div>
 
@@ -829,19 +778,20 @@ export default function CreateCampaignModal({
             </Section>
 
             {/* B) Commercial */}
-            <Section title="Commercial" highContrast={highContrast}>
-              <div
-                className="grid gap-4"
-                style={{ gridTemplateColumns: 'repeat(auto-fit, minmax(200px, 1fr))' }}
-              >
-                <div className="min-w-0">
+            <Section
+              title="Commercial"
+              highContrast={highContrast}
+              className="commercial-section border-l-4 border-l-indigo-500 bg-slate-50"
+            >
+              <div className="grid w-full grid-cols-4 gap-4 mb-6">
+                <div className="min-w-0 col-span-1">
                   <Field label="Type">
                     <div className="relative">
                       <select
                         {...register('type')}
                         aria-invalid={showErr('type') || undefined}
                         aria-describedby={showErr('type') ? errId('type') : undefined}
-                        className={`input h-10 ${showErr('type') ? 'input-error' : ''}`}
+                        className={`input h-10 w-full ${showErr('type') ? 'input-error' : ''}`}
                       >
                         {TYPES.filter((t: string) =>
                           (DEAL_TYPES as readonly string[]).includes(t)
@@ -863,7 +813,7 @@ export default function CreateCampaignModal({
                     <Err id={errId('type')} e={showErr('type') ? errors.type : undefined} />
                   </Field>
                 </div>
-                <div className="min-w-0">
+                <div className="min-w-0 col-span-1">
                   <Field label="Price (EUR)">
                     <div className="relative">
                       <input
@@ -872,7 +822,7 @@ export default function CreateCampaignModal({
                         {...register('price')}
                         aria-invalid={showErr('price') || undefined}
                         aria-describedby={showErr('price') ? errId('price') : undefined}
-                        className={`input h-10 ${showErr('price') ? 'input-error' : ''}`}
+                        className={`input h-10 w-full ${showErr('price') ? 'input-error' : ''}`}
                       />
                       {showErr('price') && (
                         <Tooltip
@@ -886,7 +836,7 @@ export default function CreateCampaignModal({
                     <Err id={errId('price')} e={showErr('price') ? errors.price : undefined} />
                   </Field>
                 </div>
-                <div className="min-w-0">
+                <div className="min-w-0 col-span-1">
                   <Field label="QTY">
                     <div className="relative">
                       <input
@@ -895,7 +845,7 @@ export default function CreateCampaignModal({
                         {...register('qty')}
                         aria-invalid={showErr('qty') || undefined}
                         aria-describedby={showErr('qty') ? errId('qty') : undefined}
-                        className={`input h-10 ${showErr('qty') ? 'input-error' : ''}`}
+                        className={`input h-10 w-full ${showErr('qty') ? 'input-error' : ''}`}
                       />
                       {showErr('qty') && (
                         <Tooltip
@@ -909,7 +859,7 @@ export default function CreateCampaignModal({
                     <Err id={errId('qty')} e={showErr('qty') ? errors.qty : undefined} />
                   </Field>
                 </div>
-                <div className="min-w-0">
+                <div className="min-w-0 col-span-1">
                   <Field label="V Sent">
                     <div className="relative">
                       <input
@@ -917,7 +867,7 @@ export default function CreateCampaignModal({
                         {...register('vSent')}
                         aria-invalid={showErr('vSent') || undefined}
                         aria-describedby={showErr('vSent') ? errId('vSent') : undefined}
-                        className={`input h-10 ${showErr('vSent') ? 'input-error' : ''}`}
+                        className={`input h-10 w-full ${showErr('vSent') ? 'input-error' : ''}`}
                       />
                       {showErr('vSent') && (
                         <Tooltip
@@ -930,6 +880,32 @@ export default function CreateCampaignModal({
                     </div>
                     <Err id={errId('vSent')} e={showErr('vSent') ? errors.vSent : undefined} />
                   </Field>
+                </div>
+              </div>
+              <div>
+                <div className="text-xs uppercase tracking-[0.18em] text-gray-500">
+                  Performance Summary
+                </div>
+                <div className="mt-3 grid gap-3 sm:grid-cols-3">
+                  <KPICard
+                    label="Turnover"
+                    value={fmtEUR.format(watchTurnover || 0)}
+                    tone="indigo"
+                    icon={<KPIIcon type="turnover" />}
+                  />
+                  <KPICard
+                    label="Margin"
+                    value={fmtEUR.format(watchMargin || 0)}
+                    helper="(Turnover - Routing Costs)"
+                    tone="emerald"
+                    icon={<KPIIcon type="margin" />}
+                  />
+                  <KPICard
+                    label="eCPM"
+                    value={fmtEUR.format(watchEcpm || 0)}
+                    tone="violet"
+                    icon={<KPIIcon type="ecpm" />}
+                  />
                 </div>
               </div>
             </Section>
@@ -959,189 +935,44 @@ export default function CreateCampaignModal({
                         />
                       </div>
                     </FieldWithAddon>
-                    <Err
-                      id={errId('database')}
-                      e={showErr('database') ? errors.database : undefined}
-                    />
-                  </Field>
-                </div>
-                <div className="flex-1 min-w-[160px]">
-                  <Field label="GEO" badge="AUTO" hint="Auto-filled from database">
-                    <div className="relative">
-                      <input
-                        type="text"
-                        {...register('geo')}
-                        readOnly
-                        aria-invalid={showErr('geo') || undefined}
-                        aria-describedby={showErr('geo') ? errId('geo') : undefined}
-                        className={roErr(showErr('geo'))}
-                      />
-                      {showErr('geo') && (
-                        <Tooltip
-                          content={errors.geo?.message}
-                          className="absolute right-2 inset-y-0 flex items-center"
-                        >
-                          <span aria-hidden className="text-[--color-accent] text-sm">âš </span>
-                        </Tooltip>
-                      )}
-                    </div>
-                    <Err id={errId('geo')} e={showErr('geo') ? errors.geo : undefined} />
-                  </Field>
-                </div>
-                <div className="flex-1 min-w-[160px]">
-                  <Field label="DB Type" badge="AUTO" hint="Auto-filled from database">
-                    <div className="relative">
-                      <input
-                        type="text"
-                        {...register('databaseType')}
-                        readOnly
-                        aria-invalid={showErr('databaseType') || undefined}
-                        aria-describedby={
-                          showErr('databaseType') ? errId('databaseType') : undefined
-                        }
-                        className={roErr(showErr('databaseType'))}
-                      />
-                      {showErr('databaseType') && (
-                        <Tooltip
-                          content={errors.databaseType?.message}
-                          className="absolute right-2 inset-y-0 flex items-center"
-                        >
-                          <span aria-hidden className="text-[--color-accent] text-sm">âš </span>
-                        </Tooltip>
-                      )}
-                    </div>
-                    <Err
-                      id={errId('databaseType')}
-                      e={showErr('databaseType') ? errors.databaseType : undefined}
-                    />
+                    {database ? (
+                      <div className="mt-1 text-xs text-gray-500">
+                        {geo || 'N/A'}
+                        {databaseType ? ` / ${databaseType}` : ''}
+                      </div>
+                    ) : null}
+                    <input type="hidden" {...register('geo')} />
+                    <input type="hidden" {...register('databaseType')} />
+                    <Err id={errId('database')} e={databaseError} />
                   </Field>
                 </div>
               </div>
             </Section>
+            <input type="hidden" {...register('routingCosts')} />
+            <input type="hidden" {...register('turnover')} />
+            <input type="hidden" {...register('margin')} />
+            <input type="hidden" {...register('ecpm')} />
             </div>
-
-            <aside className="col-span-12 xl:col-span-5 mt-10 xl:mt-6 xl:pl-4">
-              <div
-                className="flex flex-col gap-5 xl:sticky"
-                style={{ top: 'calc(var(--content-sticky-top, 5.5rem) + 4rem)' }}
-              >
-                {/* KPI BAR */}
-                <Section title="Performance Summary" highContrast={highContrast}>
-                  <div className="kpi-frame">
-                    <KPIBar
-                      turnover={watchTurnover || 0}
-                      margin={watchMargin || 0}
-                      marginPct={watchMarginPct}
-                      ecpm={watchEcpm || 0}
-                      fmtEUR={fmtEUR}
-                      fmtPct={fmtPct}
-                      positiveClass="text-[--color-primary]"
-                      negativeClass="text-[--color-accent]"
-                    />
-                  </div>
-                </Section>
-
-                {/* D) Results */}
-                <Section title="Key Metrics" highContrast={highContrast}>
-                  <div className="grid grid-cols-12 gap-x-4 gap-y-4">
-                    <div className="col-span-12">
-                      <Field label="Routing costs (€)" badge="CALC" hint={`Formula: ${routingHint}`}>
-                        <input
-                          type="number"
-                          step="0.01"
-                          {...register('routingCosts')}
-                          className={roInput}
-                          readOnly
-                        />
-                        <Err
-                          id={errId('routingCosts')}
-                          e={showErr('routingCosts') ? errors.routingCosts : undefined}
-                        />
-                      </Field>
-                    </div>
-                    <div className="col-span-12 sm:col-span-6">
-                      <Field label="Turnover (€)" badge="CALC" hint={`Formula: ${turnoverHint}`}>
-                        <div className="group flex flex-col gap-1">
-                          <div className="relative">
-                            <input
-                              type="number"
-                              step="0.01"
-                              {...register('turnover')}
-                              className={`${roInput} pr-16`}
-                              readOnly
-                            />
-                          </div>
-                          <div className="flex justify-end text-xs text-[color:var(--color-text)]/70 opacity-0 group-hover:opacity-100 group-focus-within:opacity-100 transition-opacity">
-                            {fmtEUR.format(watchTurnover || 0)}
-                          </div>
-                        </div>
-                        <Err
-                          id={errId('turnover')}
-                          e={showErr('turnover') ? errors.turnover : undefined}
-                        />
-                      </Field>
-                    </div>
-                    <div className="col-span-12 sm:col-span-6">
-                      <Field label="Margin" badge="CALC" hint={`Formula: ${marginHint}`}>
-                        <div className="group flex flex-col gap-1">
-                          <div className="relative">
-                            <input
-                              type="number"
-                              step="0.01"
-                              {...register('margin')}
-                              className={`${roInput} pr-24 ${marginTextClass}`}
-                              readOnly
-                              aria-live="polite"
-                            />
-                          </div>
-                          <div
-                            className={`flex justify-end text-xs ${marginTextClass} opacity-0 group-hover:opacity-100 group-focus-within:opacity-100 transition-opacity`}
-                          >
-                            {fmtEUR.format(watchMargin || 0)}
-                            {watchMarginPct == null ? '' : ` (${fmtPct.format(watchMarginPct)})`}
-                          </div>
-                        </div>
-                        <Err id={errId('margin')} e={showErr('margin') ? errors.margin : undefined} />
-                      </Field>
-                    </div>
-                    <div className="col-span-12">
-                      <Field label="eCPM (€)" badge="CALC" hint={`Formula: ${ecpmHint}`}>
-                        <div className="group flex flex-col gap-1">
-                          <div className="relative">
-                            <input
-                              type="number"
-                              step="0.01"
-                              {...register('ecpm')}
-                              className={`${roInput} pr-16`}
-                              readOnly
-                            />
-                          </div>
-                          <div className="flex justify-end text-xs text-[color:var(--color-text)]/70 opacity-0 group-hover:opacity-100 group-focus-within:opacity-100 transition-opacity">
-                            {fmtEUR.format(watchEcpm || 0)}
-                          </div>
-                        </div>
-                        <Err id={errId('ecpm')} e={showErr('ecpm') ? errors.ecpm : undefined} />
-                      </Field>
-                    </div>
-                  </div>
-                </Section>
-              </div>
-            </aside>
           </form>
 
-          <div className="edge-fade edge-bottom" aria-hidden />
         </div>
 
         {/* Footer */}
-        <div className="sticky bottom-0 z-10 modal-chrome modal-footer px-5 py-2.5">
+        <div className="sticky bottom-0 z-10 modal-footer bg-slate-50 backdrop-blur-md border-t border-slate-200 px-5 py-3 shadow-[0_-4px_6px_-1px_rgba(0,0,0,0.05)]">
           <div className="flex items-center justify-end gap-2">
-            <button type="button" onClick={requestClose} className="btn-ghost">Cancel</button>
+            <button
+              type="button"
+              onClick={requestClose}
+              className="btn-ghost border border-slate-200 hover:bg-white"
+            >
+              Cancel
+            </button>
             {mode === 'create' && (
               <button
                 type="submit"
                 form="create-edit-campaign-form"
                 disabled={isSubmitting}
-                className="btn-ghost"
+                className="btn-ghost border border-slate-200 hover:bg-white"
                 onClick={() => { submitIntentRef.current = 'save_add'; }}
               >
                 Save & add another
@@ -1251,16 +1082,33 @@ function Err({ id, e }: { id: string; e?: { message?: string } }) {
   );
 }
 
-function Section({ title, children, highContrast }: { title: string; children: React.ReactNode; highContrast: boolean }) {
+function Section({
+  title,
+  children,
+  highContrast,
+  className,
+}: {
+  title: string;
+  children: React.ReactNode;
+  highContrast: boolean;
+  className?: string;
+}) {
   return (
-    <section className="form-section col-span-12">
-      <header className="form-section__header">
-        <span className="form-section__title">{title}</span>
-        <span className="form-section__accent" aria-hidden />
-      </header>
-      <div className={`form-section__body ${highContrast ? 'form-section__body--hc' : ''}`}>
-        {children}
+    <section
+      className={[
+        'mb-4 rounded-xl border border-slate-200 bg-white p-5 shadow-sm',
+        highContrast ? 'shadow-md' : '',
+        className ?? '',
+      ].join(' ')}
+    >
+      <div className="mb-4 flex flex-col gap-2">
+        <span className="text-sm font-semibold text-slate-700">{title}</span>
+        <span
+          className="h-1 w-16 rounded-full bg-gradient-to-r from-[--color-primary] to-indigo-500"
+          aria-hidden
+        />
       </div>
+      {children}
     </section>
   );
 }
@@ -1286,85 +1134,86 @@ function CalendarIcon() {
   );
 }
 
-function KPIBar({
-  turnover,
-  margin,
-  marginPct,
-  ecpm,
-  fmtEUR,
-  fmtPct,
-  positiveClass,
-  negativeClass,
+type KPITone = 'indigo' | 'emerald' | 'violet';
+
+const KPI_TONE_CLASSES: Record<KPITone, string> = {
+  indigo: 'bg-indigo-50 text-indigo-600',
+  emerald: 'bg-emerald-50 text-emerald-600',
+  violet: 'bg-violet-50 text-violet-600',
+};
+
+function KPICard({
+  label,
+  value,
+  helper,
+  tone,
+  icon,
 }: {
-  turnover: number;
-  margin: number;
-  marginPct: number | null;
-  ecpm: number;
-  fmtEUR: Intl.NumberFormat;
-  fmtPct: Intl.NumberFormat;
-  positiveClass?: string;
-  negativeClass?: string;
+  label: string;
+  value: string;
+  helper?: string;
+  tone: KPITone;
+  icon: React.ReactNode;
 }) {
-  const marginClass =
-    margin > 0
-      ? (positiveClass || 'text-green-600')
-      : margin < 0
-      ? (negativeClass || 'text-red-600')
-      : 'opacity-80';
-  const tileClass =
-    'min-w-0 rounded-lg bg-[color:var(--color-surface-2)]/70 px-3 py-2.5 sm:px-4 sm:py-3 shadow-[0_12px_28px_rgba(15,23,42,0.08)] transition-shadow';
-
-  const renderCurrency = (value: number) => {
-    const parts = fmtEUR.formatToParts(value || 0);
-    const currency = parts.find((part) => part.type === 'currency')?.value ?? '';
-    const numericPortion = parts
-      .filter((part) => part.type !== 'currency' && part.type !== 'literal')
-      .map((part) => part.value)
-      .join('');
-
-    return (
-      <span
-        className="inline-flex items-baseline gap-1 whitespace-nowrap"
-        style={{ fontVariantNumeric: 'tabular-nums' }}
-      >
-        <span>{numericPortion}</span>
-        <span className="text-base sm:text-lg font-semibold">{currency}</span>
-      </span>
-    );
-  };
-
   return (
-    <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
-      <div className={tileClass}>
-        <div className="text-[11px] uppercase tracking-[0.16em] text-[color:var(--color-text)]/60">Turnover</div>
-        <div
-          className="mt-1 flex items-baseline text-lg sm:text-[1.35rem] font-semibold leading-tight text-[color:var(--color-text)]/90"
-        >
-          {renderCurrency(turnover)}
+    <div className="flex w-full items-start gap-3 rounded-2xl border border-slate-200 bg-white px-3 py-2.5 shadow-sm">
+      <span
+        className={`flex h-9 w-9 items-center justify-center rounded-full ${KPI_TONE_CLASSES[tone]}`}
+        aria-hidden
+      >
+        {icon}
+      </span>
+      <div className="min-w-0">
+        <div className="text-[11px] font-semibold uppercase tracking-wider text-slate-500">
+          {label}
         </div>
-      </div>
-      <div className={tileClass}>
-        <div className="text-[11px] uppercase tracking-[0.16em] text-[color:var(--color-text)]/60">Margin</div>
         <div
-          className={`mt-1 flex flex-wrap items-baseline gap-x-2 gap-y-1 text-lg sm:text-[1.35rem] font-semibold leading-tight ${marginClass}`}
+          className="mt-1 text-2xl font-bold text-slate-900"
+          style={{ fontVariantNumeric: 'tabular-nums' }}
         >
-          {renderCurrency(margin)}
-          {marginPct == null ? null : (
-            <span className="text-sm sm:text-base font-medium opacity-80 whitespace-nowrap">
-              ({fmtPct.format(marginPct)})
-            </span>
-          )}
+          {value}
         </div>
-      </div>
-      <div className={tileClass}>
-        <div className="text-[11px] uppercase tracking-[0.16em] text-[color:var(--color-text)]/60">eCPM</div>
-        <div
-          className="mt-1 flex items-baseline text-lg sm:text-[1.35rem] font-semibold leading-tight text-[color:var(--color-text)]/90"
-        >
-          {renderCurrency(ecpm)}
-        </div>
+        {helper ? <div className="text-xs text-gray-500">{helper}</div> : null}
       </div>
     </div>
+  );
+}
+
+function KPIIcon({ type }: { type: 'turnover' | 'margin' | 'ecpm' }) {
+  const baseProps = {
+    className: 'h-5 w-5',
+    fill: 'none',
+    stroke: 'currentColor',
+    strokeWidth: 1.8,
+    strokeLinecap: 'round' as const,
+    strokeLinejoin: 'round' as const,
+    'aria-hidden': true,
+    viewBox: '0 0 24 24',
+  };
+
+  if (type === 'turnover') {
+    return (
+      <svg {...baseProps}>
+        <path d="M3 17l6-6 4 4 7-7" />
+        <path d="M14 8h6v6" />
+      </svg>
+    );
+  }
+
+  if (type === 'margin') {
+    return (
+      <svg {...baseProps}>
+        <circle cx="12" cy="12" r="7" />
+        <path d="M9.5 10.5h5" />
+        <path d="M9.5 13.5h5" />
+      </svg>
+    );
+  }
+
+  return (
+    <svg {...baseProps}>
+      <path d="M13 2L4 14h6l-1 8 9-12h-6l1-8z" />
+    </svg>
   );
 }
 

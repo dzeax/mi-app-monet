@@ -499,6 +499,27 @@ html[data-theme="dark"] .kpi-frame::after {
   outline: none;
 }
 
+/* Clean-tech form variant */
+form[data-variant="clean-tech"] .input {
+  @apply rounded-lg bg-slate-50 px-4 py-2.5 transition-all border border-gray-200 shadow-sm;
+  color: var(--color-text);
+}
+
+form[data-variant="clean-tech"] .input:hover {
+  background: #f8fafc;
+  border-color: #d1d5db;
+}
+
+form[data-variant="clean-tech"] .input:focus {
+  background: white;
+  /* Ring de foco indigo suave */
+  @apply ring-2 ring-indigo-500;
+}
+form[data-variant="clean-tech"] .input:focus-visible {
+  outline: none;
+}
+
+
 
 /* Botón primario */
 .btn-primary {
