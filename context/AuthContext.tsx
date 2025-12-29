@@ -6,7 +6,6 @@ import {
   useContext,
   useEffect,
   useMemo,
-  useRef,
   useState,
 } from 'react';
 import { createClientComponentClient } from '@supabase/auth-helpers-nextjs';
@@ -77,33 +76,50 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   // Carga inicial de sesión + perfil y suscripción a cambios
   useEffect(() => {
     let mounted = true;
+    let inFlight: Promise<void> | null = null;
 
     const applyAuthenticatedUser = async () => {
       if (!mounted) return;
-      try {
-        const { data, error } = await supabase.auth.getUser();
-        if (!mounted) return;
-        const authUser = error ? null : data?.user ?? null;
-        if (authUser) {
-          const profile = await fetchProfile(supabase, authUser.id).catch(() => FALLBACK_PROFILE);
+      if (inFlight) {
+        await inFlight;
+        return;
+      }
+
+      const task = (async () => {
+        try {
+          const { data, error } = await supabase.auth.getSession();
           if (!mounted) return;
-          setUser({
-            id: authUser.id,
-            email: authUser.email ?? null,
-            role: profile.role,
-            displayName: profile.displayName,
-            avatarUrl: profile.avatarUrl,
-          });
-          setRole(profile.role);
-        } else {
+          const session = error ? null : data?.session ?? null;
+          const authUser = session?.user ?? null;
+
+          if (authUser) {
+            const profile = await fetchProfile(supabase, authUser.id).catch(() => FALLBACK_PROFILE);
+            if (!mounted) return;
+            setUser({
+              id: authUser.id,
+              email: authUser.email ?? null,
+              role: profile.role,
+              displayName: profile.displayName,
+              avatarUrl: profile.avatarUrl,
+            });
+            setRole(profile.role);
+          } else {
+            setUser(null);
+            setRole(null);
+          }
+        } catch (error) {
+          if (!mounted) return;
+          console.warn('[auth] Failed to resolve authenticated user', error);
           setUser(null);
           setRole(null);
         }
-      } catch (error) {
-        if (!mounted) return;
-        console.warn('Failed to resolve authenticated user', error);
-        setUser(null);
-        setRole(null);
+      })();
+
+      inFlight = task;
+      try {
+        await task;
+      } finally {
+        if (inFlight === task) inFlight = null;
       }
     };
 
@@ -112,19 +128,36 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       setLoading(false);
     })();
 
-    const { data: sub } = supabase.auth.onAuthStateChange(async (event, session) => {
-      try {
-        await fetch('/api/auth/callback', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          credentials: 'same-origin',
-          body: JSON.stringify({ event, session }),
-        });
-      } catch (error) {
-        console.warn('Failed to sync auth session', error);
-      }
+    const syncAuthSession = (event: string, session: unknown) => {
+      const started = Date.now();
+      const controller = new AbortController();
+      const timeout = window.setTimeout(() => controller.abort(), 3000);
 
-      await applyAuthenticatedUser();
+      fetch('/api/auth/callback', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        credentials: 'same-origin',
+        body: JSON.stringify({ event, session }),
+        signal: controller.signal,
+      })
+        .then((res) => {
+          return res;
+        })
+        .catch((error) => {
+          console.warn('[auth] Failed to sync auth session', {
+            event,
+            message: error instanceof Error ? error.message : String(error),
+            ms: Date.now() - started,
+          });
+        })
+        .finally(() => {
+          window.clearTimeout(timeout);
+        });
+    };
+
+    const { data: sub } = supabase.auth.onAuthStateChange((event, session) => {
+      syncAuthSession(event, session);
+      void applyAuthenticatedUser();
       setLoading(false);
     });
 
@@ -155,11 +188,23 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
 
   const signIn = useCallback(
     async (email: string, password: string) => {
-      const { error } = await supabase.auth.signInWithPassword({ email, password });
-      if (error) {
-        return { ok: false as const, message: error.message || 'Unable to sign in' };
+      try {
+        const response = await Promise.race([
+          supabase.auth.signInWithPassword({ email, password }),
+          new Promise<never>((_, reject) =>
+            setTimeout(() => reject(new Error('Sign in timed out. Please try again.')), 12000)
+          ),
+        ]);
+
+        const { error } = response;
+        if (error) {
+          return { ok: false as const, message: error.message || 'Unable to sign in' };
+        }
+        return { ok: true as const };
+      } catch (error) {
+        const message = error instanceof Error ? error.message : 'Unable to sign in';
+        return { ok: false as const, message };
       }
-      return { ok: true as const };
     },
     [supabase]
   );

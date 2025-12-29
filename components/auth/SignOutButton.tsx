@@ -3,7 +3,7 @@
 import type { ButtonHTMLAttributes, ReactNode } from 'react';
 import { useState } from 'react';
 import { useRouter } from 'next/navigation';
-import { createClientComponentClient } from '@supabase/auth-helpers-nextjs';
+import { useAuth } from '@/context/AuthContext';
 
 type Props = {
   variant?: 'text' | 'icon' | 'unstyled';
@@ -18,13 +18,13 @@ export default function SignOutButton({
   ...rest
 }: Props) {
   const router = useRouter();
-  const supabase = createClientComponentClient();
+  const { signOut } = useAuth();
   const [loading, setLoading] = useState(false);
 
   const onClick = () => {
     setLoading(true);
 
-    const p = supabase.auth.signOut().catch(console.error);
+    const p = signOut().catch(console.error);
 
     const fallback = setTimeout(() => {
       router.replace('/login');
@@ -33,6 +33,7 @@ export default function SignOutButton({
     p.finally(() => {
       clearTimeout(fallback);
       router.replace('/login');
+      router.refresh();
     });
   };
 

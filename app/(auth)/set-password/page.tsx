@@ -145,7 +145,7 @@ function SetPasswordContent() {
           setError(null);
           console.debug('[set-password] existing session detected');
         } else {
-          setError((prev) => prev ?? 'Your session is not initialized. Please request a fresh invitation.');
+          setError((prev) => prev ?? 'Your session is not initialized. Please request a new link.');
           console.warn('[set-password] no active session available');
         }
       } catch (err: unknown) {

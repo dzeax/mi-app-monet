@@ -1,7 +1,8 @@
 'use client';
 
-import { useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import Image from 'next/image';
+import Link from 'next/link';
 import { useRouter, useSearchParams } from 'next/navigation';
 import { useAuth } from '@/context/AuthContext';
 
@@ -16,6 +17,53 @@ export default function LoginClient() {
   const [showPwd, setShowPwd] = useState(false);
   const [loading, setLoading] = useState(false);
   const [err, setErr] = useState<string | null>(null);
+  const resetHref = `/reset?redirect=${encodeURIComponent(redirect)}`;
+  const forwarded = useRef(false);
+
+  useEffect(() => {
+    if (forwarded.current || typeof window === 'undefined') return;
+
+    const searchParams = new URLSearchParams(window.location.search);
+    const hashParams = new URLSearchParams(
+      window.location.hash.startsWith('#') ? window.location.hash.slice(1) : window.location.hash
+    );
+
+    const hasAuthParams =
+      searchParams.has('code') ||
+      searchParams.has('token') ||
+      searchParams.has('access_token') ||
+      searchParams.has('refresh_token') ||
+      hashParams.has('access_token') ||
+      hashParams.has('refresh_token') ||
+      hashParams.has('token') ||
+      hashParams.has('type');
+
+    if (!hasAuthParams) return;
+
+    if (!searchParams.has('redirect_to')) {
+      const type = searchParams.get('type') ?? hashParams.get('type');
+      const redirectParam = searchParams.get('redirect');
+      if (redirectParam) {
+        let decoded = redirectParam;
+        try {
+          decoded = decodeURIComponent(redirectParam);
+        } catch {}
+        const hasAuthInRedirect = /(code=|access_token=|refresh_token=|token=)/.test(decoded);
+        if (hasAuthInRedirect) {
+          searchParams.set('redirect_to', '/set-password');
+        } else {
+          searchParams.set('redirect_to', decoded);
+        }
+      } else if (type === 'recovery') {
+        searchParams.set('redirect_to', '/set-password');
+      }
+    }
+
+    const nextSearch = searchParams.toString();
+    const nextHash = window.location.hash || '';
+    forwarded.current = true;
+    router.replace(`/auth/callback${nextSearch ? `?${nextSearch}` : ''}${nextHash}`);
+  }, [router]);
 
   async function onSubmit(e: React.FormEvent) {
     e.preventDefault();
@@ -175,7 +223,11 @@ export default function LoginClient() {
               </button>
 
               <div className="text-sm text-neutral-500">
-                Forgot password? Contact an admin to reset your credentials.
+                Forgot password?{' '}
+                <Link href={resetHref} className="underline">
+                  Reset it here
+                </Link>
+                .
               </div>
             </form>
           </div>

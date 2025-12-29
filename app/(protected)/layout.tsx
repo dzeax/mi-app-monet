@@ -1,6 +1,9 @@
 // app/(protected)/layout.tsx
 import { redirect } from 'next/navigation';
-import { AuthProvider } from '@/context/AuthContext';
+import { BusinessUnitProvider } from '@/context/BusinessUnitContext';
+import { RoutingSettingsProvider } from '@/context/RoutingSettingsContext';
+import { CatalogOverridesProvider } from '@/context/CatalogOverridesContext';
+import { CampaignDataProvider } from '@/context/CampaignDataContext';
 import { getSessionAndAppUser } from '@/lib/auth/server';
 import AppHeader from '@/components/AppHeader';
 import FooterBar from '@/components/ui/FooterBar';
@@ -16,14 +19,20 @@ export default async function ProtectedLayout({ children }: { children: React.Re
   }
 
   return (
-    <AuthProvider>
-      <AppHeader />
+    <BusinessUnitProvider>
+      <RoutingSettingsProvider>
+        <CatalogOverridesProvider>
+          <CampaignDataProvider>
+            <AppHeader />
 
-      <div className="with-app-footer">
-        <div>{children}</div>
-      </div>
+            <div className="with-app-footer">
+              <div>{children}</div>
+            </div>
 
-      <FooterBar />
-    </AuthProvider>
+            <FooterBar />
+          </CampaignDataProvider>
+        </CatalogOverridesProvider>
+      </RoutingSettingsProvider>
+    </BusinessUnitProvider>
   );
 }

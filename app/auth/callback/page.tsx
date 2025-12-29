@@ -51,13 +51,19 @@ function AuthCallbackContent() {
     const hashParams = new URLSearchParams(hashString);
     const get = (key: string) => hashParams.get(key) ?? searchParams.get(key) ?? undefined;
 
-    const flow = get('flow') ?? get('type');
+    const normalizeFlow = (value?: string | null) => {
+      if (!value) return undefined;
+      if (value === 'magic_link') return 'magiclink';
+      return value;
+    };
+
+    const flow = normalizeFlow(get('flow') ?? get('type'));
     const code = get('code');
     const token = get('token');
     const email = get('email');
     const accessToken = get('access_token');
     const refreshToken = get('refresh_token');
-    const redirectTo = get('redirect_to') ?? '/';
+    const redirectTo = get('redirect_to') ?? (flow === 'recovery' ? '/set-password' : '/');
 
     const redirectToSetPassword = () => {
       const hash = new URLSearchParams();

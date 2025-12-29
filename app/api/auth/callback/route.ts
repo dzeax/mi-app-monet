@@ -26,12 +26,20 @@ export async function POST(request: Request) {
     session,
   }: { event: SupabaseAuthEvent; session: Session | null } = await request.json();
 
+  const userId = session?.user?.id ?? null;
+
   if (session && ['SIGNED_IN', 'TOKEN_REFRESHED', 'USER_UPDATED'].includes(event)) {
-    await supabase.auth.setSession(session);
+    const { error } = await supabase.auth.setSession(session);
+    if (error) {
+      console.warn('[auth-callback] setSession failed', { event, userId, message: error.message });
+    }
   }
 
   if (['SIGNED_OUT', 'USER_DELETED'].includes(event)) {
-    await supabase.auth.signOut();
+    const { error } = await supabase.auth.signOut();
+    if (error) {
+      console.warn('[auth-callback] signOut failed', { event, userId, message: error.message });
+    }
   }
 
   return NextResponse.json({ ok: true });
