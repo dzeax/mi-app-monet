@@ -102,11 +102,11 @@ export default function LoginClient() {
               height={70}
               alt="Dataventure"
               priority
-              className="h-20 w-auto drop-shadow-[0_6px_12px_rgba(0,0,0,0.28)]"
+              className="mt-8 h-20 w-auto mb-8 drop-shadow-[0_6px_12px_rgba(0,0,0,0.28)]"
             />
             <div className="h-px w-24 bg-white/45" />
-            <p className="text-xs font-medium uppercase tracking-[0.32em] text-white/75">
-              Data & Performance Marketing
+            <p className="text-xl font-semibold tracking-[0.2em] text-white/95">
+              CRM &amp; DATA Performance
             </p>
           </div>
         </div>
@@ -132,9 +132,9 @@ export default function LoginClient() {
       </div>
 
       {/* Right / Form side */}
-      <div className="relative flex items-center justify-center px-6 py-16 md:px-12 md:py-24">
+      <div className="relative flex items-center justify-center bg-slate-50 px-6 py-16 md:px-12 md:py-24">
         <div className="w-full max-w-md flex flex-col">
-          <div className="rounded-[32px] border border-white/60 dark:border-neutral-800 bg-white/85 dark:bg-neutral-950/70 shadow-[0_35px_70px_rgba(15,23,42,0.15)] dark:shadow-[0_45px_90px_rgba(0,0,0,0.45)] backdrop-blur-2xl px-6 py-8 sm:px-8 sm:py-10 space-y-8">
+          <div className="rounded-3xl border border-slate-100 bg-white shadow-2xl shadow-indigo-500/10 backdrop-blur-2xl px-6 py-8 sm:px-8 sm:py-10 space-y-8">
             {/* Mobile brand header */}
             <div className="flex items-center md:hidden">
               <Image
@@ -148,16 +148,16 @@ export default function LoginClient() {
 
             <div>
               <h1 className="text-2xl font-semibold tracking-tight text-neutral-900 dark:text-neutral-50">
-                Sign in
+                Welcome back
               </h1>
-              <p className="mt-1 text-sm text-neutral-600 dark:text-neutral-400">
-                Welcome back! Please enter your credentials.
+              <p className="mt-1 text-sm text-gray-500 dark:text-neutral-400">
+                Please enter your credentials.
               </p>
             </div>
 
             <form onSubmit={onSubmit} className="space-y-5">
               <label className="block">
-                <span className="text-sm font-medium text-neutral-800 dark:text-neutral-200">
+                <span className="text-sm font-medium text-gray-700">
                   Email
                 </span>
                 <input
@@ -166,13 +166,13 @@ export default function LoginClient() {
                   autoComplete="email"
                   value={email}
                   onChange={(e) => setEmail(e.target.value)}
-                  className="mt-1 w-full rounded-xl border border-neutral-200/80 dark:border-neutral-700 bg-white/95 dark:bg-neutral-900 px-3 py-2 text-neutral-900 dark:text-neutral-100 outline-none focus:ring-2 ring-indigo-500"
+                  className="mt-1 w-full rounded-xl border border-transparent bg-slate-100 px-4 py-3 text-neutral-900 outline-none transition-all duration-300 focus:ring-2 focus:ring-indigo-500/50 focus:bg-white"
                   placeholder="you@dataventure.com"
                 />
               </label>
 
               <label className="block">
-                <span className="text-sm font-medium text-neutral-800 dark:text-neutral-200">
+                <span className="text-sm font-medium text-gray-700">
                   Password
                 </span>
                 <div className="mt-1 relative">
@@ -182,7 +182,7 @@ export default function LoginClient() {
                     autoComplete="current-password"
                     value={password}
                     onChange={(e) => setPassword(e.target.value)}
-                    className="w-full rounded-xl border border-neutral-200/80 dark:border-neutral-700 bg-white/95 dark:bg-neutral-900 px-3 py-2 pr-11 text-neutral-900 dark:text-neutral-100 outline-none focus:ring-2 ring-indigo-500"
+                    className="w-full rounded-xl border border-transparent bg-slate-100 px-4 py-3 pr-12 text-neutral-900 outline-none transition-all duration-300 focus:ring-2 focus:ring-indigo-500/50 focus:bg-white"
                     placeholder="********"
                   />
                   <button
@@ -205,7 +205,7 @@ export default function LoginClient() {
               <button
                 type="submit"
                 disabled={loading}
-                className="w-full rounded-xl bg-neutral-900 text-white py-2.5 font-medium hover:bg-neutral-800 disabled:opacity-60 disabled:cursor-not-allowed"
+                className="w-full rounded-xl bg-gradient-to-br from-indigo-600 to-violet-600 py-3 font-semibold tracking-wide text-white shadow-lg shadow-indigo-500/30 transition-all duration-300 hover:opacity-90 hover:scale-[1.02] hover:shadow-indigo-500/50 disabled:opacity-60 disabled:cursor-not-allowed"
               >
                 {loading ? (
                   <span className="flex items-center justify-center gap-2">

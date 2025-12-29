@@ -108,12 +108,6 @@ function SetPasswordContent() {
       const hasTokens = Boolean(accessToken && refreshToken);
 
       setInitializingSession(hasTokens);
-      console.debug('[set-password] ensureSession()', {
-        tokensReady,
-        hasTokens,
-        accessToken: accessToken ? `${accessToken.slice(0, 6)}…` : null,
-        refreshToken: refreshToken ? `${refreshToken.slice(0, 6)}…` : null,
-      });
 
       if (hasTokens) {
         try {
@@ -124,12 +118,10 @@ function SetPasswordContent() {
           if (sessErr) throw sessErr;
           if (!mounted) return;
           setError(null);
-          console.debug('[set-password] setSession success');
         } catch (err: unknown) {
           if (!mounted) return;
           const message = err instanceof Error ? err.message : 'Unable to initialize your session.';
           setError(message);
-          console.error('[set-password] setSession error', err);
         } finally {
           if (mounted) setInitializingSession(false);
         }
@@ -143,16 +135,13 @@ function SetPasswordContent() {
         if (!mounted) return;
         if (data.session) {
           setError(null);
-          console.debug('[set-password] existing session detected');
         } else {
           setError((prev) => prev ?? 'Your session is not initialized. Please request a new link.');
-          console.warn('[set-password] no active session available');
         }
       } catch (err: unknown) {
         if (!mounted) return;
         const message = err instanceof Error ? err.message : 'Unable to initialize your session.';
         setError(message);
-        console.error('[set-password] getSession error', err);
       }
     };
     ensureSession();
@@ -171,15 +160,8 @@ function SetPasswordContent() {
     event.preventDefault();
     if (busy) return;
 
-    console.log('[set-password] submit:start', {
-      tokensReady,
-      initializingSession,
-      hasTokens: Boolean(accessToken && refreshToken),
-    });
-
     if (!tokensReady) {
       setError('Still preparing your invitation. Please try again in a moment.');
-      console.warn('[set-password] submit:abort tokens not ready');
       return;
     }
 
@@ -196,18 +178,12 @@ function SetPasswordContent() {
     setError(null);
     try {
       // Try to read current session, but do not hang if the helper is slow
-      console.log('[set-password] submit:getSession:start');
       const sessionOrTimeout = await withTimeout<GetSessionResult>(supabase.auth.getSession(), 1500);
       let activeSession: Session | null =
         sessionOrTimeout !== 'timeout' ? sessionOrTimeout.data.session : null;
-      console.log('[set-password] submit:getSession:done', {
-        timedOut: sessionOrTimeout === 'timeout',
-        hasSession: Boolean(activeSession),
-      });
 
       // If no session, try to establish with tokens; but keep a short timeout as well
       if (!activeSession && accessToken && refreshToken) {
-        console.debug('[set-password] retrying setSession inside submit');
         const setOrTimeout = await withTimeout<SetSessionResult>(
           supabase.auth.setSession({ access_token: accessToken, refresh_token: refreshToken }),
           1500,
@@ -221,10 +197,6 @@ function SetPasswordContent() {
         );
         activeSession =
           refreshedOrTimeout !== 'timeout' ? refreshedOrTimeout.data.session : null;
-        console.log('[set-password] submit:after retry getSession', {
-          hasSession: Boolean(activeSession),
-          timedOut: refreshedOrTimeout === 'timeout',
-        });
       }
 
       // Try update via SDK if we have a Supabase session, otherwise fall back to REST
@@ -241,12 +213,7 @@ function SetPasswordContent() {
             new Promise((_, reject) => setTimeout(() => reject(new Error('sdk_timeout')), 6000)),
           ]);
           updated = true;
-          console.log('[set-password] submit:updateUser success (sdk)');
-        } catch (sdkError: unknown) {
-          const reason =
-            sdkError instanceof Error ? sdkError.message : String(sdkError ?? 'unknown');
-          console.warn('[set-password] sdk update failed, falling back', reason);
-        }
+        } catch {}
       }
 
       if (!updated) {
@@ -277,21 +244,16 @@ function SetPasswordContent() {
           } catch {}
           throw new Error(msg);
         }
-        console.log('[set-password] submit:updateUser success (fallback)');
       }
 
       // On success, navigate away
-      console.log('[set-password] submit:navigate', redirectTarget || '/');
       await router.replace(redirectTarget || '/');
-      console.log('[set-password] submit:navigate done');
     } catch (err: unknown) {
       const message = err instanceof Error ? err.message : 'Unable to update password.';
       setError(message);
-      console.error('[set-password] submit error', err);
     } finally {
       // Ensure the button does not remain in a stuck state if navigation is blocked
       setBusy(false);
-      console.log('[set-password] submit:finally');
     }
   };
 
@@ -398,8 +360,8 @@ function LoadingCard() {
   return (
     <div className="min-h-screen flex items-center justify-center bg-[--color-surface] text-[--color-text] px-4">
       <div className="max-w-md w-full rounded-lg border border-[--color-border] bg-[--color-surface-2] p-6 text-center space-y-4 shadow-lg">
-        <h1 className="text-xl font-semibold">Loading…</h1>
-        <p className="text-sm opacity-70">Preparing password setup…</p>
+        <h1 className="text-xl font-semibold">Loading...</h1>
+        <p className="text-sm opacity-70">Preparing password setup...</p>
       </div>
     </div>
   );
