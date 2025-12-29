@@ -12,7 +12,10 @@ export default async function proxy(req: NextRequest) {
     searchParams.has("refresh_token") ||
     searchParams.has("type");
 
-  if (hasAuthParams && !pathname.startsWith("/auth/callback")) {
+  const isAuthCallback = pathname.startsWith("/auth/callback");
+  const isSetPassword = pathname.startsWith("/set-password");
+
+  if (hasAuthParams && !isAuthCallback && !isSetPassword) {
     const url = req.nextUrl.clone();
     url.pathname = "/auth/callback";
 

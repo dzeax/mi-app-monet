@@ -46,8 +46,7 @@ function ResetPasswordForm() {
 
     try {
       const origin = window.location.origin;
-      const callbackTarget = `/set-password?redirect=${encodeURIComponent(redirect)}`;
-      const redirectTo = `${origin}/auth/callback?redirect_to=${encodeURIComponent(callbackTarget)}`;
+      const redirectTo = `${origin}/set-password?redirect=${encodeURIComponent(redirect)}`;
 
       const { error: resetError } = await supabase.auth.resetPasswordForEmail(email, {
         redirectTo,
@@ -56,7 +55,10 @@ function ResetPasswordForm() {
       if (resetError) throw resetError;
       setInfo('Check your email for a reset link.');
     } catch (err: unknown) {
-      const message = err instanceof Error ? err.message : 'Unable to request password reset.';
+      let message = err instanceof Error ? err.message : 'Unable to request password reset.';
+      if (message.toLowerCase().includes('rate limit')) {
+        message = 'You have requested too many reset emails. Please wait a few minutes and try again.';
+      }
       setError(message);
     } finally {
       setBusy(false);
