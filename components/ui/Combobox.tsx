@@ -1,6 +1,6 @@
 'use client';
 import { useEffect, useMemo, useRef, useState, useId } from 'react';
-import type { JSX } from 'react';
+import type { JSX, ReactNode } from 'react';
 
 type Option = { id?: string; value: string; label?: string };
 
@@ -14,6 +14,8 @@ export default function Combobox({
   invalid = false,
   ariaDescribedby,
   className,
+  direction = 'down',
+  renderOption,
 }: {
   options: Option[];
   value?: string;
@@ -24,6 +26,8 @@ export default function Combobox({
   invalid?: boolean;
   ariaDescribedby?: string;
   className?: string;
+  direction?: 'down' | 'up';
+  renderOption?: (option: Option) => ReactNode;
 }) {
   const autoId = useId();
   const inputId = id ?? `cb_${autoId}`;
@@ -271,7 +275,10 @@ export default function Combobox({
           ref={listRef}
           id={listboxId}
           role="listbox"
-          className="absolute z-50 mt-1 max-h-60 left-0 right-0 overflow-auto rounded-lg border border-[--color-border] bg-[color:var(--color-surface-2)] p-1 shadow-xl"
+          className={[
+            'absolute z-50 max-h-60 left-0 right-0 overflow-auto rounded-lg border border-[--color-border] bg-[color:var(--color-surface-2)] p-1 shadow-xl',
+            direction === 'up' ? 'bottom-full mb-1' : 'top-full mt-1',
+          ].join(' ')}
         >
           {filtered.length === 0 && (
             <li className="px-3 py-2 text-sm opacity-70">No results</li>
@@ -330,7 +337,13 @@ export default function Combobox({
                     }
                   }}
                 >
-                  <span className="truncate">{renderHighlighted(o.label || o.value, q)}</span>
+                  {renderOption ? (
+                    renderOption(o)
+                  ) : (
+                    <span className="truncate">
+                      {renderHighlighted(o.label || o.value, q)}
+                    </span>
+                  )}
                   {isSelected ? (
                     <span aria-hidden className="ml-3 text-[--color-primary]">✓</span>
                   ) : null}

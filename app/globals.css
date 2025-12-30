@@ -499,24 +499,44 @@ html[data-theme="dark"] .kpi-frame::after {
   outline: none;
 }
 
-/* Clean-tech form variant */
+/* Clean-tech form variant: Solid Fill Style */
 form[data-variant="clean-tech"] .input {
-  @apply rounded-lg bg-slate-50 px-4 py-2.5 transition-all border border-gray-200 shadow-sm;
-  color: var(--color-text);
+  /* Base shape & typography */
+  @apply rounded-lg text-sm font-medium transition-all;
+
+  /* Dimensions */
+  min-height: 2.75rem;
+  padding: 0.625rem 1rem;
+
+  /* THE "FILLED" LOOK (El cambio clave) */
+  background-color: #f8fafc; /* Slate-50: Gris suave, NO blanco puro */
+  border: 1px solid #cbd5e1; /* Slate-300: Borde definido */
+
+  /* Sombra ligera */
+  box-shadow: 0 1px 2px 0 rgba(0, 0, 0, 0.05);
+
+  color: #334155; /* Slate-700 text */
 }
 
+/* Hover state */
 form[data-variant="clean-tech"] .input:hover {
-  background: #f8fafc;
-  border-color: #d1d5db;
+  background-color: #f1f5f9; /* Slate-100: Un poco mas oscuro al pasar el raton */
+  border-color: #94a3b8;
 }
 
+/* Focus state: AQUI si usamos blanco puro para destacar la edicion */
 form[data-variant="clean-tech"] .input:focus {
-  background: white;
-  /* Ring de foco indigo suave */
-  @apply ring-2 ring-indigo-500;
-}
-form[data-variant="clean-tech"] .input:focus-visible {
+  background-color: #ffffff; /* Blanco al escribir */
+  border-color: #6366f1;
+  box-shadow: 0 0 0 3px rgba(99, 102, 241, 0.15);
   outline: none;
+}
+
+/* Fix for DatePicker button */
+form[data-variant="clean-tech"] button.input {
+  display: flex;
+  align-items: center;
+  text-align: left;
 }
 
 

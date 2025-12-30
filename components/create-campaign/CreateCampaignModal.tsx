@@ -3,6 +3,8 @@
 import { createPortal } from 'react-dom';
 import { Children, isValidElement, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useForm } from 'react-hook-form';
+import { DayPicker } from 'react-day-picker';
+import { format, parseISO } from 'date-fns';
 import type { Resolver } from 'react-hook-form';
 import { z } from 'zod';
 import { zodResolver } from '@hookform/resolvers/zod';
@@ -15,6 +17,7 @@ import QuickAddCampaignModal from '@/components/create-campaign/QuickAddCampaign
 import QuickAddPartnerModal from '@/components/create-campaign/QuickAddPartnerModal';
 import QuickAddDatabaseModal from '@/components/create-campaign/QuickAddDatabaseModal';
 import FieldWithAddon from '@/components/ui/FieldWithAddon';
+import { flagInfoForDatabase } from '@/utils/flags';
 import type { CampaignRef, PartnerRef, DatabaseRef, DBType, InvoiceOffice } from '@/data/reference';
 import { useAuth } from '@/context/AuthContext'; // ðŸ†• roles para quick-add
 
@@ -101,12 +104,30 @@ const EMPTY_CAMPAIGNS: CampaignRef[] = [];
 const EMPTY_PARTNERS: PartnerRef[] = [];
 const EMPTY_DATABASES: DatabaseRef[] = [];
 
-type PickerInput = HTMLInputElement & { showPicker?: () => void };
-
 const isDBType = (value: unknown): value is DBType =>
   typeof value === 'string' && (DB_TYPES as readonly string[]).includes(value);
 const isInvoiceOffice = (value: unknown): value is InvoiceOffice =>
   typeof value === 'string' && (INVOICE_OFFICES as readonly string[]).includes(value);
+const getEcpmStatusIcon = (value: number) => {
+  if (value >= 0.6) return '/animations/profit.gif';
+  if (value <= 0.25) return '/animations/devaluation.gif';
+  return '/animations/resilience.gif';
+};
+const renderDatabaseOption = (option: { value: string; label?: string }) => {
+  const dbName = option.label || option.value;
+  const flag = flagInfoForDatabase(dbName);
+
+  return (
+    <div className="flex items-center gap-3">
+      <span
+        className={`fi fi-${flag.code} h-5 w-5 rounded-sm shadow-sm flex-shrink-0`}
+        style={{ backgroundSize: 'cover' }}
+        aria-hidden="true"
+      />
+      <span className="truncate">{dbName}</span>
+    </div>
+  );
+};
 
 // Zod helpers
 const ZDealType = z.enum(DEAL_TYPES);
@@ -310,7 +331,6 @@ export default function CreateCampaignModal({
       mode: 'onSubmit',
       defaultValues,
     });
-  const { ref: dateInputRef, ...dateField } = register('date');
 
   const { errors, isSubmitting, isDirty, isSubmitted, touchedFields, dirtyFields } = formState;
 
@@ -335,35 +355,13 @@ export default function CreateCampaignModal({
       ? errors.databaseType
       : undefined;
 
-  const firstRef = useRef<HTMLInputElement>(null);
+  const firstRef = useRef<HTMLButtonElement>(null);
   const formRef = useRef<HTMLFormElement>(null);
   const trapRef = useRef<HTMLDivElement>(null);
   const submitIntentRef = useRef<'save' | 'save_add'>('save');
 
-  const openDatePicker = (field?: HTMLInputElement | null) => {
-    const input = field ?? firstRef.current;
-    if (!input) return;
-
-    input.focus({ preventScroll: true });
-
-    const pickerInput = input as PickerInput;
-    if (typeof pickerInput.showPicker === 'function') {
-      try {
-        pickerInput.showPicker();
-        return;
-      } catch {
-        /* browsers can throw if called too quickly; fallback below */
-      }
-    }
-
-    try {
-      input.click();
-    } catch {
-      /* noop */
-    }
-  };
-
   // Watches
+  const dateValue = watch('date');
   const campaign = watch('campaign');
   const advertiser = watch('advertiser');
   const database = watch('database');
@@ -377,7 +375,19 @@ export default function CreateCampaignModal({
   const vSent = watch('vSent');
   const watchTurnover = watch('turnover');
   const watchMargin = watch('margin');
+  const watchMarginPct = watch('marginPct');
   const watchEcpm = watch('ecpm');
+  const marginPctValue = Number.isFinite(watchMarginPct)
+    ? watchMarginPct
+    : Number(watchMarginPct) || 0;
+  const marginBadgeClass =
+    marginPctValue >= 0.6
+      ? 'bg-emerald-100 text-emerald-700'
+      : marginPctValue <= 0.25
+      ? 'bg-red-100 text-red-700'
+      : 'bg-amber-100 text-amber-700';
+  const ecpmValue = Number.isFinite(watchEcpm) ? watchEcpm : Number(watchEcpm) || 0;
+  const ecpmStatusIcon = getEcpmStatusIcon(ecpmValue);
 
   // === Reglas automÃƒÂ¡ticas con catÃƒÂ¡logos dinÃƒÂ¡micos ===
 
@@ -517,7 +527,7 @@ export default function CreateCampaignModal({
     onClose();
   }, [isDirty, mode, onClose]);
 
-  // ESC + foco inicial + atajos
+  // ESC + atajos
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
       if (e.key === 'Escape') {
@@ -538,9 +548,14 @@ export default function CreateCampaignModal({
       }
     };
     document.addEventListener('keydown', onKey);
-    setTimeout(() => firstRef.current?.focus(), 0);
     return () => document.removeEventListener('keydown', onKey);
   }, [requestClose]);
+
+  // Foco inicial (solo al montar)
+  useEffect(() => {
+    const timer = window.setTimeout(() => firstRef.current?.focus(), 50);
+    return () => window.clearTimeout(timer);
+  }, []);
 
   // Focus trap
   useEffect(() => {
@@ -605,19 +620,15 @@ export default function CreateCampaignModal({
         ref={trapRef}
         className="relative card w-full max-w-4xl max-h-[90vh] overflow-hidden border border-[--color-border] shadow-xl"
         style={{ background: 'var(--color-surface)' }}
-        onMouseDown={(e) => {
-          // Evita que el click dentro del card burbujee al backdrop
-          e.stopPropagation();
-        }}
       >
         {/* Header sticky */}
-        <div className="sticky top-0 z-10 modal-header bg-slate-50 backdrop-blur-md border-b border-slate-200 px-5 py-3 shadow-sm">
+        <div className="sticky top-0 z-10 modal-header modal-chrome border-b px-5 py-3">
           <div className="flex items-center justify-between gap-3">
-            <h3 className="text-lg font-bold text-slate-800">
+            <h3 className="text-lg font-bold">
               {mode === 'edit' ? 'Edit campaign' : 'Create campaign'}
             </h3>
             <button
-              className="flex h-9 w-9 items-center justify-center rounded-full text-slate-500 transition-colors hover:bg-slate-200"
+              className="flex h-9 w-9 items-center justify-center rounded-full text-slate-400 transition-colors hover:bg-white/10 hover:text-white"
               onClick={requestClose}
               aria-label="Close modal"
             >
@@ -644,37 +655,24 @@ export default function CreateCampaignModal({
               <div className="grid grid-cols-12 gap-x-4 gap-y-4">
                 <div className="col-span-12 md:col-span-4">
                   <Field label="Date">
-                    <>
-                      <div className="field-with-suffix flex w-full items-stretch">
-                        <input
-                          ref={(element) => {
-                            dateInputRef(element);
-                            firstRef.current = element;
-                          }}
-                          type="date"
-                          {...dateField}
-                          aria-invalid={showErr('date') || undefined}
-                          aria-describedby={showErr('date') ? errId('date') : undefined}
-                          className={`input input-date h-10 ${showErr('date') ? 'input-error' : ''}`}
-                          onMouseDown={(event) => {
-                            const target = event.currentTarget as PickerInput;
-                            if (typeof target.showPicker === 'function') {
-                              event.preventDefault();
-                              openDatePicker(target);
-                            }
-                          }}
-                        />
-                        <button
-                          type="button"
-                          className="field-suffix-button shrink-0 h-10 w-[2.75rem]"
-                          onClick={() => openDatePicker(firstRef.current)}
-                          aria-label="Open date picker"
-                        >
-                          <CalendarIcon />
-                        </button>
-                      </div>
-                      <Err id={errId('date')} e={showErr('date') ? errors.date : undefined} />
-                    </>
+                    <DatePicker
+                      value={dateValue}
+                      onChange={(next) =>
+                        setValue('date', next, {
+                          shouldValidate: true,
+                          shouldDirty: true,
+                          shouldTouch: true,
+                        })
+                      }
+                      ariaLabel="Date"
+                      invalid={showErr('date')}
+                      ariaDescribedby={showErr('date') ? errId('date') : undefined}
+                      buttonRef={(node) => {
+                        firstRef.current = node;
+                      }}
+                    />
+                    <input type="hidden" {...register('date')} />
+                    <Err id={errId('date')} e={showErr('date') ? errors.date : undefined} />
                   </Field>
                 </div>
                 <div className="col-span-12 md:col-span-8">
@@ -791,7 +789,7 @@ export default function CreateCampaignModal({
                         {...register('type')}
                         aria-invalid={showErr('type') || undefined}
                         aria-describedby={showErr('type') ? errId('type') : undefined}
-                        className={`input h-10 w-full ${showErr('type') ? 'input-error' : ''}`}
+                        className={`input w-full ${showErr('type') ? 'input-error' : ''}`}
                       >
                         {TYPES.filter((t: string) =>
                           (DEAL_TYPES as readonly string[]).includes(t)
@@ -822,7 +820,7 @@ export default function CreateCampaignModal({
                         {...register('price')}
                         aria-invalid={showErr('price') || undefined}
                         aria-describedby={showErr('price') ? errId('price') : undefined}
-                        className={`input h-10 w-full ${showErr('price') ? 'input-error' : ''}`}
+                        className={`input w-full ${showErr('price') ? 'input-error' : ''}`}
                       />
                       {showErr('price') && (
                         <Tooltip
@@ -845,7 +843,7 @@ export default function CreateCampaignModal({
                         {...register('qty')}
                         aria-invalid={showErr('qty') || undefined}
                         aria-describedby={showErr('qty') ? errId('qty') : undefined}
-                        className={`input h-10 w-full ${showErr('qty') ? 'input-error' : ''}`}
+                        className={`input w-full ${showErr('qty') ? 'input-error' : ''}`}
                       />
                       {showErr('qty') && (
                         <Tooltip
@@ -867,7 +865,7 @@ export default function CreateCampaignModal({
                         {...register('vSent')}
                         aria-invalid={showErr('vSent') || undefined}
                         aria-describedby={showErr('vSent') ? errId('vSent') : undefined}
-                        className={`input h-10 w-full ${showErr('vSent') ? 'input-error' : ''}`}
+                        className={`input w-full ${showErr('vSent') ? 'input-error' : ''}`}
                       />
                       {showErr('vSent') && (
                         <Tooltip
@@ -899,12 +897,19 @@ export default function CreateCampaignModal({
                     helper="(Turnover - Routing Costs)"
                     tone="emerald"
                     icon={<KPIIcon type="margin" />}
+                    badge={
+                      watchMarginPct != null
+                        ? `${(watchMarginPct * 100).toFixed(1)}%`
+                        : null
+                    }
+                    badgeClassName={marginBadgeClass}
                   />
                   <KPICard
                     label="eCPM"
-                    value={fmtEUR.format(watchEcpm || 0)}
+                    value={fmtEUR.format(ecpmValue)}
                     tone="violet"
                     icon={<KPIIcon type="ecpm" />}
+                    statusIcon={ecpmStatusIcon}
                   />
                 </div>
               </div>
@@ -925,7 +930,9 @@ export default function CreateCampaignModal({
                           ariaLabel="Database"
                           className="w-full"
                           placeholder="Select database"
+                          direction="up"
                           options={DATABASES.map((d) => ({ id: d.id, value: d.name }))}
+                          renderOption={renderDatabaseOption}
                           value={database}
                           onChange={(v) =>
                             setValue('database', v, { shouldValidate: true, shouldDirty: true })
@@ -958,7 +965,7 @@ export default function CreateCampaignModal({
         </div>
 
         {/* Footer */}
-        <div className="sticky bottom-0 z-10 modal-footer bg-slate-50 backdrop-blur-md border-t border-slate-200 px-5 py-3 shadow-[0_-4px_6px_-1px_rgba(0,0,0,0.05)]">
+        <div className="sticky bottom-0 z-10 modal-footer modal-chrome border-t px-5 py-3">
           <div className="flex items-center justify-end gap-2">
             <button
               type="button"
@@ -1024,6 +1031,137 @@ export default function CreateCampaignModal({
 }
 
 // ======================= UI helpers =======================
+function DatePicker({
+  value,
+  onChange,
+  placeholder = 'Select date',
+  ariaLabel,
+  ariaDescribedby,
+  invalid = false,
+  buttonRef,
+}: {
+  value?: string;
+  onChange: (value: string) => void;
+  placeholder?: string;
+  ariaLabel?: string;
+  ariaDescribedby?: string;
+  invalid?: boolean;
+  buttonRef?: (node: HTMLButtonElement | null) => void;
+}) {
+  const [open, setOpen] = useState(false);
+  const wrapRef = useRef<HTMLDivElement | null>(null);
+  const selectedDate = value && isIsoDate(value) ? parseISO(value) : undefined;
+  const display = formatPickerDate(value) ?? placeholder;
+  const hasValue = Boolean(selectedDate);
+  const toIso = (date: Date) => format(date, 'yyyy-MM-dd');
+
+  useEffect(() => {
+    if (!open) return;
+    const handler = (event: MouseEvent) => {
+      if (!wrapRef.current) return;
+      if (wrapRef.current.contains(event.target as Node)) return;
+      setOpen(false);
+    };
+    document.addEventListener('mousedown', handler);
+    return () => document.removeEventListener('mousedown', handler);
+  }, [open]);
+
+  return (
+    <div className="relative" ref={wrapRef}>
+      <div className="relative">
+        <button
+          ref={buttonRef}
+          type="button"
+          className={`input w-full min-w-0 text-left text-sm ${
+            hasValue ? 'text-[color:var(--color-text)]' : 'text-[color:var(--color-text)]/50'
+          } ${invalid ? 'input-error' : ''}`}
+          onClick={() => setOpen((prev) => !prev)}
+          aria-label={ariaLabel}
+          aria-describedby={ariaDescribedby}
+          aria-invalid={invalid || undefined}
+          aria-expanded={open}
+        >
+          {display}
+        </button>
+        {hasValue ? (
+          <button
+            type="button"
+            className="absolute right-2 top-1/2 -translate-y-1/2 text-xs text-[color:var(--color-text)]/50 hover:text-[color:var(--color-text)]"
+            onClick={(event) => {
+              event.stopPropagation();
+              onChange('');
+            }}
+            aria-label={`Clear ${ariaLabel ?? 'date'}`}
+            title="Clear"
+          >
+            x
+          </button>
+        ) : null}
+      </div>
+      {open ? (
+        <div className="absolute left-0 top-[calc(100%+6px)] z-50 w-[280px] rounded-xl border border-[color:var(--color-border)] bg-[color:var(--color-surface)] p-3 shadow-xl ring-1 ring-black/5">
+          <div className="rounded-lg border border-[color:var(--color-border)] bg-white/60 p-2">
+            <DayPicker
+              mode="single"
+              selected={selectedDate}
+              defaultMonth={selectedDate || new Date()}
+              onSelect={(date) => {
+                onChange(date ? toIso(date) : '');
+                setOpen(false);
+              }}
+              showOutsideDays
+              classNames={{
+                root: 'relative text-sm',
+                months: 'flex pt-6',
+                month: 'min-w-[224px] space-y-2',
+                month_caption: 'flex items-center justify-center gap-2',
+                caption_label: 'text-sm font-semibold',
+                nav: 'absolute left-2 right-2 top-2 flex items-center justify-between',
+                button_previous:
+                  'h-7 w-7 rounded-md border border-[color:var(--color-border)] bg-white hover:bg-[color:var(--color-surface-2)]',
+                button_next:
+                  'h-7 w-7 rounded-md border border-[color:var(--color-border)] bg-white hover:bg-[color:var(--color-surface-2)]',
+                month_grid: 'w-full border-collapse',
+                weekdays: 'flex',
+                weekday:
+                  'w-8 text-center text-[10px] font-semibold uppercase text-[color:var(--color-text)]/50',
+                weeks: 'flex flex-col gap-1',
+                week: 'flex w-full',
+                day: 'h-8 w-8 p-0 text-center',
+                day_button:
+                  'h-8 w-8 rounded-md text-xs hover:bg-[color:var(--color-surface-2)] focus:outline-none focus-visible:ring-2 focus-visible:ring-[color:var(--color-primary)]/40',
+                selected:
+                  'bg-[color:var(--color-primary)] text-white hover:bg-[color:var(--color-primary)]',
+                today: 'font-semibold text-[color:var(--color-text)]',
+                outside: 'text-[color:var(--color-text)]/30',
+              }}
+            />
+          </div>
+          <div className="mt-3 flex items-center justify-between">
+            <button
+              type="button"
+              className="btn-ghost h-8 px-3 text-xs border border-[color:var(--color-border)] bg-[color:var(--color-surface-2)]/70 text-[color:var(--color-text)]/80 hover:text-[color:var(--color-text)]"
+              onClick={() => {
+                onChange('');
+                setOpen(false);
+              }}
+            >
+              Clear
+            </button>
+            <button
+              type="button"
+              className="btn-primary h-8 px-3 text-xs"
+              onClick={() => setOpen(false)}
+            >
+              Done
+            </button>
+          </div>
+        </div>
+      ) : null}
+    </div>
+  );
+}
+
 function Field({
   label,
   children,
@@ -1113,26 +1251,14 @@ function Section({
   );
 }
 
-function CalendarIcon() {
-  return (
-    <svg
-      width="16"
-      height="16"
-      viewBox="0 0 24 24"
-      fill="none"
-      stroke="currentColor"
-      strokeWidth="1.75"
-      strokeLinecap="round"
-      strokeLinejoin="round"
-      aria-hidden="true"
-    >
-      <rect x="3" y="4" width="18" height="17" rx="3" ry="3" />
-      <path d="M16 2v4" />
-      <path d="M8 2v4" />
-      <path d="M3 10h18" />
-    </svg>
-  );
-}
+const isIsoDate = (value: string) => /^\d{4}-\d{2}-\d{2}$/.test(value);
+
+const formatPickerDate = (value?: string | null) => {
+  if (!value || !isIsoDate(value)) return null;
+  const parsed = parseISO(value);
+  if (Number.isNaN(parsed.getTime())) return null;
+  return format(parsed, 'dd/MM/yyyy');
+};
 
 type KPITone = 'indigo' | 'emerald' | 'violet';
 
@@ -1148,12 +1274,18 @@ function KPICard({
   helper,
   tone,
   icon,
+  statusIcon,
+  badge,
+  badgeClassName,
 }: {
   label: string;
   value: string;
   helper?: string;
   tone: KPITone;
   icon: React.ReactNode;
+  statusIcon?: string;
+  badge?: string | null;
+  badgeClassName?: string;
 }) {
   return (
     <div className="flex w-full items-start gap-3 rounded-2xl border border-slate-200 bg-white px-3 py-2.5 shadow-sm">
@@ -1163,18 +1295,43 @@ function KPICard({
       >
         {icon}
       </span>
-      <div className="min-w-0">
+      <div className="min-w-0 flex-1">
         <div className="text-[11px] font-semibold uppercase tracking-wider text-slate-500">
           {label}
         </div>
-        <div
-          className="mt-1 text-2xl font-bold text-slate-900"
-          style={{ fontVariantNumeric: 'tabular-nums' }}
-        >
-          {value}
+        <div className="mt-1 flex items-center gap-2">
+          <div
+            className="text-2xl font-bold text-slate-900"
+            style={{ fontVariantNumeric: 'tabular-nums' }}
+          >
+            {value}
+          </div>
+          {badge ? (
+            <span
+              className={`rounded-full px-2 py-0.5 text-xs font-bold ${
+                badgeClassName
+                  ? badgeClassName
+                  : tone === 'emerald'
+                  ? 'bg-emerald-100 text-emerald-700'
+                  : tone === 'indigo'
+                  ? 'bg-indigo-100 text-indigo-700'
+                  : 'bg-violet-100 text-violet-700'
+              }`}
+            >
+              {badge}
+            </span>
+          ) : null}
         </div>
         {helper ? <div className="text-xs text-gray-500">{helper}</div> : null}
       </div>
+      {statusIcon ? (
+        <img
+          src={statusIcon}
+          alt=""
+          aria-hidden="true"
+          className="h-12 w-12 shrink-0 self-center object-contain"
+        />
+      ) : null}
     </div>
   );
 }
