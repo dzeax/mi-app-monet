@@ -8,7 +8,7 @@ export default function Combobox({
   options,
   value,
   onChange,
-  placeholder = 'Start typing to search…',
+  placeholder = 'Start typing to search...',
   ariaLabel,
   id,
   invalid = false,

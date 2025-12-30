@@ -1,10 +1,7 @@
 ﻿'use client';
 
-import { createPortal } from 'react-dom';
 import { Children, isValidElement, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useForm } from 'react-hook-form';
-import { DayPicker } from 'react-day-picker';
-import { format, parseISO } from 'date-fns';
 import type { Resolver } from 'react-hook-form';
 import { z } from 'zod';
 import { zodResolver } from '@hookform/resolvers/zod';
@@ -12,14 +9,16 @@ import { useCampaignData } from '@/context/CampaignDataContext';
 import { CampaignRow } from '@/types/campaign';
 import Combobox from '@/components/ui/Combobox';
 import Tooltip from '@/components/ui/Tooltip';
+import ModalShell from '@/components/ui/ModalShell';
 import { useCatalogOverrides } from '@/context/CatalogOverridesContext';
 import QuickAddCampaignModal from '@/components/create-campaign/QuickAddCampaignModal';
 import QuickAddPartnerModal from '@/components/create-campaign/QuickAddPartnerModal';
 import QuickAddDatabaseModal from '@/components/create-campaign/QuickAddDatabaseModal';
 import FieldWithAddon from '@/components/ui/FieldWithAddon';
+import DatePicker from '@/components/ui/DatePicker';
 import { flagInfoForDatabase } from '@/utils/flags';
 import type { CampaignRef, PartnerRef, DatabaseRef, DBType, InvoiceOffice } from '@/data/reference';
-import { useAuth } from '@/context/AuthContext'; // ðŸ†• roles para quick-add
+import { useAuth } from '@/context/AuthContext'; // roles para quick-add
 
 // ======================= Utils =======================
 
@@ -150,11 +149,11 @@ export default function CreateCampaignModal({
 }) {
   const { addCampaign, updateCampaign } = useCampaignData();
 
-  // ðŸ†• flag de permisos para quick-add
+  // flag de permisos para quick-add
   const { isAdmin, isEditor } = useAuth();
   const canQuickAdd = isAdmin || isEditor;
 
-  // === CatÃƒÂ¡logos dinÃƒÂ¡micos ===
+  // === Catalogos dinamicos ===
   const catalogs = useCatalogOverrides();
   const CAMPAIGNS = catalogs?.CAMPAIGNS ?? EMPTY_CAMPAIGNS;
   const PARTNERS = catalogs?.PARTNERS ?? EMPTY_PARTNERS;
@@ -168,7 +167,7 @@ export default function CreateCampaignModal({
     [CAMPAIGNS, normalizeKey]
   );
 
-  // Resolver de oficina de facturaciÃƒÂ³n tipado y seguro
+  // Resolver de oficina de facturacion tipado y seguro
   const resolveOffice = useCallback(
     (geo?: string, partner?: string): InvoiceOffice => {
       const resolver = catalogs?.resolveInvoiceOfficeMerged;
@@ -178,28 +177,12 @@ export default function CreateCampaignModal({
     [catalogs]
   );
 
-  // == Scroll lock mientras el modal estÃƒÂ¡ abierto ==
-  useEffect(() => {
-    const html = document.documentElement;
-    const prevOverflow = html.style.overflow;
-    const prevPadRight = html.style.paddingRight;
-
-    const scrollbarW = window.innerWidth - html.clientWidth;
-    html.style.overflow = 'hidden';
-    if (scrollbarW > 0) html.style.paddingRight = `${scrollbarW}px`;
-
-    return () => {
-      html.style.overflow = prevOverflow;
-      html.style.paddingRight = prevPadRight;
-    };
-  }, []);
-
   const [openAddCampaign, setOpenAddCampaign] = useState(false);
   const [openAddPartner, setOpenAddPartner] = useState(false);
   const [openAddDatabase, setOpenAddDatabase] = useState(false);
   const highContrast = false;
 
-  // ValidaciÃƒÂ³n con campaÃƒÂ±as dinÃƒÂ¡micas
+  // Validacion con campanas dinamicas
   const allowedCampaigns = useMemo(() => {
     return new Set(CAMPAIGNS.map((campaign) => normalizeKey(campaign.name)));
   }, [CAMPAIGNS, normalizeKey]);
@@ -357,7 +340,6 @@ export default function CreateCampaignModal({
 
   const firstRef = useRef<HTMLButtonElement>(null);
   const formRef = useRef<HTMLFormElement>(null);
-  const trapRef = useRef<HTMLDivElement>(null);
   const submitIntentRef = useRef<'save' | 'save_add'>('save');
 
   // Watches
@@ -389,9 +371,9 @@ export default function CreateCampaignModal({
   const ecpmValue = Number.isFinite(watchEcpm) ? watchEcpm : Number(watchEcpm) || 0;
   const ecpmStatusIcon = getEcpmStatusIcon(ecpmValue);
 
-  // === Reglas automÃƒÂ¡ticas con catÃƒÂ¡logos dinÃƒÂ¡micos ===
+  // === Reglas automaticas con catalogos dinamicos ===
 
-  // (1) Campaign -> Advertiser (aÃƒÂ±ade CAMPAIGNS a deps)
+  // (1) Campaign -> Advertiser (add CAMPAIGNS to deps)
   useEffect(() => {
     const c = findCampaignByName(campaign || '');
     setValue('advertiser', c?.advertiser ?? '', { shouldValidate: !!c });
@@ -423,7 +405,7 @@ export default function CreateCampaignModal({
     }
   }, [geo, partner, setValue, getValues, resolveOffice]);
 
-  // CÃƒÂ¡lculos en vivo
+  // Calculos en vivo
   useEffect(() => {
     const _price = parseNum(price);
     const _qty = parseNum(qty);
@@ -442,7 +424,7 @@ export default function CreateCampaignModal({
     setValue('ecpm', Number(ecpm.toFixed(2)));
   }, [price, qty, vSent, setValue]);
 
-  // EnvÃƒÂ­o
+  // Envio
   const persistCampaign = useCallback(
     async (data: FormValues, submitMode: 'save' | 'save_add') => {
       try {
@@ -527,13 +509,9 @@ export default function CreateCampaignModal({
     onClose();
   }, [isDirty, mode, onClose]);
 
-  // ESC + atajos
+  // Atajos
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
-      if (e.key === 'Escape') {
-        requestClose();
-        return;
-      }
       if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 's') {
         e.preventDefault();
         submitIntentRef.current = 'save';
@@ -557,415 +535,16 @@ export default function CreateCampaignModal({
     return () => window.clearTimeout(timer);
   }, []);
 
-  // Focus trap
-  useEffect(() => {
-    const node = trapRef.current;
-    if (!node) return;
-
-    const selector = [
-      'a[href]',
-      'button:not([disabled])',
-      'textarea:not([disabled])',
-      'input:not([disabled])',
-      'select:not([disabled])',
-      '[tabindex]:not([tabindex="-1"])',
-    ].join(',');
-
-    const handle = (e: KeyboardEvent) => {
-      if (e.key !== 'Tab') return;
-      const focusables = Array.from(node.querySelectorAll<HTMLElement>(selector)).filter(
-        (el) => el.offsetParent !== null
-      );
-      if (!focusables.length) return;
-      const first = focusables[0];
-      const last = focusables[focusables.length - 1];
-      const active = document.activeElement as HTMLElement | null;
-
-      if (e.shiftKey) {
-        if (active === first || !node.contains(active)) {
-          last.focus();
-          e.preventDefault();
-        }
-      } else {
-        if (active === last) {
-          first.focus();
-          e.preventDefault();
-        }
-      }
-    };
-
-    node.addEventListener('keydown', handle);
-    return () => node.removeEventListener('keydown', handle);
-  }, []);
-
   const errId = (name: string) => `err-${name}`;
 
   // === UI ===
-  const modal = (
-    <div
-      className="fixed inset-0 z-[200] flex items-center justify-center p-4"
-      role="dialog"
-      aria-modal="true"
-    >
-      {/* Backdrop (oscuro + blur) */}
-      <div
-        className="absolute inset-0 bg-black/55 backdrop-blur-sm"
-        data-backdrop="true"
-        onMouseDown={requestClose}
-        aria-hidden="true"
-      />
-
-      {/* Card */}
-      <div
-        ref={trapRef}
-        className="relative card w-full max-w-4xl max-h-[90vh] overflow-hidden border border-[--color-border] shadow-xl"
-        style={{ background: 'var(--color-surface)' }}
-      >
-        {/* Header sticky */}
-        <div className="sticky top-0 z-10 modal-header modal-chrome border-b px-5 py-3">
-          <div className="flex items-center justify-between gap-3">
-            <h3 className="text-lg font-bold">
-              {mode === 'edit' ? 'Edit campaign' : 'Create campaign'}
-            </h3>
-            <button
-              className="flex h-9 w-9 items-center justify-center rounded-full text-slate-400 transition-colors hover:bg-white/10 hover:text-white"
-              onClick={requestClose}
-              aria-label="Close modal"
-            >
-              <span aria-hidden className="text-xl leading-none">&times;</span>
-            </button>
-          </div>
-        </div>
-
-        {/* Body */}
-        <div className="modal-body overflow-y-auto bg-slate-50 px-5 pt-6 pb-5 relative">
-          <form
-            ref={formRef}
-            id="create-edit-campaign-form"
-            data-variant="clean-tech"
-            onSubmit={handleSubmit(
-              (formData) => persistCampaign(formData, submitIntentRef.current),
-              onInvalid
-            )}
-            className="flex flex-col"
-          >
-            <div className="mx-auto flex w-full max-w-4xl flex-col">
-              {/* A) Basics */}
-            <Section title="Basics" highContrast={highContrast}>
-              <div className="grid grid-cols-12 gap-x-4 gap-y-4">
-                <div className="col-span-12 md:col-span-4">
-                  <Field label="Date">
-                    <DatePicker
-                      value={dateValue}
-                      onChange={(next) =>
-                        setValue('date', next, {
-                          shouldValidate: true,
-                          shouldDirty: true,
-                          shouldTouch: true,
-                        })
-                      }
-                      ariaLabel="Date"
-                      invalid={showErr('date')}
-                      ariaDescribedby={showErr('date') ? errId('date') : undefined}
-                      buttonRef={(node) => {
-                        firstRef.current = node;
-                      }}
-                    />
-                    <input type="hidden" {...register('date')} />
-                    <Err id={errId('date')} e={showErr('date') ? errors.date : undefined} />
-                  </Field>
-                </div>
-                <div className="col-span-12 md:col-span-8">
-                  <Field label="Campaign">
-                    <FieldWithAddon
-                      onAdd={canQuickAdd ? () => setOpenAddCampaign(true) : undefined} // ðŸ†•
-                      addAriaLabel="Add campaign"
-                      className="w-full"
-                    >
-                      <div className="w-full min-w-0">
-                        <Combobox
-                          id="campaign"
-                          ariaLabel="Campaign"
-                          className="w-full"
-                          options={CAMPAIGNS.map((c) => ({ id: c.id, value: c.name }))}
-                          value={watch('campaign')}
-                          onChange={(v) =>
-                            setValue('campaign', v, { shouldValidate: true, shouldDirty: true })
-                          }
-                          invalid={showErr('campaign')}
-                          ariaDescribedby={showErr('campaign') ? errId('campaign') : undefined}
-                        />
-                      </div>
-                    </FieldWithAddon>
-
-                    {advertiser ? (
-                      <div className="mt-1 flex items-center gap-2 text-xs font-medium text-gray-500">
-                        <span
-                          aria-hidden
-                          className="h-1.5 w-1.5 rounded-full bg-gray-400"
-                        />
-                        <span>Advertiser: {advertiser}</span>
-                      </div>
-                    ) : null}
-                    <input type="hidden" {...register('advertiser')} />
-                    <Err id={errId('campaign')} e={campaignError} />
-                  </Field>
-                </div>
-
-
-
-                <div className="col-span-12 md:col-span-6">
-                  <Field label="Partner">
-                    <FieldWithAddon
-                      onAdd={canQuickAdd ? () => setOpenAddPartner(true) : undefined} // 🆕
-                      addAriaLabel="Add partner"
-                      className="w-full"
-                    >
-                      <div className="w-full min-w-0">
-                        <Combobox
-                          ariaLabel="Partner"
-                          className="w-full"
-                          placeholder="Select partner"
-                          options={PARTNERS.map((p) => ({
-                            id: p.id,
-                            value: p.name,
-                            label: p.isInternal ? `${p.name} (INT)` : p.name,
-                          }))}
-                          value={partner}
-                          onChange={(v) =>
-                            setValue('partner', v, { shouldValidate: true, shouldDirty: true })
-                          }
-                          invalid={showErr('partner')}
-                          ariaDescribedby={showErr('partner') ? errId('partner') : undefined}
-                        />
-                      </div>
-                    </FieldWithAddon>
-                    {invoiceOffice && (partner || geo) ? (
-                      <div className="mt-1 flex items-center gap-2 text-xs text-gray-500">
-                        <span>Invoice office</span>
-                        <span className="rounded bg-blue-50 px-2 py-0.5 text-xs text-blue-700">
-                          {invoiceOffice}
-                        </span>
-                      </div>
-                    ) : null}
-                    <input type="hidden" {...register('invoiceOffice')} />
-                    <Err id={errId('partner')} e={partnerError} />
-                  </Field>
-                </div>
-
-
-
-                <div className="col-span-12 md:col-span-6">
-                  <Field label="Theme">
-                    <Combobox
-                      ariaLabel="Theme"
-                      className="w-full"
-                      placeholder="Select theme"
-                      options={THEMES.map((t: string) => ({ id: t, value: t }))}
-                      value={themeValue}
-                      onChange={(v) =>
-                        setValue('theme', v, { shouldValidate: true, shouldDirty: true })
-                      }
-                      invalid={showErr('theme')}
-                      ariaDescribedby={showErr('theme') ? errId('theme') : undefined}
-                    />
-                    <Err id={errId('theme')} e={showErr('theme') ? errors.theme : undefined} />
-                  </Field>
-                </div>
-              </div>
-            </Section>
-
-            {/* B) Commercial */}
-            <Section
-              title="Commercial"
-              highContrast={highContrast}
-              className="commercial-section border-l-4 border-l-indigo-500 bg-slate-50"
-            >
-              <div className="grid w-full grid-cols-4 gap-4 mb-6">
-                <div className="min-w-0 col-span-1">
-                  <Field label="Type">
-                    <div className="relative">
-                      <select
-                        {...register('type')}
-                        aria-invalid={showErr('type') || undefined}
-                        aria-describedby={showErr('type') ? errId('type') : undefined}
-                        className={`input w-full ${showErr('type') ? 'input-error' : ''}`}
-                      >
-                        {TYPES.filter((t: string) =>
-                          (DEAL_TYPES as readonly string[]).includes(t)
-                        ).map((t: string) => (
-                          <option key={t} value={t}>
-                            {t}
-                          </option>
-                        ))}
-                      </select>
-                      {showErr('type') && (
-                        <Tooltip
-                          content={errors.type?.message}
-                          className="absolute right-2 inset-y-0 flex items-center"
-                        >
-                          <span aria-hidden className="text-[--color-accent] text-sm">âš </span>
-                        </Tooltip>
-                      )}
-                    </div>
-                    <Err id={errId('type')} e={showErr('type') ? errors.type : undefined} />
-                  </Field>
-                </div>
-                <div className="min-w-0 col-span-1">
-                  <Field label="Price (EUR)">
-                    <div className="relative">
-                      <input
-                        type="number"
-                        step="0.01"
-                        {...register('price')}
-                        aria-invalid={showErr('price') || undefined}
-                        aria-describedby={showErr('price') ? errId('price') : undefined}
-                        className={`input w-full ${showErr('price') ? 'input-error' : ''}`}
-                      />
-                      {showErr('price') && (
-                        <Tooltip
-                          content={errors.price?.message}
-                          className="absolute right-2 inset-y-0 flex items-center"
-                        >
-                          <span aria-hidden className="text-[--color-accent] text-sm">âš </span>
-                        </Tooltip>
-                      )}
-                    </div>
-                    <Err id={errId('price')} e={showErr('price') ? errors.price : undefined} />
-                  </Field>
-                </div>
-                <div className="min-w-0 col-span-1">
-                  <Field label="QTY">
-                    <div className="relative">
-                      <input
-                        type="number"
-                        step="1"
-                        {...register('qty')}
-                        aria-invalid={showErr('qty') || undefined}
-                        aria-describedby={showErr('qty') ? errId('qty') : undefined}
-                        className={`input w-full ${showErr('qty') ? 'input-error' : ''}`}
-                      />
-                      {showErr('qty') && (
-                        <Tooltip
-                          content={errors.qty?.message}
-                          className="absolute right-2 inset-y-0 flex items-center"
-                        >
-                          <span aria-hidden className="text-[--color-accent] text-sm">âš </span>
-                        </Tooltip>
-                      )}
-                    </div>
-                    <Err id={errId('qty')} e={showErr('qty') ? errors.qty : undefined} />
-                  </Field>
-                </div>
-                <div className="min-w-0 col-span-1">
-                  <Field label="V Sent">
-                    <div className="relative">
-                      <input
-                        type="number"
-                        {...register('vSent')}
-                        aria-invalid={showErr('vSent') || undefined}
-                        aria-describedby={showErr('vSent') ? errId('vSent') : undefined}
-                        className={`input w-full ${showErr('vSent') ? 'input-error' : ''}`}
-                      />
-                      {showErr('vSent') && (
-                        <Tooltip
-                          content={errors.vSent?.message}
-                          className="absolute right-2 inset-y-0 flex items-center"
-                        >
-                          <span aria-hidden className="text-[--color-accent] text-sm">âš </span>
-                        </Tooltip>
-                      )}
-                    </div>
-                    <Err id={errId('vSent')} e={showErr('vSent') ? errors.vSent : undefined} />
-                  </Field>
-                </div>
-              </div>
-              <div>
-                <div className="text-xs uppercase tracking-[0.18em] text-gray-500">
-                  Performance Summary
-                </div>
-                <div className="mt-3 grid gap-3 sm:grid-cols-3">
-                  <KPICard
-                    label="Turnover"
-                    value={fmtEUR.format(watchTurnover || 0)}
-                    tone="indigo"
-                    icon={<KPIIcon type="turnover" />}
-                  />
-                  <KPICard
-                    label="Margin"
-                    value={fmtEUR.format(watchMargin || 0)}
-                    helper="(Turnover - Routing Costs)"
-                    tone="emerald"
-                    icon={<KPIIcon type="margin" />}
-                    badge={
-                      watchMarginPct != null
-                        ? `${(watchMarginPct * 100).toFixed(1)}%`
-                        : null
-                    }
-                    badgeClassName={marginBadgeClass}
-                  />
-                  <KPICard
-                    label="eCPM"
-                    value={fmtEUR.format(ecpmValue)}
-                    tone="violet"
-                    icon={<KPIIcon type="ecpm" />}
-                    statusIcon={ecpmStatusIcon}
-                  />
-                </div>
-              </div>
-            </Section>
-
-            {/* C) Data source */}
-            <Section title="Data source" highContrast={highContrast}>
-              <div className="flex flex-wrap gap-x-5 gap-y-4">
-                <div className="w-full xl:flex-[1.25] min-w-[200px]">
-                  <Field label="Database">
-                    <FieldWithAddon
-                      onAdd={canQuickAdd ? () => setOpenAddDatabase(true) : undefined} // ðŸ†•
-                      addAriaLabel="Add database"
-                      className="w-full"
-                    >
-                      <div className="w-full min-w-0">
-                        <Combobox
-                          ariaLabel="Database"
-                          className="w-full"
-                          placeholder="Select database"
-                          direction="up"
-                          options={DATABASES.map((d) => ({ id: d.id, value: d.name }))}
-                          renderOption={renderDatabaseOption}
-                          value={database}
-                          onChange={(v) =>
-                            setValue('database', v, { shouldValidate: true, shouldDirty: true })
-                          }
-                          invalid={showErr('database')}
-                          ariaDescribedby={showErr('database') ? errId('database') : undefined}
-                        />
-                      </div>
-                    </FieldWithAddon>
-                    {database ? (
-                      <div className="mt-1 text-xs text-gray-500">
-                        {geo || 'N/A'}
-                        {databaseType ? ` / ${databaseType}` : ''}
-                      </div>
-                    ) : null}
-                    <input type="hidden" {...register('geo')} />
-                    <input type="hidden" {...register('databaseType')} />
-                    <Err id={errId('database')} e={databaseError} />
-                  </Field>
-                </div>
-              </div>
-            </Section>
-            <input type="hidden" {...register('routingCosts')} />
-            <input type="hidden" {...register('turnover')} />
-            <input type="hidden" {...register('margin')} />
-            <input type="hidden" {...register('ecpm')} />
-            </div>
-          </form>
-
-        </div>
-
-        {/* Footer */}
-        <div className="sticky bottom-0 z-10 modal-footer modal-chrome border-t px-5 py-3">
+  return (
+    <>
+      <ModalShell
+        title={mode === 'edit' ? 'Edit campaign' : 'Create campaign'}
+        onClose={requestClose}
+        widthClass="max-w-4xl"
+        footer={
           <div className="flex items-center justify-end gap-2">
             <button
               type="button"
@@ -980,7 +559,9 @@ export default function CreateCampaignModal({
                 form="create-edit-campaign-form"
                 disabled={isSubmitting}
                 className="btn-ghost border border-slate-200 hover:bg-white"
-                onClick={() => { submitIntentRef.current = 'save_add'; }}
+                onClick={() => {
+                  submitIntentRef.current = 'save_add';
+                }}
               >
                 Save & add another
               </button>
@@ -990,13 +571,338 @@ export default function CreateCampaignModal({
               form="create-edit-campaign-form"
               disabled={isSubmitting}
               className="btn-primary"
-              onClick={() => { submitIntentRef.current = 'save'; }}
+              onClick={() => {
+                submitIntentRef.current = 'save';
+              }}
             >
               {isSubmitting ? 'Saving...' : mode === 'edit' ? 'Save changes' : 'Save'}
             </button>
           </div>
-        </div>
-      </div>
+        }
+      >
+        <form
+                    ref={formRef}
+                    id="create-edit-campaign-form"
+                    data-variant="clean-tech"
+                    onSubmit={handleSubmit(
+                      (formData) => persistCampaign(formData, submitIntentRef.current),
+                      onInvalid
+                    )}
+                    className="flex flex-col"
+                  >
+                    <div className="mx-auto flex w-full max-w-4xl flex-col">
+                      {/* A) Basics */}
+                    <Section title="Basics" highContrast={highContrast}>
+                      <div className="grid grid-cols-12 gap-x-4 gap-y-4">
+                        <div className="col-span-12 md:col-span-4">
+                          <Field label="Date">
+                            <DatePicker
+                              value={dateValue}
+                              onChange={(next) =>
+                                setValue('date', next, {
+                                  shouldValidate: true,
+                                  shouldDirty: true,
+                                  shouldTouch: true,
+                                })
+                              }
+                              ariaLabel="Date"
+                              invalid={showErr('date')}
+                              ariaDescribedby={showErr('date') ? errId('date') : undefined}
+                              buttonRef={(node) => {
+                                firstRef.current = node;
+                              }}
+                            />
+                            <input type="hidden" {...register('date')} />
+                            <Err id={errId('date')} e={showErr('date') ? errors.date : undefined} />
+                          </Field>
+                        </div>
+                        <div className="col-span-12 md:col-span-8">
+                          <Field label="Campaign">
+                            <FieldWithAddon
+                              onAdd={canQuickAdd ? () => setOpenAddCampaign(true) : undefined}
+                              addAriaLabel="Add campaign"
+                              className="w-full"
+                            >
+                              <div className="w-full min-w-0">
+                                <Combobox
+                                  id="campaign"
+                                  ariaLabel="Campaign"
+                                  className="w-full"
+                                  options={CAMPAIGNS.map((c) => ({ id: c.id, value: c.name }))}
+                                  value={watch('campaign')}
+                                  onChange={(v) =>
+                                    setValue('campaign', v, { shouldValidate: true, shouldDirty: true })
+                                  }
+                                  invalid={showErr('campaign')}
+                                  ariaDescribedby={showErr('campaign') ? errId('campaign') : undefined}
+                                />
+                              </div>
+                            </FieldWithAddon>
+
+                            {advertiser ? (
+                              <div className="mt-1 flex items-center gap-2 text-xs font-medium text-gray-500">
+                                <span
+                                  aria-hidden
+                                  className="h-1.5 w-1.5 rounded-full bg-gray-400"
+                                />
+                                <span>Advertiser: {advertiser}</span>
+                              </div>
+                            ) : null}
+                            <input type="hidden" {...register('advertiser')} />
+                            <Err id={errId('campaign')} e={campaignError} />
+                          </Field>
+                        </div>
+
+
+
+                        <div className="col-span-12 md:col-span-6">
+                          <Field label="Partner">
+                            <FieldWithAddon
+                              onAdd={canQuickAdd ? () => setOpenAddPartner(true) : undefined}
+                              addAriaLabel="Add partner"
+                              className="w-full"
+                            >
+                              <div className="w-full min-w-0">
+                                <Combobox
+                                  ariaLabel="Partner"
+                                  className="w-full"
+                                  placeholder="Select partner"
+                                  options={PARTNERS.map((p) => ({
+                                    id: p.id,
+                                    value: p.name,
+                                    label: p.isInternal ? `${p.name} (INT)` : p.name,
+                                  }))}
+                                  value={partner}
+                                  onChange={(v) =>
+                                    setValue('partner', v, { shouldValidate: true, shouldDirty: true })
+                                  }
+                                  invalid={showErr('partner')}
+                                  ariaDescribedby={showErr('partner') ? errId('partner') : undefined}
+                                />
+                              </div>
+                            </FieldWithAddon>
+                            {invoiceOffice && (partner || geo) ? (
+                              <div className="mt-1 flex items-center gap-2 text-xs text-gray-500">
+                                <span>Invoice office</span>
+                                <span className="rounded bg-blue-50 px-2 py-0.5 text-xs text-blue-700">
+                                  {invoiceOffice}
+                                </span>
+                              </div>
+                            ) : null}
+                            <input type="hidden" {...register('invoiceOffice')} />
+                            <Err id={errId('partner')} e={partnerError} />
+                          </Field>
+                        </div>
+
+
+
+                        <div className="col-span-12 md:col-span-6">
+                          <Field label="Theme">
+                            <Combobox
+                              ariaLabel="Theme"
+                              className="w-full"
+                              placeholder="Select theme"
+                              options={THEMES.map((t: string) => ({ id: t, value: t }))}
+                              value={themeValue}
+                              onChange={(v) =>
+                                setValue('theme', v, { shouldValidate: true, shouldDirty: true })
+                              }
+                              invalid={showErr('theme')}
+                              ariaDescribedby={showErr('theme') ? errId('theme') : undefined}
+                            />
+                            <Err id={errId('theme')} e={showErr('theme') ? errors.theme : undefined} />
+                          </Field>
+                        </div>
+                      </div>
+                    </Section>
+
+                    {/* B) Commercial */}
+                    <Section
+                      title="Commercial"
+                      highContrast={highContrast}
+                      className="commercial-section border-l-4 border-l-indigo-500 bg-slate-50"
+                    >
+                      <div className="grid w-full grid-cols-4 gap-4 mb-6">
+                        <div className="min-w-0 col-span-1">
+                          <Field label="Type">
+                            <div className="relative">
+                              <select
+                                {...register('type')}
+                                aria-invalid={showErr('type') || undefined}
+                                aria-describedby={showErr('type') ? errId('type') : undefined}
+                                className={`input w-full ${showErr('type') ? 'input-error' : ''}`}
+                              >
+                                {TYPES.filter((t: string) =>
+                                  (DEAL_TYPES as readonly string[]).includes(t)
+                                ).map((t: string) => (
+                                  <option key={t} value={t}>
+                                    {t}
+                                  </option>
+                                ))}
+                              </select>
+                              {showErr('type') && (
+                                <Tooltip
+                                  content={errors.type?.message}
+                                  className="absolute right-2 inset-y-0 flex items-center"
+                                >
+                                  <span aria-hidden className="text-[--color-accent] text-sm">!</span>
+                                </Tooltip>
+                              )}
+                            </div>
+                            <Err id={errId('type')} e={showErr('type') ? errors.type : undefined} />
+                          </Field>
+                        </div>
+                        <div className="min-w-0 col-span-1">
+                          <Field label="Price (EUR)">
+                            <div className="relative">
+                              <input
+                                type="number"
+                                step="0.01"
+                                {...register('price')}
+                                aria-invalid={showErr('price') || undefined}
+                                aria-describedby={showErr('price') ? errId('price') : undefined}
+                                className={`input w-full ${showErr('price') ? 'input-error' : ''}`}
+                              />
+                              {showErr('price') && (
+                                <Tooltip
+                                  content={errors.price?.message}
+                                  className="absolute right-2 inset-y-0 flex items-center"
+                                >
+                                  <span aria-hidden className="text-[--color-accent] text-sm">!</span>
+                                </Tooltip>
+                              )}
+                            </div>
+                            <Err id={errId('price')} e={showErr('price') ? errors.price : undefined} />
+                          </Field>
+                        </div>
+                        <div className="min-w-0 col-span-1">
+                          <Field label="QTY">
+                            <div className="relative">
+                              <input
+                                type="number"
+                                step="1"
+                                {...register('qty')}
+                                aria-invalid={showErr('qty') || undefined}
+                                aria-describedby={showErr('qty') ? errId('qty') : undefined}
+                                className={`input w-full ${showErr('qty') ? 'input-error' : ''}`}
+                              />
+                              {showErr('qty') && (
+                                <Tooltip
+                                  content={errors.qty?.message}
+                                  className="absolute right-2 inset-y-0 flex items-center"
+                                >
+                                  <span aria-hidden className="text-[--color-accent] text-sm">!</span>
+                                </Tooltip>
+                              )}
+                            </div>
+                            <Err id={errId('qty')} e={showErr('qty') ? errors.qty : undefined} />
+                          </Field>
+                        </div>
+                        <div className="min-w-0 col-span-1">
+                          <Field label="V Sent">
+                            <div className="relative">
+                              <input
+                                type="number"
+                                {...register('vSent')}
+                                aria-invalid={showErr('vSent') || undefined}
+                                aria-describedby={showErr('vSent') ? errId('vSent') : undefined}
+                                className={`input w-full ${showErr('vSent') ? 'input-error' : ''}`}
+                              />
+                              {showErr('vSent') && (
+                                <Tooltip
+                                  content={errors.vSent?.message}
+                                  className="absolute right-2 inset-y-0 flex items-center"
+                                >
+                                  <span aria-hidden className="text-[--color-accent] text-sm">!</span>
+                                </Tooltip>
+                              )}
+                            </div>
+                            <Err id={errId('vSent')} e={showErr('vSent') ? errors.vSent : undefined} />
+                          </Field>
+                        </div>
+                      </div>
+                      <div>
+                        <div className="text-xs uppercase tracking-[0.18em] text-gray-500">
+                          Performance Summary
+                        </div>
+                        <div className="mt-3 grid gap-3 sm:grid-cols-3">
+                          <KPICard
+                            label="Turnover"
+                            value={fmtEUR.format(watchTurnover || 0)}
+                            tone="indigo"
+                            icon={<KPIIcon type="turnover" />}
+                          />
+                          <KPICard
+                            label="Margin"
+                            value={fmtEUR.format(watchMargin || 0)}
+                            helper="(Turnover - Routing Costs)"
+                            tone="emerald"
+                            icon={<KPIIcon type="margin" />}
+                            badge={
+                              watchMarginPct != null
+                                ? `${(watchMarginPct * 100).toFixed(1)}%`
+                                : null
+                            }
+                            badgeClassName={marginBadgeClass}
+                          />
+                          <KPICard
+                            label="eCPM"
+                            value={fmtEUR.format(ecpmValue)}
+                            tone="violet"
+                            icon={<KPIIcon type="ecpm" />}
+                            statusIcon={ecpmStatusIcon}
+                          />
+                        </div>
+                      </div>
+                    </Section>
+
+                    {/* C) Data source */}
+                    <Section title="Data source" highContrast={highContrast} className="mb-0">
+                      <div className="flex flex-wrap gap-x-5 gap-y-4">
+                        <div className="w-full xl:flex-[1.25] min-w-[200px]">
+                          <Field label="Database">
+                            <FieldWithAddon
+                              onAdd={canQuickAdd ? () => setOpenAddDatabase(true) : undefined}
+                              addAriaLabel="Add database"
+                              className="w-full"
+                            >
+                              <div className="w-full min-w-0">
+                                <Combobox
+                                  ariaLabel="Database"
+                                  className="w-full"
+                                  placeholder="Select database"
+                                  direction="up"
+                                  options={DATABASES.map((d) => ({ id: d.id, value: d.name }))}
+                                  renderOption={renderDatabaseOption}
+                                  value={database}
+                                  onChange={(v) =>
+                                    setValue('database', v, { shouldValidate: true, shouldDirty: true })
+                                  }
+                                  invalid={showErr('database')}
+                                  ariaDescribedby={showErr('database') ? errId('database') : undefined}
+                                />
+                              </div>
+                            </FieldWithAddon>
+                            {database ? (
+                              <div className="mt-1 text-xs text-gray-500">
+                                {geo || 'N/A'}
+                                {databaseType ? ` / ${databaseType}` : ''}
+                              </div>
+                            ) : null}
+                            <input type="hidden" {...register('geo')} />
+                            <input type="hidden" {...register('databaseType')} />
+                            <Err id={errId('database')} e={databaseError} />
+                          </Field>
+                        </div>
+                      </div>
+                    </Section>
+                    <input type="hidden" {...register('routingCosts')} />
+                    <input type="hidden" {...register('turnover')} />
+                    <input type="hidden" {...register('margin')} />
+                    <input type="hidden" {...register('ecpm')} />
+                    </div>
+                  </form>
+      </ModalShell>
 
       {/* Quick-add modals */}
       {openAddCampaign && (
@@ -1023,144 +929,12 @@ export default function CreateCampaignModal({
           }}
         />
       )}
-    </div>
+    </>
   );
 
-  if (typeof document === 'undefined') return null;
-  return createPortal(modal, document.body);
 }
 
 // ======================= UI helpers =======================
-function DatePicker({
-  value,
-  onChange,
-  placeholder = 'Select date',
-  ariaLabel,
-  ariaDescribedby,
-  invalid = false,
-  buttonRef,
-}: {
-  value?: string;
-  onChange: (value: string) => void;
-  placeholder?: string;
-  ariaLabel?: string;
-  ariaDescribedby?: string;
-  invalid?: boolean;
-  buttonRef?: (node: HTMLButtonElement | null) => void;
-}) {
-  const [open, setOpen] = useState(false);
-  const wrapRef = useRef<HTMLDivElement | null>(null);
-  const selectedDate = value && isIsoDate(value) ? parseISO(value) : undefined;
-  const display = formatPickerDate(value) ?? placeholder;
-  const hasValue = Boolean(selectedDate);
-  const toIso = (date: Date) => format(date, 'yyyy-MM-dd');
-
-  useEffect(() => {
-    if (!open) return;
-    const handler = (event: MouseEvent) => {
-      if (!wrapRef.current) return;
-      if (wrapRef.current.contains(event.target as Node)) return;
-      setOpen(false);
-    };
-    document.addEventListener('mousedown', handler);
-    return () => document.removeEventListener('mousedown', handler);
-  }, [open]);
-
-  return (
-    <div className="relative" ref={wrapRef}>
-      <div className="relative">
-        <button
-          ref={buttonRef}
-          type="button"
-          className={`input w-full min-w-0 text-left text-sm ${
-            hasValue ? 'text-[color:var(--color-text)]' : 'text-[color:var(--color-text)]/50'
-          } ${invalid ? 'input-error' : ''}`}
-          onClick={() => setOpen((prev) => !prev)}
-          aria-label={ariaLabel}
-          aria-describedby={ariaDescribedby}
-          aria-invalid={invalid || undefined}
-          aria-expanded={open}
-        >
-          {display}
-        </button>
-        {hasValue ? (
-          <button
-            type="button"
-            className="absolute right-2 top-1/2 -translate-y-1/2 text-xs text-[color:var(--color-text)]/50 hover:text-[color:var(--color-text)]"
-            onClick={(event) => {
-              event.stopPropagation();
-              onChange('');
-            }}
-            aria-label={`Clear ${ariaLabel ?? 'date'}`}
-            title="Clear"
-          >
-            x
-          </button>
-        ) : null}
-      </div>
-      {open ? (
-        <div className="absolute left-0 top-[calc(100%+6px)] z-50 w-[280px] rounded-xl border border-[color:var(--color-border)] bg-[color:var(--color-surface)] p-3 shadow-xl ring-1 ring-black/5">
-          <div className="rounded-lg border border-[color:var(--color-border)] bg-white/60 p-2">
-            <DayPicker
-              mode="single"
-              selected={selectedDate}
-              defaultMonth={selectedDate || new Date()}
-              onSelect={(date) => {
-                onChange(date ? toIso(date) : '');
-                setOpen(false);
-              }}
-              showOutsideDays
-              classNames={{
-                root: 'relative text-sm',
-                months: 'flex pt-6',
-                month: 'min-w-[224px] space-y-2',
-                month_caption: 'flex items-center justify-center gap-2',
-                caption_label: 'text-sm font-semibold',
-                nav: 'absolute left-2 right-2 top-2 flex items-center justify-between',
-                button_previous:
-                  'h-7 w-7 rounded-md border border-[color:var(--color-border)] bg-white hover:bg-[color:var(--color-surface-2)]',
-                button_next:
-                  'h-7 w-7 rounded-md border border-[color:var(--color-border)] bg-white hover:bg-[color:var(--color-surface-2)]',
-                month_grid: 'w-full border-collapse',
-                weekdays: 'flex',
-                weekday:
-                  'w-8 text-center text-[10px] font-semibold uppercase text-[color:var(--color-text)]/50',
-                weeks: 'flex flex-col gap-1',
-                week: 'flex w-full',
-                day: 'h-8 w-8 p-0 text-center',
-                day_button:
-                  'h-8 w-8 rounded-md text-xs hover:bg-[color:var(--color-surface-2)] focus:outline-none focus-visible:ring-2 focus-visible:ring-[color:var(--color-primary)]/40',
-                selected:
-                  'bg-[color:var(--color-primary)] text-white hover:bg-[color:var(--color-primary)]',
-                today: 'font-semibold text-[color:var(--color-text)]',
-                outside: 'text-[color:var(--color-text)]/30',
-              }}
-            />
-          </div>
-          <div className="mt-3 flex items-center justify-between">
-            <button
-              type="button"
-              className="btn-ghost h-8 px-3 text-xs border border-[color:var(--color-border)] bg-[color:var(--color-surface-2)]/70 text-[color:var(--color-text)]/80 hover:text-[color:var(--color-text)]"
-              onClick={() => {
-                onChange('');
-                setOpen(false);
-              }}
-            >
-              Clear
-            </button>
-            <button
-              type="button"
-              className="btn-primary h-8 px-3 text-xs"
-              onClick={() => setOpen(false)}
-            >
-              Done
-            </button>
-          </div>
-        </div>
-      ) : null}
-    </div>
-  );
-}
 
 function Field({
   label,
@@ -1250,15 +1024,6 @@ function Section({
     </section>
   );
 }
-
-const isIsoDate = (value: string) => /^\d{4}-\d{2}-\d{2}$/.test(value);
-
-const formatPickerDate = (value?: string | null) => {
-  if (!value || !isIsoDate(value)) return null;
-  const parsed = parseISO(value);
-  if (Number.isNaN(parsed.getTime())) return null;
-  return format(parsed, 'dd/MM/yyyy');
-};
 
 type KPITone = 'indigo' | 'emerald' | 'violet';
 
