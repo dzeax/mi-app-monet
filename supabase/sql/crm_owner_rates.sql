@@ -6,6 +6,7 @@ create table if not exists public.crm_owner_rates (
   person_id uuid references public.crm_people(id),
   daily_rate numeric not null check (daily_rate >= 0),
   currency text not null default 'EUR',
+  year int not null default extract(year from timezone('utc', now()))::int,
   valid_from date not null default (timezone('utc', now()))::date,
   created_by uuid references auth.users(id),
   created_at timestamptz not null default timezone('utc', now()),
@@ -23,10 +24,10 @@ create index if not exists crm_owner_rates_client_person_idx
 do $$
 begin
   if not exists (
-    select 1 from pg_constraint where conname = 'crm_owner_rates_client_owner_key'
+    select 1 from pg_constraint where conname = 'crm_owner_rates_client_owner_year_key'
   ) then
     alter table public.crm_owner_rates
-      add constraint crm_owner_rates_client_owner_key unique (client_slug, owner);
+      add constraint crm_owner_rates_client_owner_year_key unique (client_slug, owner, year);
   end if;
 end$$;
 

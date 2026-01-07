@@ -37,4 +37,5 @@ export type CrmOwnerRate = {
   personId?: string | null;
   dailyRate: number;
   currency: string;
+  year?: number;
 };

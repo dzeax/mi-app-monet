@@ -15,6 +15,7 @@ import ManageRatesModal from "@/components/rates/ManageRatesModal";
 import CrmImportModal from "@/components/crm/CrmImportModal";
 import CrmCatalogsModal from "@/components/crm/CrmCatalogsModal";
 import CrmEffortRulesModal from "@/components/crm/CrmEffortRulesModal";
+import CrmPeopleModal from "@/components/crm/CrmPeopleModal";
 
 type Props = {
   collapsed: boolean;
@@ -49,6 +50,7 @@ export default function Sidebar({
   const [openRates, setOpenRates] = useState(false);
   const [openCrmImport, setOpenCrmImport] = useState(false);
   const [openCrmCatalogs, setOpenCrmCatalogs] = useState(false);
+  const [openCrmPeople, setOpenCrmPeople] = useState(false);
   const [openEffortRules, setOpenEffortRules] = useState(false);
 
   // Density (comfy|compact) persisted
@@ -289,10 +291,10 @@ export default function Sidebar({
       key: "client-ops",
       title: activeClient ? activeClient.name : "CRM",
       description: "Client modules",
-      items: [
-        ...crmModuleButtons,
-        isEditor ? (
-          <button
+        items: [
+          ...crmModuleButtons,
+          isEditor ? (
+            <button
             key="crm-import"
             onClick={() => setOpenCrmImport(true)}
             className={btnBase(openCrmImport ? "sidebar-btn--active" : "")}
@@ -302,11 +304,30 @@ export default function Sidebar({
             <Image src="/icons/sidebar/import-csv.svg" alt="" aria-hidden width={24} height={24} className="sidebar-icon" />
             {!collapsed && <span>Import CSV</span>}
           </button>
-        ) : null,
-        isEditor ? (
-          <button
-            key="crm-catalogs"
-            onClick={() => setOpenCrmCatalogs(true)}
+          ) : null,
+          isEditor ? (
+            <button
+              key="crm-people"
+              onClick={() => setOpenCrmPeople(true)}
+              className={btnBase(openCrmPeople ? "sidebar-btn--active" : "")}
+              title="People & aliases"
+              aria-label="People & aliases"
+            >
+              <Image
+                src="/icons/sidebar/manage-catalogs.svg"
+                alt=""
+                aria-hidden
+                width={24}
+                height={24}
+                className="sidebar-icon"
+              />
+              {!collapsed && <span>People & aliases</span>}
+            </button>
+          ) : null,
+          isEditor ? (
+            <button
+              key="crm-catalogs"
+              onClick={() => setOpenCrmCatalogs(true)}
             className={btnBase(openCrmCatalogs ? "sidebar-btn--active" : "")}
             title="Manage catalogs"
             aria-label="Manage catalogs"
@@ -452,6 +473,12 @@ export default function Sidebar({
       )}
       {unit === "crm" && isEditor && openCrmCatalogs && (
         <CrmCatalogsModal onClose={() => setOpenCrmCatalogs(false)} clientSlug={activeClient?.slug || "emg"} />
+      )}
+      {unit === "crm" && isEditor && openCrmPeople && (
+        <CrmPeopleModal
+          clientSlug={activeClient?.slug || "emg"}
+          onClose={() => setOpenCrmPeople(false)}
+        />
       )}
       {unit === "crm" && openRates && activeClient && (
         <ManageRatesModal

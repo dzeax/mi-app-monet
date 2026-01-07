@@ -84,7 +84,8 @@ export async function GET(request: Request) {
     const { data: ratesData, error: ratesError } = await supabase
       .from("crm_owner_rates")
       .select("owner, person_id, daily_rate, currency")
-      .eq("client_slug", client);
+      .eq("client_slug", client)
+      .eq("year", year);
     if (ratesError) {
       return NextResponse.json({ error: ratesError.message }, { status: 500 });
     }
@@ -125,6 +126,8 @@ export async function GET(request: Request) {
         .eq("client_slug", client)
         .gte("effort_date", yearStart)
         .lte("effort_date", yearEnd)
+        .order("effort_date", { ascending: true })
+        .order("id", { ascending: true })
         .range(from, to),
     );
 
@@ -135,6 +138,8 @@ export async function GET(request: Request) {
         .eq("client_slug", client)
         .gte("send_date", yearStart)
         .lte("send_date", yearEnd)
+        .order("send_date", { ascending: true })
+        .order("id", { ascending: true })
         .range(from, to),
     );
 

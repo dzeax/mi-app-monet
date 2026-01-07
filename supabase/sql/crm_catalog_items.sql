@@ -2,7 +2,7 @@
 create table if not exists public.crm_catalog_items (
   id uuid primary key default uuid_generate_v4(),
   client_slug text not null references public.crm_clients(slug) on delete cascade,
-  kind text not null check (kind in ('owner','type')),
+  kind text not null check (kind in ('owner','type','workstream')),
   label text not null,
   is_active boolean not null default true,
   created_by uuid references auth.users(id),

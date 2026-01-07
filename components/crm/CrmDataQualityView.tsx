@@ -20,9 +20,9 @@ import {
   parseISO,
   startOfMonth,
   startOfYear,
-  subDays,
 } from "date-fns";
 import type { CrmOwnerRate, DataQualityTicket } from "@/types/crm";
+import { DEFAULT_WORKSTREAM, WORKSTREAM_DEFAULTS } from "@/lib/crm/workstreams";
 import { useAuth } from "@/context/AuthContext";
 import MiniModal from "@/components/ui/MiniModal";
 import ColumnPicker from "@/components/ui/ColumnPicker";
@@ -52,21 +52,10 @@ const STATUS_OPTIONS = [
   "Validation",
   "Done",
 ];
-const OWNER_DEFAULTS = ["Stephane", "Lucas V."];
+const OWNER_DEFAULTS = ["Stephane Rabarinala", "Lucas Vialatte"];
 const TYPE_DEFAULTS = ["DATA", "LIFECYCLE", "CAMPAIGNS", "GLOBAL", "OPS"];
 const NEEDS_EFFORT_STATUSES = new Set(["Validation", "Done"]);
-const DEFAULT_WORKSTREAM = "Data";
-const WORKSTREAM_DEFAULTS = [
-  DEFAULT_WORKSTREAM,
-  "Strategy & Governance",
-  "Campaigns",
-  "Lifecycle",
-  "Prospect Lifecycle",
-  "NLP",
-  "Driver's Lifecycle (PBA)",
-  "Driver's Lifecycle (FDO)",
-  "Heatmap",
-];
+// Workstreams are configured per client catalog; defaults live in lib/crm/workstreams.
 
 const unique = (values: (string | null)[]) =>
   Array.from(new Set(values)).filter(Boolean) as string[];
@@ -121,6 +110,14 @@ function daysToDue(dueDate: string | null): number | null {
 const isIsoDate = (value: string) => /^\d{4}-\d{2}-\d{2}$/.test(value);
 
 const todaysIsoDate = () => new Date().toISOString().slice(0, 10);
+
+const computePrepHours = (workValue: string) => {
+  if (workValue === "") return "";
+  const workNum = Number(workValue);
+  if (!Number.isFinite(workNum) || workNum < 0) return "";
+  const rounded = Math.round(workNum * 0.35 * 100) / 100;
+  return rounded.toFixed(2);
+};
 
 const defaultEffortDateForAssignedDate = (assignedDate: string) => {
   const year = Number(assignedDate.slice(0, 4));
@@ -323,12 +320,18 @@ function DateRangeField({
     onChangeFrom(range?.from ? toIso(range.from) : "");
     onChangeTo(range?.to ? toIso(range.to) : "");
   };
+  const lastMonthStart = new Date(today.getFullYear(), today.getMonth() - 1, 1);
+  const lastMonthEnd = new Date(today.getFullYear(), today.getMonth(), 0);
   const presets = [
     { label: "Today", from: today, to: today },
-    { label: "Last 7 days", from: subDays(today, 6), to: today },
-    { label: "Last 30 days", from: subDays(today, 29), to: today },
     { label: "This month", from: startOfMonth(today), to: endOfMonth(today) },
-    { label: "YTD", from: startOfYear(today), to: today },
+    { label: "Last month", from: lastMonthStart, to: lastMonthEnd },
+    { label: "This year", from: startOfYear(today), to: today },
+    {
+      label: "Last year",
+      from: new Date(today.getFullYear() - 1, 0, 1),
+      to: new Date(today.getFullYear() - 1, 11, 31),
+    },
   ];
 
   useEffect(() => {
@@ -591,6 +594,12 @@ const normalizeWorkstream = (value?: string | null) => {
 const normalizePersonKey = (value?: string | null) =>
   value?.trim().toLowerCase() ?? "";
 
+const parseYearFromDate = (value?: string | null) => {
+  if (!value || value.length < 4) return null;
+  const year = Number.parseInt(value.slice(0, 4), 10);
+  return Number.isFinite(year) ? year : null;
+};
+
 const stripTypePrefix = (value?: string | null) => {
   if (!value) return "";
   const trimmed = value.trim();
@@ -705,6 +714,7 @@ export default function CrmDataQualityView() {
   const segments = pathname?.split("/").filter(Boolean) ?? [];
   const clientSlug = segments[1] || "emg";
   const { isEditor, isAdmin, loading: authLoading } = useAuth();
+  const currentYear = new Date().getFullYear();
 
   const [filters, setFilters] = useState<Filters>({
     status: [],
@@ -736,8 +746,14 @@ export default function CrmDataQualityView() {
   const [typeItems, setTypeItems] = useState<CatalogItem[]>(
     TYPE_DEFAULTS.map((t) => ({ id: `default-type-${t}`, label: t })),
   );
+  const [workstreamItems, setWorkstreamItems] = useState<string[]>(
+    WORKSTREAM_DEFAULTS,
+  );
   const [openAdvanced, setOpenAdvanced] = useState(false);
   const [searchInput, setSearchInput] = useState("");
+  const [showWorkstreamInput, setShowWorkstreamInput] = useState(false);
+  const [newWorkstream, setNewWorkstream] = useState("");
+  const [workstreamSubmitting, setWorkstreamSubmitting] = useState(false);
   const [editRow, setEditRow] = useState<DataQualityTicket | null>(null);
   const [openMenuId, setOpenMenuId] = useState<string | null>(null);
   const [syncingJira, setSyncingJira] = useState(false);
@@ -749,8 +765,8 @@ export default function CrmDataQualityView() {
   const [compact, setCompact] = useState(() =>
     readBool(COMPACT_VIEW_STORAGE_KEY, true),
   );
-  const [ownerRates, setOwnerRates] = useState<
-    Record<string, { dailyRate: number; currency: string; id?: string }>
+  const [ownerRatesByYear, setOwnerRatesByYear] = useState<
+    Record<number, Record<string, { dailyRate: number; currency: string; id?: string }>>
   >({});
   const [form, setForm] = useState({
     status: STATUS_OPTIONS[0],
@@ -777,6 +793,7 @@ export default function CrmDataQualityView() {
       personId: string | null;
       workHours: string;
       prepHours: string;
+      prepIsManual: boolean;
       workstream: string;
     }[]
   >([
@@ -787,6 +804,7 @@ export default function CrmDataQualityView() {
       personId: null,
       workHours: "",
       prepHours: "",
+      prepIsManual: false,
       workstream: DEFAULT_WORKSTREAM,
     },
   ]);
@@ -824,15 +842,23 @@ export default function CrmDataQualityView() {
     [peopleById],
   );
   const getRateForContribution = useCallback(
-    (contrib: { owner: string; personId?: string | null }) => {
+    (
+      contrib: { owner: string; personId?: string | null; effortDate?: string | null },
+      fallbackDate?: string | null,
+    ) => {
+      const year =
+        parseYearFromDate(contrib.effortDate) ??
+        parseYearFromDate(fallbackDate) ??
+        currentYear;
+      const ratesForYear = ownerRatesByYear[year] ?? {};
       const personKey = resolvePersonKey(contrib.owner, contrib.personId ?? null);
       return (
-        (personKey ? ownerRates[personKey] : undefined) ??
-        (contrib.personId ? ownerRates[contrib.personId] : undefined) ??
-        ownerRates[contrib.owner]
+        (personKey ? ratesForYear[personKey] : undefined) ??
+        (contrib.personId ? ratesForYear[contrib.personId] : undefined) ??
+        ratesForYear[contrib.owner]
       );
     },
-    [ownerRates, resolvePersonKey],
+    [currentYear, ownerRatesByYear, resolvePersonKey],
   );
   useEffect(() => {
     if (aliasToPersonId.size === 0) return;
@@ -1327,6 +1353,9 @@ export default function CrmDataQualityView() {
         const resTypes = await fetch(
           `/api/crm/catalogs?client=${clientSlug}&kind=type`,
         );
+        const resWorkstreams = await fetch(
+          `/api/crm/catalogs?client=${clientSlug}&kind=workstream`,
+        );
         if (resPeople.ok) {
           const body = await resPeople.json().catch(() => null);
           if (active && Array.isArray(body?.people) && body.people.length > 0) {
@@ -1375,6 +1404,12 @@ export default function CrmDataQualityView() {
             );
           }
         }
+        if (resWorkstreams.ok) {
+          const body = await resWorkstreams.json().catch(() => null);
+          if (active && Array.isArray(body?.items) && body.items.length > 0) {
+            setWorkstreamItems(body.items.map((i: any) => String(i.label ?? "")).filter(Boolean));
+          }
+        }
       } catch {
         /* ignore; fall back to defaults */
       }
@@ -1385,42 +1420,63 @@ export default function CrmDataQualityView() {
     };
   }, [clientSlug]);
 
+  const rateYears = useMemo(() => {
+    const set = new Set<number>();
+    rows.forEach((ticket) => {
+      getTicketContributions(ticket).forEach((c) => {
+        const year =
+          parseYearFromDate(c.effortDate) ??
+          parseYearFromDate(ticket.assignedDate);
+        if (year) set.add(year);
+      });
+    });
+    if (set.size === 0) set.add(currentYear);
+    return Array.from(set).sort((a, b) => a - b);
+  }, [rows, currentYear]);
+
+  const rateYearsKey = useMemo(() => rateYears.join(","), [rateYears]);
+
   // Load owner rates (for budget column)
   useEffect(() => {
     let active = true;
     const loadRates = async () => {
       try {
-        const res = await fetch(`/api/crm/rates?client=${clientSlug}`);
+        const res = await fetch(
+          `/api/crm/rates?client=${clientSlug}&years=${rateYearsKey || currentYear}`,
+        );
         if (!res.ok) return;
         const body = (await res.json().catch(() => null)) as {
           rates?: CrmOwnerRate[];
         } | null;
         if (!body || !Array.isArray(body.rates) || !active) return;
         const map: Record<
-          string,
-          { dailyRate: number; currency: string; id?: string }
+          number,
+          Record<string, { dailyRate: number; currency: string; id?: string }>
         > = {};
         body.rates.forEach((r) => {
+          const year = Number(r.year ?? currentYear);
+          if (!Number.isFinite(year)) return;
           const entry = {
             dailyRate: r.dailyRate,
             currency: r.currency || "EUR",
             id: r.id,
           };
+          if (!map[year]) map[year] = {};
           if (r.personId) {
-            map[r.personId] = entry;
+            map[year][r.personId] = entry;
           }
-          map[r.owner] = entry;
+          map[year][r.owner] = entry;
         });
-        setOwnerRates(map);
+        setOwnerRatesByYear(map);
       } catch {
-        // ignore – budget column will show n/a when no rate
+        // ignore - budget column will show n/a when no rate
       }
     };
     void loadRates();
     return () => {
       active = false;
     };
-  }, [clientSlug]);
+  }, [clientSlug, currentYear, rateYearsKey]);
 
   useEffect(() => {
     setPage(0);
@@ -1482,7 +1538,9 @@ export default function CrmDataQualityView() {
       });
       return acc;
     };
-    const workstreamSet = new Set<string>(WORKSTREAM_DEFAULTS);
+    const workstreamSet = new Set<string>(
+      workstreamItems.length > 0 ? workstreamItems : WORKSTREAM_DEFAULTS,
+    );
     rowsForWorkstream.forEach((t) => {
       getTicketContributions(t).forEach((c) => {
         workstreamSet.add(normalizeWorkstream(c.workstream));
@@ -1526,7 +1584,14 @@ export default function CrmDataQualityView() {
       typeCounts: countBy(rowsForType, "type"),
       workstreamCounts: countWorkstreams(rowsForWorkstream),
     };
-  }, [rows, rowMatches, filterContributionsByWorkstream, resolvePersonKey, labelForPersonKey]);
+  }, [
+    rows,
+    rowMatches,
+    filterContributionsByWorkstream,
+    resolvePersonKey,
+    labelForPersonKey,
+    workstreamItems,
+  ]);
 
   const filtered = useMemo(
     () => rows.filter((t) => rowMatches(t)),
@@ -1544,7 +1609,7 @@ export default function CrmDataQualityView() {
       const totalHours = totalWork + totalPrep;
       const totalDays = totalHours / 7;
       const budget = contribs.reduce((acc, c) => {
-        const rate = getRateForContribution(c)?.dailyRate;
+        const rate = getRateForContribution(c, t.assignedDate)?.dailyRate;
         if (rate != null) {
           const work = c.workHours ?? 0;
           const prep = c.prepHours != null ? c.prepHours : work * 0.35;
@@ -1667,7 +1732,7 @@ export default function CrmDataQualityView() {
         const days = hours / 7;
         totalHours += hours;
         totalDays += days;
-        const rate = getRateForContribution(c)?.dailyRate;
+        const rate = getRateForContribution(c, t.assignedDate)?.dailyRate;
         if (rate != null) totalBudget += days * rate;
       });
     });
@@ -1678,9 +1743,42 @@ export default function CrmDataQualityView() {
     setForm((prev) => ({ ...prev, [key]: value }));
   };
 
+  const handleAddWorkstream = async () => {
+    const label = newWorkstream.trim();
+    if (!label || workstreamSubmitting) return;
+    setWorkstreamSubmitting(true);
+    try {
+      const res = await fetch("/api/crm/catalogs", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ client: clientSlug, kind: "workstream", label }),
+      });
+      const body = await res.json().catch(() => null);
+      if (!res.ok) {
+        throw new Error(body?.error || "Failed to add workstream");
+      }
+      const savedLabel = String(body?.item?.label ?? label);
+      setWorkstreamItems((prev) => {
+        const exists = prev.some((item) => item.toLowerCase() === savedLabel.toLowerCase());
+        if (exists) return prev;
+        return [...prev, savedLabel];
+      });
+      setNewWorkstream("");
+      setShowWorkstreamInput(false);
+      showSuccess("Workstream added");
+    } catch (err) {
+      const message = err instanceof Error ? err.message : "Unable to add workstream";
+      showError(message);
+    } finally {
+      setWorkstreamSubmitting(false);
+    }
+  };
+
   const openAddModal = () => {
     setModalStep("details");
     setEditRow(null);
+    setShowWorkstreamInput(false);
+    setNewWorkstream("");
     setForm({
       status: STATUS_OPTIONS[0],
       assignedDate: new Date().toISOString().slice(0, 10),
@@ -1706,6 +1804,7 @@ export default function CrmDataQualityView() {
         personId: null,
         workHours: "",
         prepHours: "",
+        prepIsManual: false,
         workstream: DEFAULT_WORKSTREAM,
       },
     ]);
@@ -1718,6 +1817,8 @@ export default function CrmDataQualityView() {
   ) => {
     setModalStep(startStep);
     setEditRow(row);
+    setShowWorkstreamInput(false);
+    setNewWorkstream("");
     setForm({
       status: row.status,
       assignedDate: row.assignedDate || "",
@@ -1747,7 +1848,8 @@ export default function CrmDataQualityView() {
             personId: c.personId ?? null,
             workHours: String(c.workHours ?? ""),
             prepHours:
-              c.prepHours != null ? String(c.prepHours) : String((c.workHours ?? 0) * 0.35),
+              c.prepHours != null ? String(c.prepHours) : computePrepHours(String(c.workHours ?? "")),
+            prepIsManual: false,
             workstream: normalizeWorkstream(c.workstream),
           }))
         : [
@@ -1758,7 +1860,8 @@ export default function CrmDataQualityView() {
               personId: null,
               workHours: String(row.workHours ?? ""),
               prepHours:
-                row.prepHours != null ? String(row.prepHours) : String((row.workHours ?? 0) * 0.35),
+                row.prepHours != null ? String(row.prepHours) : computePrepHours(String(row.workHours ?? "")),
+              prepIsManual: false,
               workstream: DEFAULT_WORKSTREAM,
             },
           ];
@@ -2652,7 +2755,7 @@ export default function CrmDataQualityView() {
                       const isZeroTotalHours = isZeroValue(totalHours);
                       const isZeroTotalDays = isZeroValue(totalDays);
                       const budget = contribs.reduce((acc, c) => {
-                        const rate = getRateForContribution(c)?.dailyRate;
+                        const rate = getRateForContribution(c, t.assignedDate)?.dailyRate;
                         if (rate != null) {
                           const work = c.workHours ?? 0;
                           const prep = c.prepHours != null ? c.prepHours : work * 0.35;
@@ -2662,7 +2765,7 @@ export default function CrmDataQualityView() {
                       }, 0);
                       const budgetCurrency = (() => {
                         for (const c of contribs) {
-                          const currency = getRateForContribution(c)?.currency;
+                          const currency = getRateForContribution(c, t.assignedDate)?.currency;
                           if (currency) return currency;
                         }
                         return "EUR";
@@ -3395,29 +3498,60 @@ export default function CrmDataQualityView() {
               ) : null}
               {modalStep === "effort" ? (
                 <div className="sm:col-span-2 space-y-2 rounded-xl border border-[color:var(--color-border)] bg-[color:var(--color-surface-2)]/60 px-3 py-3">
-                <div className="flex items-center justify-between">
+                <div className="flex flex-wrap items-center justify-between gap-2">
                   <span className="text-sm font-semibold text-[color:var(--color-text)]">Effort log</span>
-                  <button
-                    type="button"
-                    className="btn-primary h-8 px-3 text-xs"
-                    onClick={() =>
-                      setFormContribs((prev) => [
-                        ...prev,
-                        {
-                          id: `c-${Date.now()}`,
-                          effortDate: defaultEffortDateForAssignedDate(form.assignedDate),
-                          owner: "",
-                          personId: null,
-                          workHours: "",
-                          prepHours: "",
-                          workstream: DEFAULT_WORKSTREAM,
-                        },
-                      ])
-                    }
-                  >
-                    Add entry
-                  </button>
+                  <div className="flex flex-wrap items-center gap-2">
+                    {isEditor || isAdmin ? (
+                      <button
+                        type="button"
+                        className="btn-ghost h-8 px-3 text-xs"
+                        onClick={() => setShowWorkstreamInput((prev) => !prev)}
+                      >
+                        {showWorkstreamInput ? "Cancel" : "Add workstream"}
+                      </button>
+                    ) : null}
+                    <button
+                      type="button"
+                      className="btn-primary h-8 px-3 text-xs"
+                      onClick={() =>
+                        setFormContribs((prev) => [
+                          ...prev,
+                          {
+                            id: `c-${Date.now()}`,
+                            effortDate: defaultEffortDateForAssignedDate(form.assignedDate),
+                            owner: "",
+                            personId: null,
+                            workHours: "",
+                            prepHours: "",
+                            prepIsManual: false,
+                            workstream: DEFAULT_WORKSTREAM,
+                          },
+                        ])
+                      }
+                    >
+                      Add entry
+                    </button>
+                  </div>
                 </div>
+
+                {showWorkstreamInput ? (
+                  <div className="flex flex-wrap items-center gap-2 rounded-lg border border-[color:var(--color-border)] bg-[color:var(--color-surface)] px-3 py-2">
+                    <input
+                      className="input h-9 min-w-[220px]"
+                      placeholder="New workstream name"
+                      value={newWorkstream}
+                      onChange={(e) => setNewWorkstream(e.target.value)}
+                    />
+                    <button
+                      type="button"
+                      className="btn-primary h-9 px-3 text-xs"
+                      disabled={!newWorkstream.trim() || workstreamSubmitting}
+                      onClick={() => void handleAddWorkstream()}
+                    >
+                      {workstreamSubmitting ? "Adding..." : "Add"}
+                    </button>
+                  </div>
+                ) : null}
 
                 <div className="space-y-2">
                   {formContribs.map((c) => (
@@ -3532,10 +3666,8 @@ export default function CrmDataQualityView() {
                               prev.map((item) => {
                                 if (item.id !== c.id) return item;
                                 const next = { ...item, workHours: val };
-                                const shouldAutoPrep = item.prepHours === "" || Number(item.prepHours) === 0;
-                                if (shouldAutoPrep) {
-                                  const wNum = Number(val);
-                                  next.prepHours = Number.isFinite(wNum) && wNum >= 0 ? String(wNum * 0.35) : "";
+                                if (!item.prepIsManual) {
+                                  next.prepHours = computePrepHours(val);
                                 }
                                 return next;
                               }),
@@ -3556,7 +3688,11 @@ export default function CrmDataQualityView() {
                           onChange={(e) => {
                             const val = e.target.value;
                             setFormContribs((prev) =>
-                              prev.map((item) => (item.id === c.id ? { ...item, prepHours: val } : item)),
+                              prev.map((item) =>
+                                item.id === c.id
+                                  ? { ...item, prepHours: val, prepIsManual: true }
+                                  : item,
+                              ),
                             );
                           }}
                         />

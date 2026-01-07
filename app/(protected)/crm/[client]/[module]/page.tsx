@@ -2,6 +2,8 @@ import { notFound, redirect } from 'next/navigation';
 import CrmDataQualityView from '@/components/crm/CrmDataQualityView';
 import CrmCampaignReportingView from '@/components/crm/CrmCampaignReportingView';
 import CrmBudgetView from '@/components/crm/CrmBudgetView';
+import CrmBudgetExecutionView from '@/components/crm/CrmBudgetExecutionView';
+import CrmDqTicketsAnalyticsView from '@/components/crm/CrmDqTicketsAnalyticsView';
 import CrmOperationsOverview from '@/components/crm/CrmOperationsOverview';
 import { getCrmClient, getCrmModule } from '@/lib/crm/clients';
 
@@ -32,6 +34,12 @@ export default async function CrmModulePage({ params }: Props) {
   }
   if (moduleConfig.type === 'budget') {
     return <CrmBudgetView />;
+  }
+  if (moduleConfig.type === 'budget_execution') {
+    return <CrmBudgetExecutionView />;
+  }
+  if (moduleConfig.type === 'dq_tickets') {
+    return <CrmDqTicketsAnalyticsView />;
   }
   // Temporary placeholders for modules not yet implemented
   if (moduleConfig.comingSoon) {

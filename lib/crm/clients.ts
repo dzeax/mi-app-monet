@@ -1,7 +1,9 @@
 export type CrmModuleType =
   | 'data_quality'
+  | 'dq_tickets'
   | 'campaign_reporting'
   | 'budget'
+  | 'budget_execution'
   | 'playbooks'
   | 'kpi_dashboard';
 
@@ -35,6 +37,13 @@ export const CRM_CLIENTS: CrmClient[] = [
         icon: 'table',
       },
       {
+        slug: 'dq-tickets',
+        type: 'dq_tickets',
+        label: 'DQ Tickets',
+        description: 'Data Quality tickets status and execution.',
+        icon: 'insight',
+      },
+      {
         slug: 'campaigns',
         type: 'campaign_reporting',
         label: 'Campaign Reporting',
@@ -46,6 +55,13 @@ export const CRM_CLIENTS: CrmClient[] = [
         type: 'budget',
         label: 'Budget',
         description: 'Annual budget planning and tracking.',
+        icon: 'chart',
+      },
+      {
+        slug: 'budget-execution',
+        type: 'budget_execution',
+        label: 'Budget Execution',
+        description: 'Budget execution tracking by role and scope.',
         icon: 'chart',
       },
     ],

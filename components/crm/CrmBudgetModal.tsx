@@ -3,9 +3,8 @@
 
 import { useEffect, useMemo, useRef, useState } from "react";
 import type { MouseEvent as ReactMouseEvent } from "react";
-import { DayPicker } from "react-day-picker";
-import { format, parseISO } from "date-fns";
-import MiniModal from "@/components/ui/MiniModal";
+import DatePicker from "@/components/ui/DatePicker";
+import ModalShell from "@/components/ui/ModalShell";
 import { showError, showSuccess } from "@/utils/toast";
 
 type BudgetRole = {
@@ -46,135 +45,6 @@ type Props = {
 };
 
 const isTempId = (value: string) => value.startsWith("new-");
-const isIsoDate = (value: string) => /^\d{4}-\d{2}-\d{2}$/.test(value);
-
-const formatPickerDate = (value?: string | null) => {
-  if (!value || !isIsoDate(value)) return null;
-  const parsed = parseISO(value);
-  if (Number.isNaN(parsed.getTime())) return null;
-  return format(parsed, "dd/MM/yyyy");
-};
-
-function DatePickerField({
-  value,
-  onChange,
-  placeholder = "Select date",
-  ariaLabel,
-}: {
-  value: string | null;
-  onChange: (value: string) => void;
-  placeholder?: string;
-  ariaLabel?: string;
-}) {
-  const [open, setOpen] = useState(false);
-  const wrapRef = useRef<HTMLDivElement | null>(null);
-  const selectedDate = value && isIsoDate(value) ? parseISO(value) : undefined;
-  const display = formatPickerDate(value) ?? placeholder;
-  const hasValue = Boolean(selectedDate);
-  const toIso = (date: Date) => format(date, "yyyy-MM-dd");
-
-  useEffect(() => {
-    if (!open) return;
-    const handler = (event: MouseEvent) => {
-      if (!wrapRef.current) return;
-      if (wrapRef.current.contains(event.target as Node)) return;
-      setOpen(false);
-    };
-    document.addEventListener("mousedown", handler);
-    return () => document.removeEventListener("mousedown", handler);
-  }, [open]);
-
-  return (
-    <div className="relative" ref={wrapRef}>
-      <div className="relative">
-        <button
-          type="button"
-          className={`input h-8 w-full min-w-0 text-left text-xs ${
-            hasValue ? "text-[color:var(--color-text)]" : "text-[color:var(--color-text)]/50"
-          }`}
-          onClick={() => setOpen((prev) => !prev)}
-          aria-label={ariaLabel}
-        >
-          {display}
-        </button>
-        {hasValue ? (
-          <button
-            type="button"
-            className="absolute right-2 top-1/2 -translate-y-1/2 text-[10px] text-[color:var(--color-text)]/50 hover:text-[color:var(--color-text)]"
-            onClick={(event) => {
-              event.stopPropagation();
-              onChange("");
-            }}
-            aria-label={`Clear ${ariaLabel ?? "date"}`}
-            title="Clear"
-          >
-            x
-          </button>
-        ) : null}
-      </div>
-      {open ? (
-        <div className="absolute left-0 top-[calc(100%+6px)] z-50 w-[280px] rounded-xl border border-[color:var(--color-border)] bg-[color:var(--color-surface)] p-3 shadow-xl ring-1 ring-black/5">
-          <div className="rounded-lg border border-[color:var(--color-border)] bg-white/60 p-2">
-            <DayPicker
-              mode="single"
-              selected={selectedDate}
-              defaultMonth={selectedDate || new Date()}
-              onSelect={(date) => {
-                onChange(date ? toIso(date) : "");
-                setOpen(false);
-              }}
-              showOutsideDays
-              classNames={{
-                root: "relative text-sm",
-                months: "flex pt-6",
-                month: "min-w-[224px] space-y-2",
-                month_caption: "flex items-center justify-center gap-2",
-                caption_label: "text-sm font-semibold",
-                nav: "absolute left-2 right-2 top-2 flex items-center justify-between",
-                button_previous:
-                  "h-7 w-7 rounded-md border border-[color:var(--color-border)] bg-white hover:bg-[color:var(--color-surface-2)]",
-                button_next:
-                  "h-7 w-7 rounded-md border border-[color:var(--color-border)] bg-white hover:bg-[color:var(--color-surface-2)]",
-                month_grid: "w-full border-collapse",
-                weekdays: "flex",
-                weekday:
-                  "w-8 text-center text-[10px] font-semibold uppercase text-[color:var(--color-text)]/50",
-                weeks: "flex flex-col gap-1",
-                week: "flex w-full",
-                day: "h-8 w-8 p-0 text-center",
-                day_button:
-                  "h-8 w-8 rounded-md text-xs hover:bg-[color:var(--color-surface-2)] focus:outline-none focus-visible:ring-2 focus-visible:ring-[color:var(--color-primary)]/40",
-                selected:
-                  "bg-[color:var(--color-primary)] text-white hover:bg-[color:var(--color-primary)]",
-                today: "font-semibold text-[color:var(--color-text)]",
-                outside: "text-[color:var(--color-text)]/30",
-              }}
-            />
-          </div>
-          <div className="mt-3 flex items-center justify-between">
-            <button
-              type="button"
-              className="btn-ghost h-8 px-3 text-xs border border-[color:var(--color-border)] bg-[color:var(--color-surface-2)]/70 text-[color:var(--color-text)]/80 hover:text-[color:var(--color-text)]"
-              onClick={() => {
-                onChange("");
-                setOpen(false);
-              }}
-            >
-              Clear
-            </button>
-            <button
-              type="button"
-              className="btn-primary h-8 px-3 text-xs"
-              onClick={() => setOpen(false)}
-            >
-              Done
-            </button>
-          </div>
-        </div>
-      ) : null}
-    </div>
-  );
-}
 
 export default function CrmBudgetModal({
   clientSlug,
@@ -631,22 +501,24 @@ export default function CrmBudgetModal({
   };
 
   return (
-    <MiniModal
-      title={`Manage budgets (${year})`}
-      headerActions={
-        <button
-          className="btn-ghost h-8 px-3 text-sm"
-          type="button"
-          onClick={handleCopyFromPreviousYear}
-          disabled={!canEdit || savingAll || copying}
-        >
-          {copying ? "Copying..." : "Copy from previous year"}
-        </button>
+    <ModalShell
+      title={
+        <div className="flex w-full items-center justify-between gap-3">
+          <span className="min-w-0 flex-1 truncate">{`Manage budgets (${year})`}</span>
+          <button
+            className="btn-ghost h-8 px-3 text-sm font-medium shrink-0"
+            type="button"
+            onClick={handleCopyFromPreviousYear}
+            disabled={!canEdit || savingAll || copying}
+          >
+            {copying ? "Copying..." : "Copy from previous year"}
+          </button>
+        </div>
       }
       onClose={handleRequestClose}
       widthClass="max-w-4xl"
       footer={
-        <div className="flex w-full items-center justify-between gap-3">
+        <div className="flex w-full items-center justify-end gap-2">
           <button className="btn-ghost h-9 px-4" onClick={handleRequestClose}>
             Cancel
           </button>
@@ -666,7 +538,11 @@ export default function CrmBudgetModal({
         </div>
       }
     >
-      <div className="space-y-6">
+      <form
+        className="space-y-6"
+        data-variant="clean-tech"
+        onSubmit={(event) => event.preventDefault()}
+      >
         {feedback ? (
           <div
             className={[
@@ -739,7 +615,7 @@ export default function CrmBudgetModal({
                       </svg>
                     </button>
                     <input
-                      className={`input h-9 min-w-0 flex-1 font-semibold ${
+                      className={`input h-9 min-w-0 flex-1 text-base font-semibold ${
                         isExpanded ? "" : "opacity-60 pointer-events-none"
                       }`}
                       placeholder="Role name"
@@ -920,7 +796,7 @@ export default function CrmBudgetModal({
                                     </option>
                                   ))}
                                 </select>
-                                <DatePickerField
+                                <DatePicker
                                   value={assignment.startDate ?? ""}
                                   ariaLabel="Start date"
                                   onChange={(value) =>
@@ -934,7 +810,7 @@ export default function CrmBudgetModal({
                                     }))
                                   }
                                 />
-                                <DatePickerField
+                                <DatePicker
                                   value={assignment.endDate ?? ""}
                                   ariaLabel="End date"
                                   onChange={(value) =>
@@ -1030,7 +906,7 @@ export default function CrmBudgetModal({
             })
           )}
         </div>
-      </div>
-    </MiniModal>
+      </form>
+    </ModalShell>
   );
 }

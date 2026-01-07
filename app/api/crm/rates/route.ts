@@ -10,13 +10,19 @@ const UpsertRateZ = z.object({
   owner: z.string().min(1),
   dailyRate: z.number().nonnegative(),
   currency: z.string().min(1).default("EUR"),
+  personId: z.string().uuid().optional().nullable(),
+  year: z.number().int().min(2000).optional(),
 });
 
 export const runtime = "nodejs";
 
 const normalizeAlias = (value: string) => value.trim().toLowerCase();
 
-const resolvePersonId = async (supabase: ReturnType<typeof createRouteHandlerClient>, clientSlug: string, owner: string) => {
+const resolvePersonId = async (
+  supabase: ReturnType<typeof createRouteHandlerClient>,
+  clientSlug: string,
+  owner: string,
+) => {
   const { data } = await supabase
     .from("crm_people_aliases")
     .select("alias, person_id")
@@ -35,13 +41,34 @@ export async function GET(request: Request) {
 
   const { searchParams } = new URL(request.url);
   const client = searchParams.get("client") || DEFAULT_CLIENT;
+  const listYears =
+    searchParams.get("listYears") === "1" || searchParams.get("listYears") === "true";
+  const yearsParam = searchParams.get("years");
+  const yearParam = searchParams.get("year");
+  const currentYear = new Date().getFullYear();
+  const parseYear = (value: string | null) => {
+    if (!value) return null;
+    const num = Number.parseInt(value, 10);
+    return Number.isFinite(num) && num > 1900 ? num : null;
+  };
+  const parseYearList = (raw: string | null) => {
+    if (!raw) return [];
+    return raw
+      .split(",")
+      .map((item) => parseYear(item.trim()))
+      .filter((val): val is number => val != null);
+  };
+  const yearsList = parseYearList(yearsParam);
+  const year = parseYear(yearParam) ?? currentYear;
 
   try {
-    const { data, error } = await supabase
-      .from("crm_owner_rates")
-      .select("*")
-      .eq("client_slug", client)
-      .order("owner", { ascending: true });
+    const query = supabase.from("crm_owner_rates").select("*").eq("client_slug", client);
+    if (yearsList.length > 0) {
+      query.in("year", yearsList);
+    } else {
+      query.eq("year", year);
+    }
+    const { data, error } = await query.order("owner", { ascending: true });
 
     if (error) {
       return NextResponse.json({ error: error.message }, { status: 500 });
@@ -55,7 +82,23 @@ export async function GET(request: Request) {
         personId: (row.person_id as string | null) ?? null,
         dailyRate: Number(row.daily_rate ?? 0),
         currency: (row.currency as string) || "EUR",
+        year: row.year != null ? Number(row.year) : undefined,
       })) ?? [];
+
+    if (listYears) {
+      const { data: yearRows } = await supabase
+        .from("crm_owner_rates")
+        .select("year")
+        .eq("client_slug", client);
+      const years = Array.from(
+        new Set(
+          (yearRows ?? [])
+            .map((row: { year?: number | null }) => Number(row.year ?? 0))
+            .filter((val) => Number.isFinite(val) && val > 1900),
+        ),
+      ).sort((a, b) => a - b);
+      return NextResponse.json({ rates, years });
+    }
 
     return NextResponse.json({ rates });
   } catch (err) {
@@ -73,6 +116,8 @@ export async function POST(request: Request) {
     const parsed = UpsertRateZ.parse(body);
     const clientSlug = parsed.client || DEFAULT_CLIENT;
     const owner = parsed.owner.trim();
+    const year = parsed.year ?? new Date().getFullYear();
+    const validFrom = `${year}-01-01`;
 
     const { data: sessionData, error: sessionError } =
       await supabase.auth.getSession();
@@ -87,21 +132,38 @@ export async function POST(request: Request) {
       return NextResponse.json({ error: "Not authenticated" }, { status: 401 });
     }
 
+    let resolvedPersonId: string | null = null;
+    if (parsed.personId) {
+      const { data: person } = await supabase
+        .from("crm_people")
+        .select("id")
+        .eq("client_slug", clientSlug)
+        .eq("id", parsed.personId)
+        .maybeSingle();
+      if (person?.id) resolvedPersonId = person.id;
+    }
+    if (!resolvedPersonId) {
+      resolvedPersonId = await resolvePersonId(supabase, clientSlug, owner);
+    }
+
     const payload = {
       client_slug: clientSlug,
       owner,
-      person_id: await resolvePersonId(supabase, clientSlug, owner),
+      person_id: resolvedPersonId,
       daily_rate: parsed.dailyRate,
       currency: parsed.currency || "EUR",
+      year,
+      valid_from: validFrom,
       created_by: userId,
     };
 
     const { data, error } = await supabase
       .from("crm_owner_rates")
-      .upsert(payload, { onConflict: "client_slug,owner" })
+      .upsert(payload, { onConflict: "client_slug,owner,year" })
       .select("*")
       .eq("client_slug", clientSlug)
       .eq("owner", owner)
+      .eq("year", year)
       .single();
 
     if (error || !data) {
@@ -118,6 +180,7 @@ export async function POST(request: Request) {
       personId: (data.person_id as string | null) ?? null,
       dailyRate: Number(data.daily_rate ?? 0),
       currency: (data.currency as string) || "EUR",
+      year: data.year != null ? Number(data.year) : undefined,
     };
 
     return NextResponse.json({ rate });

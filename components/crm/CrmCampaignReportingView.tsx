@@ -78,6 +78,12 @@ const formatLocalDate = (d: Date) => {
   return `${y}-${m}-${day}`;
 };
 
+const parseYearFromDate = (value?: string | null) => {
+  if (!value || value.length < 4) return null;
+  const year = Number.parseInt(value.slice(0, 4), 10);
+  return Number.isFinite(year) ? year : null;
+};
+
 const normalizePersonKey = (value?: string | null) =>
   value?.trim().toLowerCase() ?? "";
 
@@ -238,11 +244,13 @@ export default function CrmCampaignReportingView() {
   const pathname = usePathname();
   const segments = pathname?.split("/").filter(Boolean) ?? [];
   const clientSlug = segments[1] || "emg";
-  const currentYearStart = `${new Date().getFullYear()}-01-01`;
+  const currentYear = new Date().getFullYear();
+  const currentYearStart = `${currentYear}-01-01`;
 
   const [rows, setRows] = useState<Row[]>([]);
-  const [ratesByOwner, setRatesByOwner] = useState<Record<string, number>>({});
-  const [ratesByPerson, setRatesByPerson] = useState<Record<string, number>>({});
+  const [ratesByYear, setRatesByYear] = useState<
+    Record<number, { byOwner: Record<string, number>; byPerson: Record<string, number> }>
+  >({});
   const [peopleDirectory, setPeopleDirectory] = useState<PersonDirectoryItem[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -292,6 +300,16 @@ export default function CrmCampaignReportingView() {
     });
     return map;
   }, [peopleDirectory]);
+  const rateYears = useMemo(() => {
+    const set = new Set<number>();
+    rows.forEach((row) => {
+      const year = parseYearFromDate(row.sendDate) ?? row.year ?? currentYear;
+      if (year) set.add(year);
+    });
+    if (set.size === 0) set.add(currentYear);
+    return Array.from(set).sort((a, b) => a - b);
+  }, [rows, currentYear]);
+  const rateYearsKey = useMemo(() => rateYears.join(","), [rateYears]);
   const resolveOwnerKey = useCallback(
     (label?: string | null, personId?: string | null) => {
       if (personId) return personId;
@@ -304,6 +322,15 @@ export default function CrmCampaignReportingView() {
   const labelForOwnerKey = useCallback(
     (key: string) => peopleById.get(key) ?? key,
     [peopleById],
+  );
+  const getRateForRow = useCallback(
+    (row: Row) => {
+      const year = parseYearFromDate(row.sendDate) ?? row.year ?? currentYear;
+      const rates = ratesByYear[year];
+      if (!rates) return null;
+      return row.personId ? rates.byPerson[row.personId] : rates.byOwner[row.owner];
+    },
+    [currentYear, ratesByYear],
   );
   useEffect(() => {
     if (aliasToPersonId.size === 0) return;
@@ -381,20 +408,6 @@ export default function CrmCampaignReportingView() {
           setPeopleDirectory(people);
         }
 
-        const resRates = await fetch(`/api/crm/rates?client=${clientSlug}`);
-        const bodyRates = await resRates.json().catch(() => null);
-        if (resRates.ok && Array.isArray(bodyRates?.rates) && active) {
-          const nextByOwner: Record<string, number> = {};
-          const nextByPerson: Record<string, number> = {};
-          bodyRates.rates.forEach((r: any) => {
-            const rate = Number(r.dailyRate ?? 0);
-            if (r.owner) nextByOwner[r.owner] = rate;
-            if (r.personId) nextByPerson[r.personId] = rate;
-          });
-          setRatesByOwner(nextByOwner);
-          setRatesByPerson(nextByPerson);
-        }
-
         const params = new URLSearchParams({ client: clientSlug });
         if (dateFrom) params.append("from", dateFrom);
         if (dateTo) params.append("to", dateTo);
@@ -443,7 +456,45 @@ export default function CrmCampaignReportingView() {
       active = false;
       window.removeEventListener("crm:imported", handler);
     };
-  }, [clientSlug, dateFrom, dateTo]);
+  }, [clientSlug, currentYear, dateFrom, dateTo]);
+
+  useEffect(() => {
+    let active = true;
+    const loadRates = async () => {
+      try {
+        const resRates = await fetch(
+          `/api/crm/rates?client=${clientSlug}&years=${rateYearsKey || currentYear}`,
+        );
+        const bodyRates = await resRates.json().catch(() => null);
+        if (!active) return;
+        if (resRates.ok && Array.isArray(bodyRates?.rates)) {
+          const nextByYear: Record<
+            number,
+            { byOwner: Record<string, number>; byPerson: Record<string, number> }
+          > = {};
+          bodyRates.rates.forEach((r: any) => {
+            const year = Number(r.year ?? currentYear);
+            if (!Number.isFinite(year)) return;
+            if (!nextByYear[year]) {
+              nextByYear[year] = { byOwner: {}, byPerson: {} };
+            }
+            const rate = Number(r.dailyRate ?? 0);
+            if (r.owner) nextByYear[year].byOwner[r.owner] = rate;
+            if (r.personId) nextByYear[year].byPerson[r.personId] = rate;
+          });
+          setRatesByYear(nextByYear);
+        } else {
+          setRatesByYear({});
+        }
+      } catch {
+        if (active) setRatesByYear({});
+      }
+    };
+    void loadRates();
+    return () => {
+      active = false;
+    };
+  }, [clientSlug, currentYear, rateYearsKey]);
 
   useEffect(() => {
     // Clear any selection if the dataset changes
@@ -536,12 +587,14 @@ export default function CrmCampaignReportingView() {
 
   const bulkEditOwnerOptions = useMemo(() => {
     const set = new Set<string>();
-    Object.keys(ratesByOwner).forEach((o) => set.add(o));
+    Object.values(ratesByYear).forEach((bucket) => {
+      Object.keys(bucket.byOwner).forEach((o) => set.add(o));
+    });
     rows.forEach((r) => {
       if (r.owner) set.add(r.owner);
     });
     return Array.from(set).sort((a, b) => a.localeCompare(b));
-  }, [ratesByOwner, rows]);
+  }, [ratesByYear, rows]);
 
   const bulkEditStatusOptions = useMemo(() => {
     const set = new Set<string>(["Planned", "Done", "Sent"]);
@@ -578,11 +631,11 @@ export default function CrmCampaignReportingView() {
 
   const computedRows = useMemo<ComputedRow[]>(() => {
     return filteredRows.map((r) => {
-      const rate = r.personId ? ratesByPerson[r.personId] : ratesByOwner[r.owner];
+      const rate = getRateForRow(r);
       const budgetValue = rate != null ? r.daysTotal * rate : r.budgetEur ?? 0;
       return { ...r, budgetValue };
     });
-  }, [filteredRows, ratesByOwner, ratesByPerson]);
+  }, [filteredRows, getRateForRow]);
 
   const activeChips = useMemo(() => {
     const chips: { label: string; onClear: () => void }[] = [];
@@ -918,7 +971,7 @@ export default function CrmCampaignReportingView() {
       ];
       const escape = (val: string) => `"${val.replace(/"/g, '""')}"`;
       const lines = sortedRows.map((r) => {
-        const rate = r.personId ? ratesByPerson[r.personId] : ratesByOwner[r.owner];
+        const rate = getRateForRow(r);
         const budget =
           rate != null ? r.daysTotal * rate : r.budgetEur ?? r.daysTotal * 0;
         return [

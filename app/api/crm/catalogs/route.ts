@@ -3,13 +3,15 @@ import { NextResponse } from 'next/server';
 import { cookies } from 'next/headers';
 import { createRouteHandlerClient } from '@supabase/auth-helpers-nextjs';
 import { z } from 'zod';
+import { supabaseAdmin } from '@/lib/supabase/admin';
+import { WORKSTREAM_DEFAULTS } from '@/lib/crm/workstreams';
 
 const DEFAULT_CLIENT = 'emg';
-const KINDS = ['owner', 'type'] as const;
+const KINDS = ['owner', 'type', 'workstream'] as const;
 
 const CreateCatalogZ = z.object({
   client: z.string().optional(),
-  kind: z.enum(['owner', 'type']),
+  kind: z.enum(['owner', 'type', 'workstream']),
   label: z.string().min(1),
 });
 
@@ -29,13 +31,51 @@ export async function GET(request: Request) {
     }
     const { data, error } = await query.order('label', { ascending: true });
     if (error) return NextResponse.json({ error: error.message }, { status: 500 });
-    const items = (data ?? []).map((row) => ({
+    let items = (data ?? []).map((row) => ({
       id: row.id,
       clientSlug: row.client_slug,
       kind: row.kind,
       label: row.label,
       isActive: row.is_active,
     }));
+
+    if (kind === 'workstream') {
+      const existing = new Set(items.map((item) => String(item.label).toLowerCase()));
+      const missing = WORKSTREAM_DEFAULTS.filter(
+        (label) => !existing.has(label.toLowerCase()),
+      );
+      if (missing.length > 0) {
+        const admin = supabaseAdmin();
+        const { error: seedError } = await admin
+          .from('crm_catalog_items')
+          .insert(
+            missing.map((label) => ({
+              client_slug: client,
+              kind: 'workstream',
+              label,
+            })),
+          );
+        if (!seedError) {
+          const seedQuery = supabase
+            .from('crm_catalog_items')
+            .select('*')
+            .eq('client_slug', client)
+            .eq('is_active', true)
+            .eq('kind', 'workstream');
+          const { data: seeded, error: seededError } = await seedQuery.order('label', { ascending: true });
+          if (!seededError) {
+            items = (seeded ?? []).map((row) => ({
+              id: row.id,
+              clientSlug: row.client_slug,
+              kind: row.kind,
+              label: row.label,
+              isActive: row.is_active,
+            }));
+          }
+        }
+      }
+    }
+
     return NextResponse.json({ items });
   } catch (err) {
     const msg = err instanceof Error ? err.message : 'Unexpected error';

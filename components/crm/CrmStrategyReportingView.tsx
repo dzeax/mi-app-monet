@@ -142,6 +142,12 @@ const formatNumber = (val: number) =>
     ? val.toLocaleString("es-ES", { minimumFractionDigits: 2, maximumFractionDigits: 2 })
     : "0,00";
 
+const parseYearFromDate = (value?: string | null) => {
+  if (!value || value.length < 4) return null;
+  const year = Number.parseInt(value.slice(0, 4), 10);
+  return Number.isFinite(year) ? year : null;
+};
+
 const buildJiraUrl = (ticket: string) =>
   ticket.startsWith("http") ? ticket : `https://europcarmobility.atlassian.net/browse/${ticket}`;
 
@@ -150,9 +156,10 @@ export default function CrmStrategyReportingView() {
   const segments = pathname?.split("/").filter(Boolean) ?? [];
   const clientSlug = segments[1] || "emg";
   const { isAdmin, isEditor } = useAuth();
+  const currentYear = new Date().getFullYear();
 
   const [rows, setRows] = useState<StrategyRow[]>([]);
-  const [rates, setRates] = useState<Record<string, number>>({});
+  const [ratesByYear, setRatesByYear] = useState<Record<number, Record<string, number>>>({});
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [filters, setFilters] = useState<Filters>({
@@ -165,7 +172,29 @@ export default function CrmStrategyReportingView() {
   const [openEdit, setOpenEdit] = useState(false);
   const [editTicket, setEditTicket] = useState<StrategyTicketDraft | null>(null);
 
-  const ownerOptions = useMemo(() => Object.keys(rates).sort((a, b) => a.localeCompare(b)), [rates]);
+  const getRateForEffort = useCallback(
+    (effort: EffortRow, fallbackDate?: string | null) => {
+      const year =
+        parseYearFromDate(effort.effortDate) ??
+        parseYearFromDate(fallbackDate) ??
+        currentYear;
+      return ratesByYear[year]?.[effort.owner] ?? 0;
+    },
+    [currentYear, ratesByYear],
+  );
+
+  const ownerOptions = useMemo(() => {
+    const set = new Set<string>();
+    Object.values(ratesByYear).forEach((bucket) => {
+      Object.keys(bucket).forEach((owner) => set.add(owner));
+    });
+    rows.forEach((r) => {
+      r.efforts.forEach((e) => {
+        if (e.owner) set.add(e.owner);
+      });
+    });
+    return Array.from(set).sort((a, b) => a.localeCompare(b));
+  }, [ratesByYear, rows]);
 
   const categoryOptions = useMemo(() => {
     const set = new Set<string>(CATEGORY_DEFAULTS);
@@ -188,15 +217,40 @@ export default function CrmStrategyReportingView() {
     setLoading(true);
     setError(null);
     try {
-      const resRates = await fetch(`/api/crm/campaign-owner-rates?client=${clientSlug}`);
-      const bodyRates = await resRates.json().catch(() => null);
-      if (resRates.ok && bodyRates?.rates) setRates(bodyRates.rates as Record<string, number>);
-
       const res = await fetch(`/api/crm/strategy-reporting?client=${clientSlug}`);
       const body = await res.json().catch(() => null);
       if (!res.ok) throw new Error(body?.error || `Failed to load (${res.status})`);
       const list: StrategyRow[] = Array.isArray(body?.rows) ? (body.rows as any) : [];
       setRows(list);
+
+      const yearSet = new Set<number>();
+      list.forEach((row) => {
+        row.efforts.forEach((effort) => {
+          const year =
+            parseYearFromDate(effort.effortDate) ??
+            parseYearFromDate(row.createdDate);
+          if (year) yearSet.add(year);
+        });
+      });
+      if (yearSet.size === 0) yearSet.add(currentYear);
+      const years = Array.from(yearSet).sort((a, b) => a - b);
+
+      const resRates = await fetch(
+        `/api/crm/rates?client=${clientSlug}&years=${years.join(",")}`,
+      );
+      const bodyRates = await resRates.json().catch(() => null);
+      if (resRates.ok && Array.isArray(bodyRates?.rates)) {
+        const map: Record<number, Record<string, number>> = {};
+        bodyRates.rates.forEach((rate: any) => {
+          const year = Number(rate.year ?? currentYear);
+          if (!Number.isFinite(year)) return;
+          if (!map[year]) map[year] = {};
+          if (rate.owner) map[year][rate.owner] = Number(rate.dailyRate ?? 0);
+        });
+        setRatesByYear(map);
+      } else {
+        setRatesByYear({});
+      }
     } catch (err) {
       const msg = err instanceof Error ? err.message : "Unable to load data";
       setError(msg);
@@ -204,7 +258,7 @@ export default function CrmStrategyReportingView() {
     } finally {
       setLoading(false);
     }
-  }, [clientSlug]);
+  }, [clientSlug, currentYear]);
 
   useEffect(() => {
     void fetchAll();
@@ -215,13 +269,13 @@ export default function CrmStrategyReportingView() {
       const totalHours = r.efforts.reduce((acc, e) => acc + Number(e.hours ?? 0), 0);
       const totalDays = totalHours / 7;
       const totalBudget = r.efforts.reduce((acc, e) => {
-        const rate = rates[e.owner] ?? 0;
+        const rate = getRateForEffort(e, r.createdDate);
         return acc + (Number(e.hours ?? 0) / 7) * rate;
       }, 0);
       const owners = Array.from(new Set(r.efforts.map((e) => e.owner).filter(Boolean)));
       return { ...r, totalHours, totalDays, totalBudget, ownersCount: owners.length };
     });
-  }, [rows, rates]);
+  }, [rows, getRateForEffort]);
 
   const filtered = useMemo(() => {
     const term = filters.search.trim().toLowerCase();
