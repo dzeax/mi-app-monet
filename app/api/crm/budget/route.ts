@@ -98,10 +98,25 @@ export async function GET(request: Request) {
       return NextResponse.json({ error: aliasError.message }, { status: 500 });
     }
 
+    const { data: entityRows, error: entityError } = await supabase
+      .from("crm_people_entities")
+      .select("person_id, entity")
+      .eq("client_slug", client)
+      .eq("year", year);
+    if (entityError) {
+      return NextResponse.json({ error: entityError.message }, { status: 500 });
+    }
+
     const aliasMap = new Map<string, string>();
     (aliasData ?? []).forEach((row: any) => {
       if (!row?.alias || !row?.person_id) return;
       aliasMap.set(normalizeKey(row.alias), row.person_id);
+    });
+
+    const entityByPerson: Record<string, string> = {};
+    (entityRows ?? []).forEach((row: any) => {
+      if (!row?.person_id || !row?.entity) return;
+      entityByPerson[String(row.person_id)] = String(row.entity);
     });
 
     const rateByPerson = new Map<string, { dailyRate: number; currency: string }>();
@@ -143,6 +158,18 @@ export async function GET(request: Request) {
         .range(from, to),
     );
 
+    const manualRows = await fetchPaged<any>((from, to) =>
+      supabase
+        .from("crm_manual_efforts")
+        .select("person_id, owner, hours, effort_date")
+        .eq("client_slug", client)
+        .gte("effort_date", yearStart)
+        .lte("effort_date", yearEnd)
+        .order("effort_date", { ascending: true })
+        .order("id", { ascending: true })
+        .range(from, to),
+    );
+
     const spendByPerson: Record<string, number> = {};
     let unmappedSpend = 0;
 
@@ -177,6 +204,11 @@ export async function GET(request: Request) {
 
     campaignRows.forEach((row: any) => {
       const hours = Number(row.hours_total ?? 0);
+      addSpend(row.person_id ? String(row.person_id) : null, row.owner ?? null, hours);
+    });
+
+    manualRows.forEach((row: any) => {
+      const hours = Number(row.hours ?? 0);
       addSpend(row.person_id ? String(row.person_id) : null, row.owner ?? null, hours);
     });
 
@@ -225,6 +257,7 @@ export async function GET(request: Request) {
       spendByPerson,
       unmappedSpend,
       spendCurrency,
+      entityByPerson,
     });
   } catch (err) {
     const msg = err instanceof Error ? err.message : "Unexpected error";

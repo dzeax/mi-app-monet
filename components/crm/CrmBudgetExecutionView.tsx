@@ -43,6 +43,7 @@ type TableRow = {
   key: string;
   personId: string | null;
   name: string;
+  entity: string;
   roleIds: string[];
   roles: string[];
   roleShares: Array<{ roleId: string; share: number }>;
@@ -62,6 +63,12 @@ type BudgetExecutionResponse = {
   utilization: number;
   asOfDate: string | null;
   monthlyActual: number[];
+  entityPlan: Record<string, number>;
+  entityActual: Record<string, number>;
+  monthlyEntity: Record<string, number[]>;
+  monthlyEntityScope: Record<string, Record<string, number[]>>;
+  monthlyEntityRole: Record<string, Record<string, number[]>>;
+  monthlyEntityRoleScope: Record<string, Record<string, Record<string, number[]>>>;
   totals: {
     hours: number;
     days: number;
@@ -79,6 +86,7 @@ type BudgetExecutionResponse = {
     rows: TableRow[];
     roles: RoleOption[];
     scopes: string[];
+    entities: string[];
   };
 };
 
@@ -91,6 +99,7 @@ type KpiItem = {
 
 type ColumnKey =
   | "name"
+  | "entity"
   | "roles"
   | "plan"
   | "actual"
@@ -105,12 +114,13 @@ const PRESET_STORAGE_KEY = "crm_budget_exec_preset";
 const MONTHS = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
 const CHART_HEIGHT = 260;
 const COLUMN_PRESETS: Record<ColumnPreset, ColumnKey[]> = {
-  Minimal: ["name", "actual", "utilization", "risk"],
-  Finance: ["name", "roles", "plan", "actual", "remaining", "delta", "risk"],
-  Full: ["name", "roles", "plan", "actual", "remaining", "utilization", "delta", "risk"],
+  Minimal: ["name", "entity", "actual", "utilization", "risk"],
+  Finance: ["name", "entity", "roles", "plan", "actual", "remaining", "delta", "risk"],
+  Full: ["name", "entity", "roles", "plan", "actual", "remaining", "utilization", "delta", "risk"],
 };
 const COLUMN_LABELS: Record<ColumnKey, string> = {
   name: "Resource",
+  entity: "Entity",
   roles: "Roles",
   plan: "Plan",
   actual: "Actual",
@@ -157,6 +167,11 @@ const sumSeriesList = (seriesList: number[][]) => {
     });
   });
   return totals;
+};
+
+const sumSeries = (series?: number[]) => {
+  if (!Array.isArray(series)) return 0;
+  return series.reduce((acc, value) => acc + (value || 0), 0);
 };
 
 const riskToneClass: Record<"ok" | "warn" | "danger", string> = {
@@ -318,6 +333,7 @@ export default function CrmBudgetExecutionView() {
   const [error, setError] = useState<string | null>(null);
   const [roleFilters, setRoleFilters] = useState<string[]>([]);
   const [scopeFilters, setScopeFilters] = useState<string[]>([]);
+  const [entityFilters, setEntityFilters] = useState<string[]>([]);
   const [searchQuery, setSearchQuery] = useState("");
   const [riskOnly, setRiskOnly] = useState(false);
   const [columnPreset, setColumnPreset] = useState<ColumnPreset>("Finance");
@@ -369,6 +385,7 @@ export default function CrmBudgetExecutionView() {
       prev.filter((value) => data.breakdowns.roles.some((role) => role.roleId === value)),
     );
     setScopeFilters((prev) => prev.filter((value) => data.table.scopes.includes(value)));
+    setEntityFilters((prev) => prev.filter((value) => data.table.entities.includes(value)));
   }, [data]);
 
   const yearOptions = useMemo(() => {
@@ -413,8 +430,78 @@ export default function CrmBudgetExecutionView() {
 
   const roleFilterSet = useMemo(() => new Set(roleFilters), [roleFilters]);
   const scopeFilterSet = useMemo(() => new Set(scopeFilters), [scopeFilters]);
+  const entityFilterSet = useMemo(() => new Set(entityFilters), [entityFilters]);
   const hasRoleFilter = roleFilters.length > 0;
   const hasScopeFilter = scopeFilters.length > 0;
+  const hasEntityFilter = entityFilters.length > 0;
+
+  const baseRows = useMemo(() => {
+    if (!data) return [];
+    const rows = data.table.rows;
+    return rows
+      .map((row) => {
+        const roleShare = (() => {
+          if (!hasRoleFilter) return 1;
+          if (row.isUnassigned) return roleFilterSet.has("unassigned") ? 1 : 0;
+          return row.roleShares.reduce((acc, share) => {
+            if (roleFilterSet.has(share.roleId)) return acc + share.share;
+            return acc;
+          }, 0);
+        })();
+        const scopeSpend = row.scopeSpend ?? {};
+        const scopeActual = hasScopeFilter
+          ? sumRecord(scopeSpend, scopeFilterSet)
+          : sumRecord(scopeSpend);
+        const actual = scopeActual * roleShare;
+        const plan = hasRoleFilter ? row.plan * roleShare : row.plan;
+        const remaining = plan - actual;
+        const utilization = plan > 0 ? actual / plan : 0;
+        const delta = actual - plan;
+        const risk = riskLabel(row, plan, actual, utilization);
+        return {
+          ...row,
+          actual,
+          plan,
+          remaining,
+          utilization,
+          delta,
+          risk,
+        };
+      })
+      .filter((row) => {
+        if (hasEntityFilter && !entityFilterSet.has(row.entity)) {
+          return false;
+        }
+        if (hasRoleFilter && row.isUnassigned && !roleFilterSet.has("unassigned")) {
+          return false;
+        }
+        if (hasRoleFilter && row.roleIds.length > 0) {
+          const matchesRole = row.roleIds.some((id) => roleFilterSet.has(id));
+          if (!matchesRole && row.plan > 0) return false;
+        }
+        return row.actual > 0 || row.plan > 0;
+      });
+  }, [
+    data,
+    hasRoleFilter,
+    hasScopeFilter,
+    hasEntityFilter,
+    roleFilterSet,
+    scopeFilterSet,
+    entityFilterSet,
+  ]);
+
+  const planTotalFiltered = useMemo(
+    () => baseRows.reduce((acc, row) => acc + row.plan, 0),
+    [baseRows],
+  );
+  const actualTotalFiltered = useMemo(
+    () => baseRows.reduce((acc, row) => acc + row.actual, 0),
+    [baseRows],
+  );
+  const remainingFiltered = planTotalFiltered - actualTotalFiltered;
+  const utilizationFiltered =
+    planTotalFiltered > 0 ? actualTotalFiltered / planTotalFiltered : 0;
 
   const kpiItems = useMemo<KpiItem[]>(() => {
     const placeholder = loading ? "..." : "--";
@@ -429,48 +516,93 @@ export default function CrmBudgetExecutionView() {
     return [
       {
         label: "Annual plan",
-        value: formatCurrency(data.planTotal),
+        value: formatCurrency(planTotalFiltered),
         helper: "Sum of budget pools",
         icon: Wallet,
       },
       {
         label: "Spent YTD",
-        value: formatCurrency(data.actualTotal),
+        value: formatCurrency(actualTotalFiltered),
         helper: "Campaigns + Data Quality",
         icon: CreditCard,
       },
       {
         label: "Remaining",
-        value: formatCurrency(data.remaining),
+        value: formatCurrency(remainingFiltered),
         helper: "Plan minus actuals",
         icon: PiggyBank,
       },
       {
         label: "Utilization",
-        value: formatPercent(data.utilization),
+        value: formatPercent(utilizationFiltered),
         helper: "Spent / plan",
         icon: Activity,
       },
     ];
-  }, [data, loading, currency]);
-
-  const planTotalFiltered = useMemo(() => {
-    if (!data) return 0;
-    if (!hasRoleFilter) return data.planTotal;
-    return data.breakdowns.roles.reduce((acc, role) => {
-      if (roleFilterSet.has(role.roleId)) return acc + role.plan;
-      return acc;
-    }, 0);
-  }, [data, hasRoleFilter, roleFilterSet]);
+  }, [
+    data,
+    loading,
+    currency,
+    planTotalFiltered,
+    actualTotalFiltered,
+    remainingFiltered,
+    utilizationFiltered,
+  ]);
 
   const filteredMonthlyActual = useMemo(() => {
     if (!data) return Array(12).fill(0);
-    if (!hasRoleFilter && !hasScopeFilter) {
+    if (!hasRoleFilter && !hasScopeFilter && !hasEntityFilter) {
       return data.monthlyActual ?? Array(12).fill(0);
     }
     const monthlyRoleScope = data.monthlyRoleScope ?? {};
     const monthlyRole = data.monthlyRole ?? {};
     const monthlyScope = data.monthlyScope ?? {};
+    const monthlyEntity = data.monthlyEntity ?? {};
+    const monthlyEntityScope = data.monthlyEntityScope ?? {};
+    const monthlyEntityRole = data.monthlyEntityRole ?? {};
+    const monthlyEntityRoleScope = data.monthlyEntityRoleScope ?? {};
+    if (hasEntityFilter) {
+      if (hasRoleFilter && hasScopeFilter) {
+        const seriesList: number[][] = [];
+        entityFilters.forEach((entity) => {
+          const roleMap = monthlyEntityRoleScope[entity] ?? {};
+          roleFilters.forEach((roleId) => {
+            const scopeMap = roleMap[roleId] ?? {};
+            scopeFilters.forEach((scope) => {
+              const series = scopeMap[scope];
+              if (series) seriesList.push(series);
+            });
+          });
+        });
+        return sumSeriesList(seriesList);
+      }
+      if (hasRoleFilter) {
+        const seriesList: number[][] = [];
+        entityFilters.forEach((entity) => {
+          const roleMap = monthlyEntityRole[entity] ?? {};
+          roleFilters.forEach((roleId) => {
+            const series = roleMap[roleId];
+            if (series) seriesList.push(series);
+          });
+        });
+        return sumSeriesList(seriesList);
+      }
+      if (hasScopeFilter) {
+        const seriesList: number[][] = [];
+        entityFilters.forEach((entity) => {
+          const scopeMap = monthlyEntityScope[entity] ?? {};
+          scopeFilters.forEach((scope) => {
+            const series = scopeMap[scope];
+            if (series) seriesList.push(series);
+          });
+        });
+        return sumSeriesList(seriesList);
+      }
+      const seriesList = entityFilters
+        .map((entity) => monthlyEntity[entity])
+        .filter((series): series is number[] => Array.isArray(series));
+      return sumSeriesList(seriesList);
+    }
     if (hasRoleFilter && hasScopeFilter) {
       const seriesList: number[][] = [];
       roleFilters.forEach((roleId) => {
@@ -495,7 +627,15 @@ export default function CrmBudgetExecutionView() {
       return sumSeriesList(seriesList);
     }
     return data.monthlyActual ?? Array(12).fill(0);
-  }, [data, hasRoleFilter, hasScopeFilter, roleFilters, scopeFilters]);
+  }, [
+    data,
+    hasRoleFilter,
+    hasScopeFilter,
+    hasEntityFilter,
+    roleFilters,
+    scopeFilters,
+    entityFilters,
+  ]);
 
   const burnData = useMemo(() => {
     const actual = filteredMonthlyActual;
@@ -539,30 +679,111 @@ export default function CrmBudgetExecutionView() {
     [data],
   );
 
+  const entityOptions = useMemo<Option[]>(
+    () => (data?.table.entities ?? []).map((entity) => ({ label: entity, value: entity })),
+    [data],
+  );
+
   const roleChartData = useMemo(() => {
     if (!data) return [];
     const roleScopes = data.roleScopes || {};
+    const rolePlanById = new Map<string, number>();
+    if (hasEntityFilter) {
+      data.table.rows.forEach((row) => {
+        if (!entityFilterSet.has(row.entity)) return;
+        if (row.roleShares.length > 0) {
+          row.roleShares.forEach((share) => {
+            rolePlanById.set(
+              share.roleId,
+              (rolePlanById.get(share.roleId) ?? 0) + row.plan * share.share,
+            );
+          });
+        } else if (row.isUnassigned) {
+          rolePlanById.set("unassigned", (rolePlanById.get("unassigned") ?? 0) + row.plan);
+        }
+      });
+    }
+
+    const entityRoleScope = data.monthlyEntityRoleScope ?? {};
+    const entityRole = data.monthlyEntityRole ?? {};
+
+    const roleActualForEntity = (roleId: string) => {
+      if (!hasEntityFilter) return 0;
+      if (hasScopeFilter) {
+        let total = 0;
+        entityFilters.forEach((entity) => {
+          const scopeMap = entityRoleScope[entity]?.[roleId] ?? {};
+          scopeFilters.forEach((scope) => {
+            total += sumSeries(scopeMap[scope]);
+          });
+        });
+        return total;
+      }
+      let total = 0;
+      entityFilters.forEach((entity) => {
+        total += sumSeries(entityRole[entity]?.[roleId]);
+      });
+      return total;
+    };
+
     return data.breakdowns.roles
       .filter((role) => !hasRoleFilter || roleFilterSet.has(role.roleId))
       .map((role) => {
         const scopeMap = roleScopes[role.roleId] ?? {};
-        const actual = hasScopeFilter
-          ? sumRecord(scopeMap, scopeFilterSet)
-          : sumRecord(scopeMap) || role.actual;
+        const actual = hasEntityFilter
+          ? roleActualForEntity(role.roleId)
+          : hasScopeFilter
+            ? sumRecord(scopeMap, scopeFilterSet)
+            : sumRecord(scopeMap) || role.actual;
+        const plan = hasEntityFilter
+          ? rolePlanById.get(role.roleId) ?? 0
+          : role.plan;
         return {
           roleName: role.roleName,
-          plan: role.plan,
+          plan,
           actual,
         };
       })
+      .filter((entry) => entry.plan > 0 || entry.actual > 0)
       .sort((a, b) => b.actual - a.actual);
-  }, [data, hasRoleFilter, roleFilterSet, hasScopeFilter, scopeFilterSet]);
+  }, [
+    data,
+    hasRoleFilter,
+    roleFilterSet,
+    hasScopeFilter,
+    scopeFilterSet,
+    scopeFilters,
+    hasEntityFilter,
+    entityFilters,
+    entityFilterSet,
+  ]);
 
   const scopeChartData = useMemo(() => {
     if (!data) return [];
     const roleScopes = data.roleScopes || {};
     const scopeTotals: Record<string, number> = {};
-    if (hasRoleFilter) {
+    if (hasEntityFilter) {
+      if (hasRoleFilter) {
+        const entityRoleScope = data.monthlyEntityRoleScope ?? {};
+        entityFilters.forEach((entity) => {
+          const roleMap = entityRoleScope[entity] ?? {};
+          roleFilters.forEach((roleId) => {
+            const scopeMap = roleMap[roleId] ?? {};
+            Object.entries(scopeMap).forEach(([scope, series]) => {
+              scopeTotals[scope] = (scopeTotals[scope] ?? 0) + sumSeries(series);
+            });
+          });
+        });
+      } else {
+        const entityScope = data.monthlyEntityScope ?? {};
+        entityFilters.forEach((entity) => {
+          const scopeMap = entityScope[entity] ?? {};
+          Object.entries(scopeMap).forEach(([scope, series]) => {
+            scopeTotals[scope] = (scopeTotals[scope] ?? 0) + sumSeries(series);
+          });
+        });
+      }
+    } else if (hasRoleFilter) {
       roleFilters.forEach((roleId) => {
         const scopeMap = roleScopes[roleId] ?? {};
         Object.entries(scopeMap).forEach(([scope, value]) => {
@@ -579,75 +800,43 @@ export default function CrmBudgetExecutionView() {
       ? result.filter((entry) => scopeFilterSet.has(entry.scope))
       : result;
     return filtered.sort((a, b) => b.actual - a.actual);
-  }, [data, hasRoleFilter, roleFilters, hasScopeFilter, scopeFilterSet]);
+  }, [
+    data,
+    hasRoleFilter,
+    roleFilters,
+    hasScopeFilter,
+    scopeFilterSet,
+    hasEntityFilter,
+    entityFilters,
+  ]);
 
   const processedRows = useMemo(() => {
-    if (!data) return [];
-    const rows = data.table.rows;
-    return rows
-      .map((row) => {
-        const roleShare = (() => {
-          if (!hasRoleFilter) return 1;
-          if (row.isUnassigned) return roleFilterSet.has("unassigned") ? 1 : 0;
-          return row.roleShares.reduce((acc, share) => {
-            if (roleFilterSet.has(share.roleId)) return acc + share.share;
-            return acc;
-          }, 0);
-        })();
-        const scopeSpend = row.scopeSpend ?? {};
-        const scopeActual = hasScopeFilter
-          ? sumRecord(scopeSpend, scopeFilterSet)
-          : sumRecord(scopeSpend);
-        const actual = scopeActual * roleShare;
-        const plan = hasRoleFilter ? row.plan * roleShare : row.plan;
-        const remaining = plan - actual;
-        const utilization = plan > 0 ? actual / plan : 0;
-        const delta = actual - plan;
-        const risk = riskLabel(row, plan, actual, utilization);
-        return {
-          ...row,
-          actual,
-          plan,
-          remaining,
-          utilization,
-          delta,
-          risk,
-        };
-      })
+    return baseRows
       .filter((row) => {
-        if (hasRoleFilter && row.isUnassigned && !roleFilterSet.has("unassigned")) {
-          return false;
-        }
-        if (hasRoleFilter && row.roleIds.length > 0) {
-          const matchesRole = row.roleIds.some((id) => roleFilterSet.has(id));
-          if (!matchesRole && row.plan > 0) return false;
-        }
         if (searchQuery) {
           const query = searchQuery.toLowerCase();
           const roleText = row.roles.join(" ").toLowerCase();
-          if (!row.name.toLowerCase().includes(query) && !roleText.includes(query)) {
+          const entityText = row.entity.toLowerCase();
+          if (
+            !row.name.toLowerCase().includes(query) &&
+            !roleText.includes(query) &&
+            !entityText.includes(query)
+          ) {
             return false;
           }
         }
         if (riskOnly && row.risk.label === "OK") return false;
-        return row.actual > 0 || row.plan > 0;
+        return true;
       })
       .sort((a, b) => b.actual - a.actual);
-  }, [
-    data,
-    hasRoleFilter,
-    hasScopeFilter,
-    roleFilterSet,
-    scopeFilterSet,
-    searchQuery,
-    riskOnly,
-  ]);
+  }, [baseRows, searchQuery, riskOnly]);
 
   const visibleColumns = COLUMN_PRESETS[columnPreset];
 
   const clearFilters = () => {
     setRoleFilters([]);
     setScopeFilters([]);
+    setEntityFilters([]);
     setSearchQuery("");
     setRiskOnly(false);
   };
@@ -661,7 +850,7 @@ export default function CrmBudgetExecutionView() {
             <p className="text-xs uppercase tracking-[0.3em] text-[color:var(--color-text)]/65">CRM</p>
             <h1 className="mt-2 text-2xl font-semibold text-[color:var(--color-text)]">Budget Execution</h1>
             <p className="mt-2 text-sm text-[color:var(--color-text)]/70">
-              Execution tracking by role and scope for {clientSlug.toUpperCase()}.
+              Execution tracking by role, entity, and scope for {clientSlug.toUpperCase()}.
             </p>
           </div>
           <div className="flex flex-wrap items-center gap-2">
@@ -716,13 +905,20 @@ export default function CrmBudgetExecutionView() {
       </header>
 
       <section className="card px-6 py-5">
-        <div className="grid gap-4 lg:grid-cols-[1.2fr_1.2fr_1fr]">
+        <div className="grid gap-4 lg:grid-cols-[1.1fr_1.1fr_1.1fr_1fr]">
           <MultiSelect
             label="Role"
             options={roleOptions}
             values={roleFilters}
             onChange={setRoleFilters}
             placeholder="All roles"
+          />
+          <MultiSelect
+            label="Entity"
+            options={entityOptions}
+            values={entityFilters}
+            onChange={setEntityFilters}
+            placeholder="All entities"
           />
           <MultiSelect
             label="Scope"
@@ -757,7 +953,7 @@ export default function CrmBudgetExecutionView() {
             </button>
           </div>
           <span className="text-xs text-[color:var(--color-text)]/60">
-            Filters impact burn-up, breakdowns, and details. KPIs stay global.
+            Filters update KPIs, burn-up, breakdowns, and details.
           </span>
         </div>
       </section>
@@ -969,7 +1165,12 @@ export default function CrmBudgetExecutionView() {
               <thead className="bg-[color:var(--color-surface-2)]/50 text-[color:var(--color-text)]/80">
                 <tr>
                   {visibleColumns.map((key) => (
-                    <th key={key} className={`px-3 py-2 text-left font-semibold ${key !== "name" && key !== "roles" ? "text-right" : ""}`}>
+                    <th
+                      key={key}
+                      className={`px-3 py-2 text-left font-semibold ${
+                        key !== "name" && key !== "roles" && key !== "entity" ? "text-right" : ""
+                      }`}
+                    >
                       {COLUMN_LABELS[key]}
                     </th>
                   ))}
@@ -994,6 +1195,13 @@ export default function CrmBudgetExecutionView() {
                       {visibleColumns.map((key) => {
                         if (key === "name") {
                           return <td key={key} className="px-3 py-2 font-semibold">{row.name}</td>;
+                        }
+                        if (key === "entity") {
+                          return (
+                            <td key={key} className="px-3 py-2 text-[color:var(--color-text)]/70">
+                              {row.entity}
+                            </td>
+                          );
                         }
                         if (key === "roles") {
                           return (

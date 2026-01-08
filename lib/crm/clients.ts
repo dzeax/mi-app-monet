@@ -4,6 +4,7 @@ export type CrmModuleType =
   | 'campaign_reporting'
   | 'budget'
   | 'budget_execution'
+  | 'manual_efforts'
   | 'playbooks'
   | 'kpi_dashboard';
 
@@ -42,6 +43,13 @@ export const CRM_CLIENTS: CrmClient[] = [
         label: 'DQ Tickets',
         description: 'Data Quality tickets status and execution.',
         icon: 'insight',
+      },
+      {
+        slug: 'manual-efforts',
+        type: 'manual_efforts',
+        label: 'Manual Efforts',
+        description: 'Non-ticket effort logging for CRM teams.',
+        icon: 'chart',
       },
       {
         slug: 'campaigns',

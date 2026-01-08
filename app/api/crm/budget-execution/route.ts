@@ -61,6 +61,7 @@ export async function GET(request: Request) {
   const yearStart = `${year}-01-01`;
   const yearEnd = `${year}-12-31`;
   const UNMAPPED_KEY = "unmapped";
+  const UNASSIGNED_ENTITY = "Unassigned";
 
   try {
     const { data: rolesData, error: rolesError } = await supabase
@@ -120,10 +121,25 @@ export async function GET(request: Request) {
       return NextResponse.json({ error: aliasError.message }, { status: 500 });
     }
 
+    const { data: entityRows, error: entityError } = await supabase
+      .from("crm_people_entities")
+      .select("person_id, entity")
+      .eq("client_slug", client)
+      .eq("year", year);
+    if (entityError) {
+      return NextResponse.json({ error: entityError.message }, { status: 500 });
+    }
+
     const aliasMap = new Map<string, string>();
     (aliasData ?? []).forEach((row: any) => {
       if (!row?.alias || !row?.person_id) return;
       aliasMap.set(normalizeKey(row.alias), row.person_id);
+    });
+
+    const entityByPersonId = new Map<string, string>();
+    (entityRows ?? []).forEach((row: any) => {
+      if (!row?.person_id || !row?.entity) return;
+      entityByPersonId.set(String(row.person_id), String(row.entity));
     });
 
     const rateByPerson = new Map<string, { dailyRate: number; currency: string }>();
@@ -225,6 +241,12 @@ export async function GET(request: Request) {
       });
     });
 
+    const planByEntity = new Map<string, number>();
+    Object.entries(budgetByPerson).forEach(([personId, plan]) => {
+      const entity = entityByPersonId.get(personId) ?? UNASSIGNED_ENTITY;
+      planByEntity.set(entity, (planByEntity.get(entity) ?? 0) + plan);
+    });
+
     type ContributionRow = {
       person_id?: string | null;
       owner?: string | null;
@@ -239,6 +261,14 @@ export async function GET(request: Request) {
       owner?: string | null;
       hours_total?: number | string | null;
       send_date?: string | null;
+    };
+
+    type ManualEffortRow = {
+      person_id?: string | null;
+      owner?: string | null;
+      hours?: number | string | null;
+      effort_date?: string | null;
+      workstream?: string | null;
     };
 
     const contribRows = await fetchPaged<ContributionRow>((from, to) =>
@@ -265,6 +295,18 @@ export async function GET(request: Request) {
         .range(from, to),
     );
 
+    const manualRows = await fetchPaged<ManualEffortRow>((from, to) =>
+      supabase
+        .from("crm_manual_efforts")
+        .select("person_id, owner, hours, effort_date, workstream")
+        .eq("client_slug", client)
+        .gte("effort_date", yearStart)
+        .lte("effort_date", yearEnd)
+        .order("effort_date", { ascending: true })
+        .order("id", { ascending: true })
+        .range(from, to),
+    );
+
     const monthlyActual = Array(12).fill(0);
     const scopeTotals = new Map<string, number>();
     const scopeSpendByPerson = new Map<string, Map<string, number>>();
@@ -272,6 +314,11 @@ export async function GET(request: Request) {
     const monthlyScope = new Map<string, number[]>();
     const monthlyRole = new Map<string, number[]>();
     const monthlyRoleScope = new Map<string, Map<string, number[]>>();
+    const entityTotals = new Map<string, number>();
+    const monthlyEntity = new Map<string, number[]>();
+    const monthlyEntityScope = new Map<string, Map<string, number[]>>();
+    const monthlyEntityRole = new Map<string, Map<string, number[]>>();
+    const monthlyEntityRoleScope = new Map<string, Map<string, Map<string, number[]>>>();
     let actualTotal = 0;
     let totalHours = 0;
     let totalDays = 0;
@@ -299,6 +346,53 @@ export async function GET(request: Request) {
       return created;
     };
 
+    const ensureEntitySeries = (entityKey: string) =>
+      ensureMonthSeries(monthlyEntity, entityKey);
+
+    const ensureEntityScopeSeries = (entityKey: string, scopeKey: string) => {
+      let scopeMap = monthlyEntityScope.get(entityKey);
+      if (!scopeMap) {
+        scopeMap = new Map<string, number[]>();
+        monthlyEntityScope.set(entityKey, scopeMap);
+      }
+      const existing = scopeMap.get(scopeKey);
+      if (existing) return existing;
+      const created = Array(12).fill(0);
+      scopeMap.set(scopeKey, created);
+      return created;
+    };
+
+    const ensureEntityRoleSeries = (entityKey: string, roleId: string) => {
+      let roleMap = monthlyEntityRole.get(entityKey);
+      if (!roleMap) {
+        roleMap = new Map<string, number[]>();
+        monthlyEntityRole.set(entityKey, roleMap);
+      }
+      const existing = roleMap.get(roleId);
+      if (existing) return existing;
+      const created = Array(12).fill(0);
+      roleMap.set(roleId, created);
+      return created;
+    };
+
+    const ensureEntityRoleScopeSeries = (entityKey: string, roleId: string, scopeKey: string) => {
+      let roleMap = monthlyEntityRoleScope.get(entityKey);
+      if (!roleMap) {
+        roleMap = new Map<string, Map<string, number[]>>();
+        monthlyEntityRoleScope.set(entityKey, roleMap);
+      }
+      let scopeMap = roleMap.get(roleId);
+      if (!scopeMap) {
+        scopeMap = new Map<string, number[]>();
+        roleMap.set(roleId, scopeMap);
+      }
+      const existing = scopeMap.get(scopeKey);
+      if (existing) return existing;
+      const created = Array(12).fill(0);
+      scopeMap.set(scopeKey, created);
+      return created;
+    };
+
     const addSpend = (
       personId: string | null,
       owner: string | null,
@@ -315,11 +409,15 @@ export async function GET(request: Request) {
       if (!rate || rate.dailyRate <= 0) return;
       const days = hours / 7;
       const amount = days * rate.dailyRate;
+      const entityKey = resolvedPersonId
+        ? entityByPersonId.get(resolvedPersonId) ?? UNASSIGNED_ENTITY
+        : UNASSIGNED_ENTITY;
       actualTotal += amount;
       totalHours += hours;
       totalDays += days;
       const scopeKey = scopeLabel || "Unknown";
       scopeTotals.set(scopeKey, (scopeTotals.get(scopeKey) ?? 0) + amount);
+      entityTotals.set(entityKey, (entityTotals.get(entityKey) ?? 0) + amount);
       const personKey = resolvedPersonId ?? UNMAPPED_KEY;
       const scopeMap = scopeSpendByPerson.get(personKey) ?? new Map<string, number>();
       scopeMap.set(scopeKey, (scopeMap.get(scopeKey) ?? 0) + amount);
@@ -345,15 +443,21 @@ export async function GET(request: Request) {
         if (idx >= 0 && idx < 12) {
           monthlyActual[idx] += amount;
           ensureMonthSeries(monthlyScope, scopeKey)[idx] += amount;
+          ensureEntitySeries(entityKey)[idx] += amount;
+          ensureEntityScopeSeries(entityKey, scopeKey)[idx] += amount;
           if (roleShares && roleShares.length > 0) {
             roleShares.forEach((share) => {
               const roleAmount = amount * share.share;
               ensureMonthSeries(monthlyRole, share.roleId)[idx] += roleAmount;
               ensureRoleScopeSeries(share.roleId, scopeKey)[idx] += roleAmount;
+              ensureEntityRoleSeries(entityKey, share.roleId)[idx] += roleAmount;
+              ensureEntityRoleScopeSeries(entityKey, share.roleId, scopeKey)[idx] += roleAmount;
             });
           } else {
             ensureMonthSeries(monthlyRole, "unassigned")[idx] += amount;
             ensureRoleScopeSeries("unassigned", scopeKey)[idx] += amount;
+            ensureEntityRoleSeries(entityKey, "unassigned")[idx] += amount;
+            ensureEntityRoleScopeSeries(entityKey, "unassigned", scopeKey)[idx] += amount;
           }
         }
         if (!lastDate || d > lastDate) lastDate = d;
@@ -386,6 +490,18 @@ export async function GET(request: Request) {
         hours,
         row.send_date ?? null,
         "Production",
+      );
+    });
+
+    manualRows.forEach((row) => {
+      const hours = Number(row.hours ?? 0);
+      const scopeLabel = String(row.workstream || "Manual");
+      addSpend(
+        row.person_id ? String(row.person_id) : null,
+        row.owner ?? null,
+        hours,
+        row.effort_date ?? null,
+        scopeLabel,
       );
     });
 
@@ -435,6 +551,48 @@ export async function GET(request: Request) {
       });
     });
 
+    const entityPlanPayload: Record<string, number> = {};
+    planByEntity.forEach((value, entity) => {
+      entityPlanPayload[entity] = value;
+    });
+
+    const entityActualPayload: Record<string, number> = {};
+    entityTotals.forEach((value, entity) => {
+      entityActualPayload[entity] = value;
+    });
+
+    const monthlyEntityPayload: Record<string, number[]> = {};
+    monthlyEntity.forEach((series, entity) => {
+      monthlyEntityPayload[entity] = series;
+    });
+
+    const monthlyEntityScopePayload: Record<string, Record<string, number[]>> = {};
+    monthlyEntityScope.forEach((scopeMap, entity) => {
+      monthlyEntityScopePayload[entity] = {};
+      scopeMap.forEach((series, scope) => {
+        monthlyEntityScopePayload[entity][scope] = series;
+      });
+    });
+
+    const monthlyEntityRolePayload: Record<string, Record<string, number[]>> = {};
+    monthlyEntityRole.forEach((roleMap, entity) => {
+      monthlyEntityRolePayload[entity] = {};
+      roleMap.forEach((series, roleId) => {
+        monthlyEntityRolePayload[entity][roleId] = series;
+      });
+    });
+
+    const monthlyEntityRoleScopePayload: Record<string, Record<string, Record<string, number[]>>> = {};
+    monthlyEntityRoleScope.forEach((roleMap, entity) => {
+      monthlyEntityRoleScopePayload[entity] = {};
+      roleMap.forEach((scopeMap, roleId) => {
+        monthlyEntityRoleScopePayload[entity][roleId] = {};
+        scopeMap.forEach((series, scope) => {
+          monthlyEntityRoleScopePayload[entity][roleId][scope] = series;
+        });
+      });
+    });
+
     const roleScopePayload: Record<string, Record<string, number>> = {};
     roleScopeActual.forEach((scopeMap, roleId) => {
       roleScopePayload[roleId] = {};
@@ -463,10 +621,14 @@ export async function GET(request: Request) {
       const name = isUnmapped
         ? "Unmapped"
         : peopleById.get(personKey)?.displayName || "Unknown";
+      const entity = isUnmapped
+        ? UNASSIGNED_ENTITY
+        : entityByPersonId.get(personKey) ?? UNASSIGNED_ENTITY;
       return {
         key: personKey,
         personId: isUnmapped ? null : personKey,
         name,
+        entity,
         roleIds,
         roles,
         roleShares: shares,
@@ -485,6 +647,18 @@ export async function GET(request: Request) {
     }));
 
     const scopeOptions = scopeBreakdown.map((entry) => entry.scope);
+    const entityOptions = Array.from(
+      new Set([
+        ...Array.from(entityByPersonId.values()),
+        ...entityTotals.keys(),
+        ...planByEntity.keys(),
+      ]),
+    ).sort((a, b) => a.localeCompare(b));
+
+    const entityByPerson: Record<string, string> = {};
+    entityByPersonId.forEach((entity, personId) => {
+      entityByPerson[personId] = entity;
+    });
 
     const roleCurrencySet = new Set(activeRoles.map((role) => role.currency).filter(Boolean));
     const currency =
@@ -503,6 +677,13 @@ export async function GET(request: Request) {
       utilization,
       asOfDate: lastDate ? lastDate.toISOString().slice(0, 10) : null,
       monthlyActual,
+      entityByPerson,
+      entityPlan: entityPlanPayload,
+      entityActual: entityActualPayload,
+      monthlyEntity: monthlyEntityPayload,
+      monthlyEntityScope: monthlyEntityScopePayload,
+      monthlyEntityRole: monthlyEntityRolePayload,
+      monthlyEntityRoleScope: monthlyEntityRoleScopePayload,
       totals: {
         hours: totalHours,
         days: totalDays,
@@ -520,6 +701,7 @@ export async function GET(request: Request) {
         rows: tableRows,
         roles: roleOptions,
         scopes: scopeOptions,
+        entities: entityOptions,
       },
     });
   } catch (err) {

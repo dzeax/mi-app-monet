@@ -5,6 +5,7 @@ import { Fragment, useEffect, useMemo, useState } from "react";
 import { Activity, CreditCard, PiggyBank, Wallet } from "lucide-react";
 import { usePathname } from "next/navigation";
 import { useAuth } from "@/context/AuthContext";
+import { ENTITY_OPTIONS } from "@/lib/crm/entities";
 import CrmBudgetModal from "@/components/crm/CrmBudgetModal";
 
 type BudgetRole = {
@@ -41,7 +42,10 @@ type BudgetResponse = {
   spendByPerson: Record<string, number>;
   unmappedSpend?: number;
   spendCurrency?: string | null;
+  entityByPerson?: Record<string, string>;
 };
+
+const UNASSIGNED_ENTITY = "Unassigned";
 
 const DAY_MS = 24 * 60 * 60 * 1000;
 
@@ -123,6 +127,7 @@ export default function CrmBudgetView() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [openManage, setOpenManage] = useState(false);
+  const [entityFilter, setEntityFilter] = useState("");
 
   const fetchBudget = async () => {
     setLoading(true);
@@ -148,6 +153,7 @@ export default function CrmBudgetView() {
   const people = data?.people ?? [];
   const spendByPerson = data?.spendByPerson ?? {};
   const unmappedSpend = Number(data?.unmappedSpend ?? 0);
+  const entityByPerson = data?.entityByPerson ?? {};
 
   const peopleById = useMemo(() => {
     const map = new Map<string, Person>();
@@ -163,14 +169,34 @@ export default function CrmBudgetView() {
     return "EUR";
   }, [roles]);
 
-  const { roleSummaries, personSummaries, totals } = useMemo(() => {
+  const entityOptions = useMemo(() => {
+    const set = new Set<string>(ENTITY_OPTIONS);
+    Object.values(entityByPerson).forEach((entity) => {
+      if (entity) set.add(entity);
+    });
+    return Array.from(set).sort((a, b) => a.localeCompare(b));
+  }, [entityByPerson]);
+
+  useEffect(() => {
+    if (entityFilter && !entityOptions.includes(entityFilter)) {
+      setEntityFilter("");
+    }
+  }, [entityFilter, entityOptions]);
+
+  const { roleSummaries, personSummaries, totals, missingEntityPeople } = useMemo(() => {
     const yearStart = new Date(Date.UTC(year, 0, 1));
     const yearEnd = new Date(Date.UTC(year, 11, 31));
+    const hasEntityFilter = Boolean(entityFilter);
+    const entityForPerson = (personId: string) =>
+      entityByPerson[personId] ?? UNASSIGNED_ENTITY;
+    const isEntityMatch = (personId: string) =>
+      !hasEntityFilter || entityForPerson(personId) === entityFilter;
 
     const activeRoles = roles.filter((r) => r.isActive !== false);
     const activeAssignments = assignments.filter((a) => a.isActive !== false);
 
-    const roleSummaries = activeRoles.map((role) => {
+    const roleSummaries = activeRoles
+      .map((role) => {
       const roleAssignments = activeAssignments.filter((a) => a.roleId === role.id);
       const memberMap = new Map<string, { personId: string; activeDays: number; budget: number }>();
       let totalActiveDays = 0;
@@ -208,30 +234,50 @@ export default function CrmBudgetView() {
         return {
           ...member,
           displayName: person?.displayName || "Unknown",
+          entity: entityForPerson(member.personId),
         };
       });
 
-      const spent = members.reduce((acc, member) => {
+      const visibleMembers = hasEntityFilter
+        ? members.filter((member) => isEntityMatch(member.personId))
+        : members;
+
+      const spent = visibleMembers.reduce((acc, member) => {
         const value = spendByPerson[member.personId] ?? 0;
         return acc + value;
       }, 0);
 
-      const allocated = members.reduce((acc, member) => acc + member.budget, 0);
-      const remaining = role.poolAmount - spent;
-      const utilization = role.poolAmount > 0 ? spent / role.poolAmount : 0;
+      const allocated = visibleMembers.reduce((acc, member) => acc + member.budget, 0);
+      if (hasEntityFilter && allocated === 0 && spent === 0) {
+        return null;
+      }
+      const poolAmount = hasEntityFilter ? allocated : role.poolAmount;
+      const remaining = poolAmount - spent;
+      const utilization = poolAmount > 0 ? spent / poolAmount : 0;
 
       return {
         roleId: role.id,
         roleName: role.roleName,
-        poolAmount: role.poolAmount,
+        poolAmount,
         currency: role.currency,
-        members,
+        members: visibleMembers,
         allocated,
         spent,
         remaining,
         utilization,
       };
-    });
+    })
+    .filter(Boolean) as Array<{
+      roleId: string;
+      roleName: string;
+      poolAmount: number;
+      currency: string;
+      members: Array<{ personId: string; activeDays: number; budget: number; displayName: string; entity: string }>;
+      allocated: number;
+      spent: number;
+      remaining: number;
+      utilization: number;
+    }>;
 
     const budgetByPerson: Record<string, number> = {};
     const rolesByPerson: Record<string, string[]> = {};
@@ -248,7 +294,14 @@ export default function CrmBudgetView() {
       ...Object.keys(spendByPerson),
     ]);
 
-    const personSummaries = Array.from(personIds).map((personId) => {
+    const missingEntityPeople = Array.from(personIds).filter((personId) => {
+      const entity = entityByPerson[personId];
+      return !entity;
+    });
+
+    const personSummaries = Array.from(personIds)
+      .filter((personId) => isEntityMatch(personId))
+      .map((personId) => {
       const person = peopleById.get(personId);
       const budget = budgetByPerson[personId] ?? 0;
       const spent = spendByPerson[personId] ?? 0;
@@ -258,21 +311,32 @@ export default function CrmBudgetView() {
         personId,
         displayName: person?.displayName || "Unknown",
         roles: rolesByPerson[personId] ?? [],
+        entity: entityForPerson(personId),
         budget,
         spent,
         remaining,
         utilization,
       };
-    }).sort((a, b) => b.budget - a.budget);
+    })
+      .sort((a, b) => b.budget - a.budget);
 
-    const budgetTotal = activeRoles.reduce((acc, role) => acc + role.poolAmount, 0);
-    const spentTotal = Object.values(spendByPerson).reduce((acc, val) => acc + val, 0);
+    const budgetTotal = hasEntityFilter
+      ? Object.entries(budgetByPerson).reduce((acc, [personId, value]) => {
+          if (!isEntityMatch(personId)) return acc;
+          return acc + value;
+        }, 0)
+      : activeRoles.reduce((acc, role) => acc + role.poolAmount, 0);
+    const spentTotal = Object.entries(spendByPerson).reduce((acc, [personId, value]) => {
+      if (!isEntityMatch(personId)) return acc;
+      return acc + value;
+    }, 0);
     const remainingTotal = budgetTotal - spentTotal;
     const utilizationTotal = budgetTotal > 0 ? spentTotal / budgetTotal : 0;
 
     return {
       roleSummaries,
       personSummaries,
+      missingEntityPeople,
       totals: {
         budgetTotal,
         spentTotal,
@@ -280,7 +344,13 @@ export default function CrmBudgetView() {
         utilizationTotal,
       },
     };
-  }, [roles, assignments, peopleById, spendByPerson, year]);
+  }, [roles, assignments, peopleById, spendByPerson, year, entityByPerson, entityFilter]);
+
+  const missingEntityLabels = useMemo(() => {
+    return missingEntityPeople
+      .map((personId) => peopleById.get(personId)?.displayName || "Unknown")
+      .sort((a, b) => a.localeCompare(b));
+  }, [missingEntityPeople, peopleById]);
 
   const groupedPersonRows = useMemo(
     () =>
@@ -406,9 +476,37 @@ export default function CrmBudgetView() {
           </div>
         </div>
 
+        <div className="mt-5 flex flex-wrap items-end gap-3">
+          <div className="flex flex-col gap-1">
+            <label className="text-xs font-medium text-[color:var(--color-text)]/70">Entity</label>
+            <select
+              className="input h-10 min-w-[220px]"
+              value={entityFilter}
+              onChange={(e) => setEntityFilter(e.target.value)}
+            >
+              <option value="">All entities</option>
+              {entityOptions.map((entity) => (
+                <option key={entity} value={entity}>
+                  {entity}
+                </option>
+              ))}
+            </select>
+          </div>
+          <span className="text-xs text-[color:var(--color-text)]/60">
+            Filters update KPIs and tables.
+          </span>
+        </div>
+
         {unmappedSpend > 0 ? (
           <div className="mt-4 rounded-xl border border-amber-200 bg-amber-50 px-4 py-2 text-sm text-amber-900">
             Unmapped spend: {formatCurrency(unmappedSpend, budgetCurrency)} (missing person mapping).
+          </div>
+        ) : null}
+        {missingEntityLabels.length > 0 ? (
+          <div className="mt-3 rounded-xl border border-amber-200 bg-amber-50 px-4 py-2 text-sm text-amber-900">
+            Missing entity for {missingEntityLabels.length} people:{" "}
+            {missingEntityLabels.slice(0, 6).join(", ")}
+            {missingEntityLabels.length > 6 ? ` +${missingEntityLabels.length - 6} more` : ""}
           </div>
         ) : null}
       </header>
@@ -490,6 +588,7 @@ export default function CrmBudgetView() {
             <thead className="bg-[color:var(--color-surface-2)]/50 text-[color:var(--color-text)]/80">
               <tr>
                 <th className="px-3 py-2 text-left font-semibold">Person</th>
+                <th className="px-3 py-2 text-left font-semibold">Entity</th>
                 <th className="px-3 py-2 text-right font-semibold">Budget</th>
                 <th className="px-3 py-2 text-right font-semibold">Spent</th>
                 <th className="px-3 py-2 text-right font-semibold">Remaining</th>
@@ -499,19 +598,19 @@ export default function CrmBudgetView() {
             <tbody className="divide-y divide-[color:var(--color-border)]">
               {loading ? (
                 <tr>
-                  <td className="px-3 py-6 text-center text-[color:var(--color-text)]/60" colSpan={5}>
+                  <td className="px-3 py-6 text-center text-[color:var(--color-text)]/60" colSpan={6}>
                     Loading budget...
                   </td>
                 </tr>
               ) : error ? (
                 <tr>
-                  <td className="px-3 py-6 text-center text-[color:var(--color-text)]/60" colSpan={5}>
+                  <td className="px-3 py-6 text-center text-[color:var(--color-text)]/60" colSpan={6}>
                     {error}
                   </td>
                 </tr>
               ) : groupedPersonRows.length === 0 ? (
                 <tr>
-                  <td className="px-3 py-6 text-center text-[color:var(--color-text)]/60" colSpan={5}>
+                  <td className="px-3 py-6 text-center text-[color:var(--color-text)]/60" colSpan={6}>
                     No budget entries yet.
                   </td>
                 </tr>
@@ -521,7 +620,7 @@ export default function CrmBudgetView() {
                     <tr className="bg-[color:var(--color-surface-2)]/40">
                       <td
                         className="px-3 py-2 text-xs font-semibold uppercase tracking-[0.2em] text-[color:var(--color-text)]/70"
-                        colSpan={5}
+                        colSpan={6}
                       >
                         {group.roleName}
                       </td>
@@ -530,6 +629,9 @@ export default function CrmBudgetView() {
                       group.members.map((member) => (
                         <tr key={`${group.roleName}-${member.personId}`}>
                           <td className="px-3 py-2 font-semibold">{member.displayName}</td>
+                          <td className="px-3 py-2 text-[color:var(--color-text)]/70">
+                            {member.entity}
+                          </td>
                           <td className="px-3 py-2 text-right">
                             {formatCurrency(member.budget, budgetCurrency)}
                           </td>
@@ -563,7 +665,7 @@ export default function CrmBudgetView() {
                       ))
                     ) : (
                       <tr>
-                        <td className="px-3 py-3 text-sm text-[color:var(--color-text)]/60" colSpan={5}>
+                        <td className="px-3 py-3 text-sm text-[color:var(--color-text)]/60" colSpan={6}>
                           No members assigned.
                         </td>
                       </tr>
@@ -583,6 +685,8 @@ export default function CrmBudgetView() {
           roles={roles}
           assignments={assignments}
           people={people}
+          entityByPerson={entityByPerson}
+          spendByPerson={spendByPerson}
           canEdit={isEditor || isAdmin}
           canDelete={isAdmin}
           onClose={() => setOpenManage(false)}

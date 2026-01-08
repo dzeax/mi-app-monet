@@ -5,6 +5,7 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import type { MouseEvent as ReactMouseEvent } from "react";
 import DatePicker from "@/components/ui/DatePicker";
 import ModalShell from "@/components/ui/ModalShell";
+import { ENTITY_OPTIONS } from "@/lib/crm/entities";
 import { showError, showSuccess } from "@/utils/toast";
 
 type BudgetRole = {
@@ -38,6 +39,8 @@ type Props = {
   roles: BudgetRole[];
   assignments: BudgetAssignment[];
   people: Person[];
+  entityByPerson?: Record<string, string>;
+  spendByPerson?: Record<string, number>;
   canEdit: boolean;
   canDelete: boolean;
   onClose: () => void;
@@ -52,6 +55,8 @@ export default function CrmBudgetModal({
   roles,
   assignments,
   people,
+  entityByPerson,
+  spendByPerson,
   canEdit,
   canDelete,
   onClose,
@@ -62,6 +67,7 @@ export default function CrmBudgetModal({
     assignmentList: BudgetAssignment[],
     removedRoles: string[],
     removedAssignments: string[],
+    entitySnapshot: Record<string, string>,
   ) => {
     const normalizedRoles = roleList
       .map((role) => ({
@@ -91,6 +97,13 @@ export default function CrmBudgetModal({
       assignments: normalizedAssignments,
       deletedRoleIds: [...new Set(removedRoles)].sort(),
       deletedAssignmentIds: [...new Set(removedAssignments)].sort(),
+      entities: Object.entries(entitySnapshot)
+        .filter(([, entity]) => entity)
+        .map(([personId, entity]) => ({
+          personId,
+          entity: entity.trim(),
+        }))
+        .sort((a, b) => a.personId.localeCompare(b.personId)),
     });
   };
 
@@ -98,6 +111,7 @@ export default function CrmBudgetModal({
     roles: BudgetRole[];
     assignments: BudgetAssignment[];
   }>({ roles: [], assignments: [] });
+  const [entityMap, setEntityMap] = useState<Record<string, string>>({});
   const [deletedRoleIds, setDeletedRoleIds] = useState<string[]>([]);
   const [deletedAssignmentIds, setDeletedAssignmentIds] = useState<string[]>([]);
   const [savingAll, setSavingAll] = useState(false);
@@ -129,10 +143,12 @@ export default function CrmBudgetModal({
       startDate: a.startDate ?? null,
       endDate: a.endDate ?? null,
     }));
+    const baseEntities = entityByPerson ?? {};
     setDraft({
       roles: baseRoles,
       assignments: baseAssignments,
     });
+    setEntityMap(baseEntities);
     setDeletedRoleIds([]);
     setDeletedAssignmentIds([]);
     initialSignatureRef.current = buildSignature(
@@ -140,6 +156,7 @@ export default function CrmBudgetModal({
       baseAssignments,
       [],
       [],
+      baseEntities,
     );
     setFeedback(null);
     setExpandedRoles((prev) => {
@@ -157,7 +174,7 @@ export default function CrmBudgetModal({
       return next;
     });
     hasInitializedExpanded.current = true;
-  }, [roles, assignments]);
+  }, [roles, assignments, entityByPerson]);
 
   useEffect(
     () => () => {
@@ -176,9 +193,10 @@ export default function CrmBudgetModal({
         draft.assignments,
         deletedRoleIds,
         deletedAssignmentIds,
+        entityMap,
       ) !== initialSignatureRef.current
     );
-  }, [draft.roles, draft.assignments, deletedRoleIds, deletedAssignmentIds]);
+  }, [draft.roles, draft.assignments, deletedRoleIds, deletedAssignmentIds, entityMap]);
 
   const peopleOptions = useMemo(
     () =>
@@ -186,6 +204,51 @@ export default function CrmBudgetModal({
         a.displayName.localeCompare(b.displayName),
       ),
     [people],
+  );
+
+  const peopleById = useMemo(() => {
+    const map = new Map<string, Person>();
+    people.forEach((person) => {
+      map.set(person.personId, person);
+    });
+    return map;
+  }, [people]);
+
+  const requiredPersonIds = useMemo(() => {
+    const ids = new Set<string>();
+    draft.assignments.forEach((assignment) => {
+      if (assignment.personId) ids.add(assignment.personId);
+    });
+    if (spendByPerson) {
+      Object.entries(spendByPerson).forEach(([personId, spent]) => {
+        if ((spent ?? 0) > 0) ids.add(personId);
+      });
+    }
+    return Array.from(ids);
+  }, [draft.assignments, spendByPerson]);
+
+  const requiredPeople = useMemo(
+    () =>
+      requiredPersonIds
+        .map((personId) => ({
+          personId,
+          displayName: peopleById.get(personId)?.displayName || "Unknown",
+        }))
+        .sort((a, b) => a.displayName.localeCompare(b.displayName)),
+    [requiredPersonIds, peopleById],
+  );
+
+  const missingEntityIds = useMemo(
+    () => requiredPersonIds.filter((personId) => !entityMap[personId]),
+    [requiredPersonIds, entityMap],
+  );
+
+  const missingEntityLabels = useMemo(
+    () =>
+      missingEntityIds
+        .map((personId) => peopleById.get(personId)?.displayName || "Unknown")
+        .sort((a, b) => a.localeCompare(b)),
+    [missingEntityIds, peopleById],
   );
 
   const handleRoleDelete = (roleId: string) => {
@@ -235,6 +298,14 @@ export default function CrmBudgetModal({
     setSavingAll(true);
     setFeedback(null);
     try {
+      if (missingEntityIds.length > 0) {
+        const preview = missingEntityLabels.slice(0, 5).join(", ");
+        const suffix =
+          missingEntityLabels.length > 5
+            ? ` +${missingEntityLabels.length - 5} more`
+            : "";
+        throw new Error(`Assign an entity for: ${preview}${suffix}.`);
+      }
       const rolePayloads = draft.roles.map((role) => ({
         ...role,
         roleName: role.roleName.trim(),
@@ -347,6 +418,22 @@ export default function CrmBudgetModal({
         }
       }
 
+      const entityEntries = Object.entries(entityMap)
+        .filter(([, entity]) => entity && entity.trim())
+        .map(([personId, entity]) => ({
+          personId,
+          entity: entity.trim(),
+        }));
+      if (entityEntries.length > 0) {
+        const res = await fetch("/api/crm/people-entities", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ client: clientSlug, year, entries: entityEntries }),
+        });
+        const body = await res.json().catch(() => null);
+        if (!res.ok) throw new Error(body?.error || "Failed to save entities");
+      }
+
       setDraft({ roles: nextRoles, assignments: nextAssignments });
       setDeletedRoleIds([]);
       setDeletedAssignmentIds([]);
@@ -355,6 +442,7 @@ export default function CrmBudgetModal({
         nextAssignments,
         [],
         [],
+        entityMap,
       );
       setFeedback({ type: "success", message: "Changes saved." });
       onSaved();
@@ -482,6 +570,37 @@ export default function CrmBudgetModal({
         });
         return next;
       });
+      try {
+        const copyRes = await fetch("/api/crm/people-entities/copy", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            client: clientSlug,
+            fromYear: prevYear,
+            toYear: year,
+            overwrite: false,
+          }),
+        });
+        const copyBody = await copyRes.json().catch(() => null);
+        if (!copyRes.ok && copyRes.status !== 404) {
+          throw new Error(copyBody?.error || "Failed to copy entities");
+        }
+        const res = await fetch(
+          `/api/crm/people-entities?client=${clientSlug}&year=${year}`,
+        );
+        const body = await res.json().catch(() => null);
+        if (res.ok) {
+          const nextMap: Record<string, string> = {};
+          (body?.entries ?? []).forEach((entry: any) => {
+            if (entry?.personId && entry?.entity) {
+              nextMap[entry.personId] = entry.entity;
+            }
+          });
+          setEntityMap(nextMap);
+        }
+      } catch (entityErr) {
+        showError(entityErr instanceof Error ? entityErr.message : "Failed to copy entities");
+      }
       showSuccess(`Loaded roles from ${prevYear}.`);
     } catch (err) {
       showError(err instanceof Error ? err.message : "Copy failed");
@@ -527,7 +646,7 @@ export default function CrmBudgetModal({
               hasUnsavedChanges ? "ring-2 ring-emerald-200/70" : ""
             }`}
             onClick={handleSaveAll}
-            disabled={savingAll || !canEdit}
+            disabled={savingAll || !canEdit || missingEntityIds.length > 0}
           >
             {savingAll
               ? "Saving..."
@@ -556,6 +675,69 @@ export default function CrmBudgetModal({
             {feedback.message}
           </div>
         ) : null}
+        <section className="space-y-3">
+          <div className="flex items-center justify-between">
+            <h3 className="text-sm font-semibold text-[color:var(--color-text)]">Entities</h3>
+            <span className="text-xs text-[color:var(--color-text)]/60">
+              Required for budget and execution splits.
+            </span>
+          </div>
+          {requiredPeople.length === 0 ? (
+            <div className="text-sm text-[color:var(--color-text)]/70">
+              Add members to assign entities.
+            </div>
+          ) : (
+            <div className="space-y-2">
+              {requiredPeople.map((person) => {
+                const value = entityMap[person.personId] ?? "";
+                const isMissing = !value;
+                return (
+                  <div
+                    key={person.personId}
+                    className={[
+                      "flex flex-wrap items-center gap-3 rounded-xl border bg-[color:var(--color-surface)]/90 p-2",
+                      isMissing ? "border-red-200" : "border-[color:var(--color-border)]",
+                    ].join(" ")}
+                  >
+                    <div className="min-w-[180px] flex-1">
+                      <div className="text-sm font-semibold text-[color:var(--color-text)]">
+                        {person.displayName}
+                      </div>
+                      {isMissing ? (
+                        <div className="text-xs text-red-600">Entity required</div>
+                      ) : null}
+                    </div>
+                    <select
+                      className={[
+                        "input h-9 min-w-[180px]",
+                        isMissing ? "border-red-300" : "",
+                      ].join(" ")}
+                      value={value}
+                      onChange={(e) =>
+                        setEntityMap((prev) => ({
+                          ...prev,
+                          [person.personId]: e.target.value,
+                        }))
+                      }
+                    >
+                      <option value="">Select entity</option>
+                      {ENTITY_OPTIONS.map((entity) => (
+                        <option key={entity} value={entity}>
+                          {entity}
+                        </option>
+                      ))}
+                    </select>
+                  </div>
+                );
+              })}
+            </div>
+          )}
+          {missingEntityLabels.length > 0 ? (
+            <div className="rounded-xl border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-900">
+              Missing entities: {missingEntityLabels.join(", ")}.
+            </div>
+          ) : null}
+        </section>
         <div className="flex items-center justify-between">
           <h3 className="text-sm font-semibold text-[color:var(--color-text)]">
             Roles

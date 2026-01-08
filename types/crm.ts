@@ -39,3 +39,11 @@ export type CrmOwnerRate = {
   currency: string;
   year?: number;
 };
+
+export type CrmPersonEntity = {
+  id: string;
+  clientSlug: string;
+  year: number;
+  personId: string;
+  entity: string;
+};
