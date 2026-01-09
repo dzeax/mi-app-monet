@@ -1,7 +1,7 @@
 /* eslint-disable @typescript-eslint/no-explicit-any */
 "use client";
 
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { MouseEvent as ReactMouseEvent } from "react";
 import DatePicker from "@/components/ui/DatePicker";
 import ModalShell from "@/components/ui/ModalShell";
@@ -25,6 +25,8 @@ type BudgetAssignment = {
   startDate: string | null;
   endDate: string | null;
   isActive: boolean;
+  allocationAmount?: number | null;
+  allocationPct?: number | null;
 };
 
 type Person = {
@@ -48,6 +50,23 @@ type Props = {
 };
 
 const isTempId = (value: string) => value.startsWith("new-");
+const DAY_MS = 24 * 60 * 60 * 1000;
+const toUtcDate = (value: string) => new Date(`${value}T00:00:00Z`);
+const clampDate = (value: Date, min: Date, max: Date) => {
+  if (value < min) return min;
+  if (value > max) return max;
+  return value;
+};
+const diffDays = (start: Date, end: Date) =>
+  Math.floor((end.getTime() - start.getTime()) / DAY_MS) + 1;
+const roundAmount = (value: number) => Math.round(value * 100) / 100;
+const getAllocationValue = (rolePool: number, assignment: BudgetAssignment) => {
+  if (assignment.allocationAmount != null) return Number(assignment.allocationAmount) || 0;
+  if (assignment.allocationPct != null) {
+    return rolePool * (Number(assignment.allocationPct) / 100);
+  }
+  return 0;
+};
 
 export default function CrmBudgetModal({
   clientSlug,
@@ -89,6 +108,10 @@ export default function CrmBudgetModal({
         startDate: assignment.startDate ?? null,
         endDate: assignment.endDate ?? null,
         isActive: assignment.isActive !== false,
+        allocationAmount:
+          assignment.allocationAmount != null ? Number(assignment.allocationAmount) : null,
+        allocationPct:
+          assignment.allocationPct != null ? Number(assignment.allocationPct) : null,
       }))
       .sort((a, b) => a.id.localeCompare(b.id));
 
@@ -112,6 +135,7 @@ export default function CrmBudgetModal({
     assignments: BudgetAssignment[];
   }>({ roles: [], assignments: [] });
   const [entityMap, setEntityMap] = useState<Record<string, string>>({});
+  const [allocationModeByRole, setAllocationModeByRole] = useState<Record<string, "auto" | "manual">>({});
   const [deletedRoleIds, setDeletedRoleIds] = useState<string[]>([]);
   const [deletedAssignmentIds, setDeletedAssignmentIds] = useState<string[]>([]);
   const [savingAll, setSavingAll] = useState(false);
@@ -142,6 +166,10 @@ export default function CrmBudgetModal({
       ...a,
       startDate: a.startDate ?? null,
       endDate: a.endDate ?? null,
+      allocationAmount:
+        a.allocationAmount != null ? Number(a.allocationAmount) : null,
+      allocationPct:
+        a.allocationPct != null ? Number(a.allocationPct) : null,
     }));
     const baseEntities = entityByPerson ?? {};
     setDraft({
@@ -149,6 +177,16 @@ export default function CrmBudgetModal({
       assignments: baseAssignments,
     });
     setEntityMap(baseEntities);
+    const nextModes: Record<string, "auto" | "manual"> = {};
+    baseRoles.forEach((role) => {
+      const hasManual = baseAssignments.some(
+        (assignment) =>
+          assignment.roleId === role.id &&
+          (assignment.allocationAmount != null || assignment.allocationPct != null),
+      );
+      nextModes[role.id] = hasManual ? "manual" : "auto";
+    });
+    setAllocationModeByRole(nextModes);
     setDeletedRoleIds([]);
     setDeletedAssignmentIds([]);
     initialSignatureRef.current = buildSignature(
@@ -197,6 +235,132 @@ export default function CrmBudgetModal({
       ) !== initialSignatureRef.current
     );
   }, [draft.roles, draft.assignments, deletedRoleIds, deletedAssignmentIds, entityMap]);
+
+  const getRoleMode = useCallback(
+    (roleId: string) => allocationModeByRole[roleId] ?? "auto",
+    [allocationModeByRole],
+  );
+
+  const computeAutoAllocationsForRole = useCallback(
+    (role: BudgetRole, roleAssignments: BudgetAssignment[]) => {
+      const yearStart = new Date(Date.UTC(year, 0, 1));
+      const yearEnd = new Date(Date.UTC(year, 11, 31));
+      const activeAssignments = roleAssignments.filter((a) => a.isActive !== false);
+      const daysByAssignment = new Map<string, number>();
+      let totalDays = 0;
+
+      activeAssignments.forEach((assignment) => {
+        const rawStart = assignment.startDate ? toUtcDate(assignment.startDate) : yearStart;
+        const rawEnd = assignment.endDate ? toUtcDate(assignment.endDate) : yearEnd;
+        const start = clampDate(rawStart, yearStart, yearEnd);
+        const end = clampDate(rawEnd, yearStart, yearEnd);
+        if (start > end) return;
+        const days = diffDays(start, end);
+        if (!Number.isFinite(days) || days <= 0) return;
+        totalDays += days;
+        daysByAssignment.set(assignment.id, days);
+      });
+
+      const allocations = new Map<string, number>();
+      if (totalDays <= 0) {
+        activeAssignments.forEach((assignment) => {
+          allocations.set(assignment.id, 0);
+        });
+        return allocations;
+      }
+
+      const raw = activeAssignments.map((assignment) => ({
+        id: assignment.id,
+        amount: role.poolAmount * ((daysByAssignment.get(assignment.id) ?? 0) / totalDays),
+      }));
+      const rounded = raw.map((item) => ({
+        id: item.id,
+        amount: roundAmount(item.amount),
+      }));
+      const totalRounded = rounded.reduce((acc, item) => acc + item.amount, 0);
+      const diff = roundAmount(role.poolAmount - totalRounded);
+      if (rounded.length > 0 && Math.abs(diff) > 0) {
+        rounded[rounded.length - 1] = {
+          id: rounded[rounded.length - 1].id,
+          amount: roundAmount(rounded[rounded.length - 1].amount + diff),
+        };
+      }
+      rounded.forEach((item) => allocations.set(item.id, item.amount));
+      return allocations;
+    },
+    [year],
+  );
+
+  const handleAllocationModeChange = useCallback(
+    (role: BudgetRole, mode: "auto" | "manual") => {
+      setAllocationModeByRole((prev) => ({ ...prev, [role.id]: mode }));
+      setDraft((prev) => {
+        const nextAssignments = prev.assignments.map((assignment) => {
+          if (assignment.roleId !== role.id) return assignment;
+          if (mode === "manual") {
+            return assignment;
+          }
+          return {
+            ...assignment,
+            allocationAmount: null,
+            allocationPct: null,
+          };
+        });
+        return { ...prev, assignments: nextAssignments };
+      });
+      if (mode === "manual") {
+        const roleAssignments = draft.assignments.filter(
+          (assignment) => assignment.roleId === role.id,
+        );
+        const allocations = computeAutoAllocationsForRole(role, roleAssignments);
+        setDraft((prev) => ({
+          ...prev,
+          assignments: prev.assignments.map((assignment) => {
+            if (assignment.roleId !== role.id) return assignment;
+            const amount = allocations.get(assignment.id);
+            const allocationAmount = amount != null ? amount : 0;
+            const allocationPct =
+              role.poolAmount > 0
+                ? roundAmount((allocationAmount / role.poolAmount) * 100)
+                : null;
+            return {
+              ...assignment,
+              allocationAmount,
+              allocationPct,
+            };
+          }),
+        }));
+      }
+    },
+    [computeAutoAllocationsForRole, draft.assignments],
+  );
+
+  const allocationStatus = useMemo(() => {
+    const byRole: Record<string, { total: number; diff: number }> = {};
+    let hasMismatch = false;
+    draft.roles.forEach((role) => {
+      if (getRoleMode(role.id) !== "manual") return;
+      const roleAssignments = draft.assignments.filter(
+        (assignment) => assignment.roleId === role.id && assignment.isActive !== false,
+      );
+      const total = roleAssignments.reduce((acc, assignment) => {
+        return acc + getAllocationValue(role.poolAmount, assignment);
+      }, 0);
+      const diff = roundAmount(role.poolAmount - total);
+      if (Math.abs(diff) > 0.01) {
+        byRole[role.id] = { total, diff };
+        hasMismatch = true;
+      }
+    });
+    return { byRole, hasMismatch };
+  }, [draft.roles, draft.assignments, getRoleMode]);
+
+  const allocationMismatchLabels = useMemo(() => {
+    if (!allocationStatus.hasMismatch) return [];
+    return draft.roles
+      .filter((role) => allocationStatus.byRole[role.id])
+      .map((role) => role.roleName || "Unnamed role");
+  }, [allocationStatus, draft.roles]);
 
   const peopleOptions = useMemo(
     () =>
@@ -298,6 +462,9 @@ export default function CrmBudgetModal({
     setSavingAll(true);
     setFeedback(null);
     try {
+      if (allocationStatus.hasMismatch) {
+        throw new Error("Manual allocations must match the role pool before saving.");
+      }
       if (missingEntityIds.length > 0) {
         const preview = missingEntityLabels.slice(0, 5).join(", ");
         const suffix =
@@ -361,6 +528,10 @@ export default function CrmBudgetModal({
         startDate: assignment.startDate || null,
         endDate: assignment.endDate || null,
         isActive: assignment.isActive,
+        allocationAmount:
+          assignment.allocationAmount != null ? Number(assignment.allocationAmount) : null,
+        allocationPct:
+          assignment.allocationPct != null ? Number(assignment.allocationPct) : null,
       }));
 
       if (assignmentPayloads.some((a) => !a.roleId || !a.personId)) {
@@ -376,6 +547,8 @@ export default function CrmBudgetModal({
           startDate: assignment.startDate,
           endDate: assignment.endDate,
           isActive: assignment.isActive,
+          allocationAmount: assignment.allocationAmount,
+          allocationPct: assignment.allocationPct,
         };
         if (!isTempId(assignment.id)) payload.id = assignment.id;
         const res = await fetch("/api/crm/budget-assignments", {
@@ -395,6 +568,14 @@ export default function CrmBudgetModal({
           startDate: saved.start_date ?? assignment.startDate,
           endDate: saved.end_date ?? assignment.endDate,
           isActive: saved.is_active ?? assignment.isActive,
+          allocationAmount:
+            saved.allocation_amount != null
+              ? Number(saved.allocation_amount)
+              : assignment.allocationAmount ?? null,
+          allocationPct:
+            saved.allocation_pct != null
+              ? Number(saved.allocation_pct)
+              : assignment.allocationPct ?? null,
         });
       }
 
@@ -481,6 +662,8 @@ export default function CrmBudgetModal({
       startDate: `${year}-01-01`,
       endDate: `${year}-12-31`,
       isActive: true,
+      allocationAmount: null,
+      allocationPct: null,
     };
     setDraft((prev) => ({
       ...prev,
@@ -557,6 +740,14 @@ export default function CrmBudgetModal({
             roleId: mappedRoleId,
             startDate: mapDateToYear(assignment.startDate, year),
             endDate: mapDateToYear(assignment.endDate, year),
+            allocationAmount:
+              assignment.allocationAmount != null
+                ? Number(assignment.allocationAmount)
+                : null,
+            allocationPct:
+              assignment.allocationPct != null
+                ? Number(assignment.allocationPct)
+                : null,
           };
         })
         .filter(Boolean) as BudgetAssignment[];
@@ -646,7 +837,12 @@ export default function CrmBudgetModal({
               hasUnsavedChanges ? "ring-2 ring-emerald-200/70" : ""
             }`}
             onClick={handleSaveAll}
-            disabled={savingAll || !canEdit || missingEntityIds.length > 0}
+            disabled={
+              savingAll ||
+              !canEdit ||
+              missingEntityIds.length > 0 ||
+              allocationStatus.hasMismatch
+            }
           >
             {savingAll
               ? "Saving..."
@@ -673,6 +869,12 @@ export default function CrmBudgetModal({
             role={feedback.type === "error" ? "alert" : "status"}
           >
             {feedback.message}
+          </div>
+        ) : null}
+        {allocationStatus.hasMismatch ? (
+          <div className="rounded-xl border border-amber-200 bg-amber-50 px-3 py-2 text-sm text-amber-800">
+            Manual allocations must match the role pool. Check:{" "}
+            {allocationMismatchLabels.join(", ")}.
           </div>
         ) : null}
         <section className="space-y-3">
@@ -763,6 +965,12 @@ export default function CrmBudgetModal({
               const memberCount = roleAssignments.length;
               const memberLabel =
                 memberCount === 1 ? "1 member" : `${memberCount} members`;
+              const roleMode = getRoleMode(role.id);
+              const isManual = roleMode === "manual";
+              const roleMismatch = allocationStatus.byRole[role.id];
+              const memberGridCols = isManual
+                ? "sm:grid-cols-[minmax(0,1.6fr)_minmax(0,0.8fr)_minmax(0,0.8fr)_minmax(0,0.8fr)_minmax(0,0.4fr)_auto]"
+                : "sm:grid-cols-[minmax(0,1.6fr)_minmax(0,0.8fr)_minmax(0,0.8fr)_minmax(0,0.4fr)_auto]";
               return (
                 <div
                   key={role.id}
@@ -852,9 +1060,41 @@ export default function CrmBudgetModal({
                                 ? { ...r, currency: e.target.value }
                                 : r,
                             ),
-                        }))
-                      }
-                    />
+                          }))
+                        }
+                      />
+                      <div className="flex items-center rounded-full border border-[color:var(--color-border)] bg-[color:var(--color-surface-2)]/60 p-0.5 text-xs">
+                        <button
+                          type="button"
+                          className={`px-2 py-1 rounded-full ${
+                            roleMode === "auto"
+                              ? "bg-white text-[color:var(--color-text)] shadow-sm"
+                              : "text-[color:var(--color-text)]/60"
+                          }`}
+                          onClick={(event) => {
+                            event.stopPropagation();
+                            if (roleMode === "auto") return;
+                            handleAllocationModeChange(role, "auto");
+                          }}
+                        >
+                          Auto
+                        </button>
+                        <button
+                          type="button"
+                          className={`px-2 py-1 rounded-full ${
+                            roleMode === "manual"
+                              ? "bg-white text-[color:var(--color-text)] shadow-sm"
+                              : "text-[color:var(--color-text)]/60"
+                          }`}
+                          onClick={(event) => {
+                            event.stopPropagation();
+                            if (roleMode === "manual") return;
+                            handleAllocationModeChange(role, "manual");
+                          }}
+                        >
+                          Manual
+                        </button>
+                      </div>
                       {!isExpanded ? (
                         <span className="rounded-full border border-[#DBEAFE] bg-[#EFF6FF] px-2 py-0.5 text-[11px] font-medium text-[#3B82F6]">
                           {memberLabel}
@@ -939,15 +1179,32 @@ export default function CrmBudgetModal({
 
                   {isExpanded ? (
                     <div className="mt-3 space-y-3">
+                      {isManual ? (
+                        <div
+                          className={[
+                            "rounded-lg border px-3 py-2 text-xs",
+                            roleMismatch
+                              ? "border-amber-200 bg-amber-50 text-amber-800"
+                              : "border-emerald-200 bg-emerald-50 text-emerald-700",
+                          ].join(" ")}
+                        >
+                          {roleMismatch
+                            ? `Manual allocation off by ${roleMismatch.diff > 0 ? "+" : ""}${roleMismatch.diff.toFixed(2)}.`
+                            : "Manual allocations match the pool."}
+                        </div>
+                      ) : null}
                       <p className="text-xs uppercase tracking-[0.2em] text-[color:var(--color-text)]/60">
                         Members
                       </p>
                       {roleAssignments.length ? (
                         <>
-                          <div className="hidden grid-cols-[minmax(0,1.6fr)_minmax(0,0.8fr)_minmax(0,0.8fr)_minmax(0,0.4fr)_auto] items-center gap-2 px-2 text-[11px] uppercase tracking-[0.2em] text-[color:var(--color-text)]/55 sm:grid">
+                          <div
+                            className={`hidden ${memberGridCols} items-center gap-2 px-2 text-[11px] uppercase tracking-[0.2em] text-[color:var(--color-text)]/55 sm:grid`}
+                          >
                             <span>Member</span>
                             <span>Start</span>
                             <span>End</span>
+                            {isManual ? <span>Allocation</span> : null}
                             <span className="text-center">Active</span>
                             <span className="text-right">Actions</span>
                           </div>
@@ -955,7 +1212,7 @@ export default function CrmBudgetModal({
                             {roleAssignments.map((assignment) => (
                               <div
                                 key={assignment.id}
-                                className="grid grid-cols-1 gap-2 rounded-lg border border-[color:var(--color-border)] bg-[color:var(--color-surface)] p-2 sm:grid-cols-[minmax(0,1.6fr)_minmax(0,0.8fr)_minmax(0,0.8fr)_minmax(0,0.4fr)_auto] sm:items-center"
+                                className={`grid grid-cols-1 gap-2 rounded-lg border border-[color:var(--color-border)] bg-[color:var(--color-surface)] p-2 ${memberGridCols} sm:items-center`}
                               >
                                 <select
                                   className="input h-8 w-full min-w-0 text-sm"
@@ -1006,6 +1263,51 @@ export default function CrmBudgetModal({
                                     }))
                                   }
                                 />
+                                {isManual ? (
+                                  <div>
+                                    <input
+                                      className="input h-8 w-full text-right text-sm"
+                                      type="number"
+                                      min="0"
+                                      step="0.01"
+                                      value={
+                                        assignment.allocationAmount != null
+                                          ? assignment.allocationAmount
+                                          : ""
+                                      }
+                                      onChange={(e) => {
+                                        const raw = e.target.value;
+                                        const amount =
+                                          raw === "" ? null : Number.parseFloat(raw);
+                                        const allocationPct =
+                                          amount != null && role.poolAmount > 0
+                                            ? roundAmount((amount / role.poolAmount) * 100)
+                                            : null;
+                                        setDraft((prev) => ({
+                                          ...prev,
+                                          assignments: prev.assignments.map((a) =>
+                                            a.id === assignment.id
+                                              ? {
+                                                  ...a,
+                                                  allocationAmount: amount,
+                                                  allocationPct,
+                                                }
+                                              : a,
+                                          ),
+                                        }));
+                                      }}
+                                    />
+                                    <div className="mt-1 text-[10px] text-[color:var(--color-text)]/60 text-right">
+                                      {role.poolAmount > 0
+                                        ? `${roundAmount(
+                                            ((assignment.allocationAmount ?? 0) /
+                                              role.poolAmount) *
+                                              100,
+                                          )}%`
+                                        : "0%"}
+                                    </div>
+                                  </div>
+                                ) : null}
                                 <div className="flex items-center justify-center">
                                   <label className="relative inline-flex items-center">
                                     <input

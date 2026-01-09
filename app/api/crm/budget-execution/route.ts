@@ -164,6 +164,10 @@ export async function GET(request: Request) {
       startDate: row.start_date ?? null,
       endDate: row.end_date ?? null,
       isActive: row.is_active ?? true,
+      allocationAmount:
+        row.allocation_amount != null ? Number(row.allocation_amount) : null,
+      allocationPct:
+        row.allocation_pct != null ? Number(row.allocation_pct) : null,
     }));
 
     const people =
@@ -179,57 +183,105 @@ export async function GET(request: Request) {
 
     const yearStartDate = new Date(Date.UTC(year, 0, 1));
     const yearEndDate = new Date(Date.UTC(year, 11, 31));
-    const shouldIncludeAssignment = (assignment: {
-      isActive: boolean;
+    const roleById = new Map(activeRoles.map((role) => [role.id, role]));
+    const activeRoleIds = new Set(activeRoles.map((role) => role.id));
+    const activeAssignments = assignments.filter(
+      (assignment) => assignment.isActive !== false && activeRoleIds.has(assignment.roleId),
+    );
+
+    const getOverlapDays = (assignment: {
       startDate: string | null;
       endDate: string | null;
     }) => {
-      if (assignment.isActive !== false) return true;
-      return Boolean(assignment.startDate || assignment.endDate);
+      const rawStart = assignment.startDate ? toUtcDate(assignment.startDate) : yearStartDate;
+      const rawEnd = assignment.endDate ? toUtcDate(assignment.endDate) : yearEndDate;
+      const start = clampDate(rawStart, yearStartDate, yearEndDate);
+      const end = clampDate(rawEnd, yearStartDate, yearEndDate);
+      if (start > end) return 0;
+      const activeDays = diffDays(start, end);
+      if (!Number.isFinite(activeDays) || activeDays <= 0) return 0;
+      return activeDays;
     };
-    const roleDaysByPerson = new Map<string, Map<string, number>>();
-    const roleDaysByRole = new Map<string, Map<string, number>>();
 
-    assignments
-      .filter((assignment) => shouldIncludeAssignment(assignment))
-      .forEach((assignment) => {
-        const rawStart = assignment.startDate ? toUtcDate(assignment.startDate) : yearStartDate;
-        const rawEnd = assignment.endDate ? toUtcDate(assignment.endDate) : yearEndDate;
-        const start = clampDate(rawStart, yearStartDate, yearEndDate);
-        const end = clampDate(rawEnd, yearStartDate, yearEndDate);
-        if (start > end) return;
-        const activeDays = diffDays(start, end);
-        if (!Number.isFinite(activeDays) || activeDays <= 0) return;
-        const map = roleDaysByPerson.get(assignment.personId) ?? new Map<string, number>();
-        map.set(assignment.roleId, (map.get(assignment.roleId) ?? 0) + activeDays);
-        roleDaysByPerson.set(assignment.personId, map);
-        const roleMap = roleDaysByRole.get(assignment.roleId) ?? new Map<string, number>();
-        roleMap.set(assignment.personId, (roleMap.get(assignment.personId) ?? 0) + activeDays);
-        roleDaysByRole.set(assignment.roleId, roleMap);
+    const assignmentsByRole = new Map<string, typeof assignments>();
+    activeAssignments.forEach((assignment) => {
+      const list = assignmentsByRole.get(assignment.roleId) ?? [];
+      list.push(assignment);
+      assignmentsByRole.set(assignment.roleId, list);
+    });
+
+    const roleBudgetByPerson = new Map<string, Map<string, number>>();
+    const personRoleBudget = new Map<string, Map<string, number>>();
+
+    const addRoleBudget = (roleId: string, personId: string, amount: number) => {
+      const roleMap = roleBudgetByPerson.get(roleId) ?? new Map<string, number>();
+      roleMap.set(personId, (roleMap.get(personId) ?? 0) + amount);
+      roleBudgetByPerson.set(roleId, roleMap);
+      const personMap = personRoleBudget.get(personId) ?? new Map<string, number>();
+      personMap.set(roleId, (personMap.get(roleId) ?? 0) + amount);
+      personRoleBudget.set(personId, personMap);
+    };
+
+    activeRoles.forEach((role) => {
+      const roleAssignments = assignmentsByRole.get(role.id) ?? [];
+      if (roleAssignments.length === 0) return;
+      const hasManualAllocations = roleAssignments.some(
+        (assignment) =>
+          assignment.allocationAmount != null || assignment.allocationPct != null,
+      );
+
+      if (hasManualAllocations) {
+        roleAssignments.forEach((assignment) => {
+          const overlapDays = getOverlapDays(assignment);
+          if (overlapDays <= 0) return;
+          const amount =
+            assignment.allocationAmount != null
+              ? Number(assignment.allocationAmount)
+              : assignment.allocationPct != null
+                ? role.poolAmount * (Number(assignment.allocationPct) / 100)
+                : 0;
+          addRoleBudget(role.id, assignment.personId, amount);
+        });
+        return;
+      }
+
+      let totalActiveDays = 0;
+      const daysByPerson = new Map<string, number>();
+      roleAssignments.forEach((assignment) => {
+        const activeDays = getOverlapDays(assignment);
+        if (activeDays <= 0) return;
+        totalActiveDays += activeDays;
+        daysByPerson.set(
+          assignment.personId,
+          (daysByPerson.get(assignment.personId) ?? 0) + activeDays,
+        );
       });
+      if (totalActiveDays <= 0) return;
+      daysByPerson.forEach((days, personId) => {
+        const amount = role.poolAmount * (days / totalActiveDays);
+        addRoleBudget(role.id, personId, amount);
+      });
+    });
 
     const roleSharesByPerson = new Map<string, Array<{ roleId: string; share: number }>>();
-    roleDaysByPerson.forEach((roleMap, personId) => {
-      const totalDays = Array.from(roleMap.values()).reduce((acc, days) => acc + days, 0);
-      if (totalDays <= 0) return;
-      const shares = Array.from(roleMap.entries()).map(([roleId, days]) => ({
-        roleId,
-        share: days / totalDays,
-      }));
-      roleSharesByPerson.set(personId, shares);
+    personRoleBudget.forEach((roleMap, personId) => {
+      const total = Array.from(roleMap.values()).reduce((acc, value) => acc + value, 0);
+      if (total <= 0) return;
+      const shares = Array.from(roleMap.entries())
+        .map(([roleId, value]) => ({ roleId, share: value / total }))
+        .filter((entry) => entry.share > 0);
+      if (shares.length) roleSharesByPerson.set(personId, shares);
     });
 
     const budgetByPerson: Record<string, number> = {};
     const rolesByPerson: Record<string, string[]> = {};
     const roleIdsByPerson: Record<string, string[]> = {};
 
-    activeRoles.forEach((role) => {
-      const roleMap = roleDaysByRole.get(role.id) ?? new Map<string, number>();
-      const totalActiveDays = Array.from(roleMap.values()).reduce((acc, days) => acc + days, 0);
-      if (totalActiveDays <= 0) return;
-      roleMap.forEach((days, personId) => {
-        const budgetShare = role.poolAmount * (days / totalActiveDays);
-        budgetByPerson[personId] = (budgetByPerson[personId] ?? 0) + budgetShare;
+    roleBudgetByPerson.forEach((personMap, roleId) => {
+      const role = roleById.get(roleId);
+      if (!role) return;
+      personMap.forEach((amount, personId) => {
+        budgetByPerson[personId] = (budgetByPerson[personId] ?? 0) + amount;
         rolesByPerson[personId] = rolesByPerson[personId] ?? [];
         roleIdsByPerson[personId] = roleIdsByPerson[personId] ?? [];
         if (!rolesByPerson[personId].includes(role.roleName)) {

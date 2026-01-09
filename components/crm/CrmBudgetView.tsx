@@ -25,6 +25,8 @@ type BudgetAssignment = {
   startDate: string | null;
   endDate: string | null;
   isActive: boolean;
+  allocationAmount?: number | null;
+  allocationPct?: number | null;
 };
 
 type Person = {
@@ -200,6 +202,10 @@ export default function CrmBudgetView() {
       const roleAssignments = activeAssignments.filter((a) => a.roleId === role.id);
       const memberMap = new Map<string, { personId: string; activeDays: number; budget: number }>();
       let totalActiveDays = 0;
+      const hasManualAllocations = roleAssignments.some(
+        (assignment) =>
+          assignment.allocationAmount != null || assignment.allocationPct != null,
+      );
 
       roleAssignments.forEach((assignment) => {
         const rawStart = assignment.startDate ? toUtcDate(assignment.startDate) : yearStart;
@@ -210,24 +216,35 @@ export default function CrmBudgetView() {
         const activeDays = diffDays(start, end);
         totalActiveDays += activeDays;
         const existing = memberMap.get(assignment.personId);
+        const allocation =
+          assignment.allocationAmount != null
+            ? Number(assignment.allocationAmount)
+            : assignment.allocationPct != null
+              ? role.poolAmount * (Number(assignment.allocationPct) / 100)
+              : 0;
         if (existing) {
           existing.activeDays += activeDays;
+          if (hasManualAllocations) {
+            existing.budget += allocation;
+          }
         } else {
           memberMap.set(assignment.personId, {
             personId: assignment.personId,
             activeDays,
-            budget: 0,
+            budget: hasManualAllocations ? allocation : 0,
           });
         }
       });
 
-      memberMap.forEach((entry) => {
-        if (totalActiveDays <= 0) {
-          entry.budget = 0;
-        } else {
-          entry.budget = role.poolAmount * (entry.activeDays / totalActiveDays);
-        }
-      });
+      if (!hasManualAllocations) {
+        memberMap.forEach((entry) => {
+          if (totalActiveDays <= 0) {
+            entry.budget = 0;
+          } else {
+            entry.budget = role.poolAmount * (entry.activeDays / totalActiveDays);
+          }
+        });
+      }
 
       const members = Array.from(memberMap.values()).map((member) => {
         const person = peopleById.get(member.personId);

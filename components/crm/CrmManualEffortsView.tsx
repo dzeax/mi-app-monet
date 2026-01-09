@@ -1,8 +1,12 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { usePathname } from "next/navigation";
+import { DayPicker } from "react-day-picker";
+import type { DateRange } from "react-day-picker";
+import { endOfMonth, format, parseISO, startOfMonth, startOfYear } from "date-fns";
 import CrmManualEffortsImportModal from "@/components/crm/CrmManualEffortsImportModal";
+import DatePicker from "@/components/ui/DatePicker";
 import MiniModal from "@/components/ui/MiniModal";
 import { useAuth } from "@/context/AuthContext";
 import { DEFAULT_WORKSTREAM } from "@/lib/crm/workstreams";
@@ -125,6 +129,241 @@ function MultiSelect({
                 <span className="flex-1">{opt.label}</span>
               </label>
             ))}
+          </div>
+        </div>
+      ) : null}
+    </div>
+  );
+}
+
+const isIsoDate = (value: string) => /^\d{4}-\d{2}-\d{2}$/.test(value);
+
+const formatRangeInputDate = (value?: string | null) => {
+  if (!value || !isIsoDate(value)) return null;
+  const parsed = parseISO(value);
+  if (Number.isNaN(parsed.getTime())) return null;
+  return format(parsed, "dd/MM/yy");
+};
+
+function DateRangeField({
+  label,
+  from,
+  to,
+  onChangeFrom,
+  onChangeTo,
+  onClear,
+}: {
+  label: string;
+  from: string;
+  to: string;
+  onChangeFrom: (value: string) => void;
+  onChangeTo: (value: string) => void;
+  onClear: () => void;
+}) {
+  const [open, setOpen] = useState(false);
+  const [openUp, setOpenUp] = useState(false);
+  const [alignRight, setAlignRight] = useState(false);
+  const wrapRef = useRef<HTMLDivElement | null>(null);
+  const triggerRef = useRef<HTMLButtonElement | null>(null);
+  const popoverRef = useRef<HTMLDivElement | null>(null);
+  const fromDate = from && isIsoDate(from) ? parseISO(from) : undefined;
+  const toDate = to && isIsoDate(to) ? parseISO(to) : undefined;
+  const hasRange = Boolean(fromDate || toDate);
+  const display = (() => {
+    const fromLabel = formatRangeInputDate(from);
+    const toLabel = formatRangeInputDate(to);
+    if (fromLabel && toLabel) return `${fromLabel} - ${toLabel}`;
+    if (fromLabel) return `Since ${fromLabel}`;
+    if (toLabel) return `Until ${toLabel}`;
+    return "All time";
+  })();
+  const selectedRange: DateRange | undefined = hasRange
+    ? { from: fromDate, to: toDate }
+    : undefined;
+  const today = new Date();
+  const toIso = (date: Date) => format(date, "yyyy-MM-dd");
+  const applyRange = (range?: DateRange) => {
+    onChangeFrom(range?.from ? toIso(range.from) : "");
+    onChangeTo(range?.to ? toIso(range.to) : "");
+  };
+  const lastMonthStart = new Date(today.getFullYear(), today.getMonth() - 1, 1);
+  const lastMonthEnd = new Date(today.getFullYear(), today.getMonth(), 0);
+  const presets = [
+    { label: "Today", from: today, to: today },
+    { label: "This month", from: startOfMonth(today), to: endOfMonth(today) },
+    { label: "Last month", from: lastMonthStart, to: lastMonthEnd },
+    { label: "This year", from: startOfYear(today), to: today },
+    {
+      label: "Last year",
+      from: new Date(today.getFullYear() - 1, 0, 1),
+      to: new Date(today.getFullYear() - 1, 11, 31),
+    },
+  ];
+
+  const updatePosition = useCallback(() => {
+    if (!open) return;
+    const trigger = triggerRef.current;
+    const popover = popoverRef.current;
+    if (!trigger || !popover) return;
+    const rect = trigger.getBoundingClientRect();
+    const popRect = popover.getBoundingClientRect();
+    const viewportHeight = window.innerHeight;
+    const viewportWidth = window.innerWidth;
+    const spaceBelow = viewportHeight - rect.bottom;
+    const spaceAbove = rect.top;
+    const shouldOpenUp = spaceBelow < popRect.height && spaceAbove > spaceBelow;
+    const shouldAlignRight =
+      rect.left + popRect.width > viewportWidth && rect.right - popRect.width >= 0;
+    setOpenUp((prev) => (prev === shouldOpenUp ? prev : shouldOpenUp));
+    setAlignRight((prev) => (prev === shouldAlignRight ? prev : shouldAlignRight));
+  }, [open]);
+
+  useLayoutEffect(() => {
+    if (!open) return;
+    updatePosition();
+  }, [open, updatePosition, from, to]);
+
+  useEffect(() => {
+    if (!open) return;
+    const handler = (e: MouseEvent) => {
+      if (!wrapRef.current) return;
+      if (wrapRef.current.contains(e.target as Node)) return;
+      setOpen(false);
+    };
+    document.addEventListener("mousedown", handler);
+    return () => document.removeEventListener("mousedown", handler);
+  }, [open]);
+
+  useEffect(() => {
+    if (!open) return;
+    const handler = () => updatePosition();
+    window.addEventListener("resize", handler);
+    window.addEventListener("scroll", handler, true);
+    return () => {
+      window.removeEventListener("resize", handler);
+      window.removeEventListener("scroll", handler, true);
+    };
+  }, [open, updatePosition]);
+
+  return (
+    <div className="relative flex flex-col gap-1" ref={wrapRef}>
+      <label className="text-xs font-medium text-[color:var(--color-text)]/70">
+        {label}
+      </label>
+      <div className="relative">
+        <button
+          type="button"
+          className="input h-10 w-full text-left"
+          ref={triggerRef}
+          onClick={() => setOpen((v) => !v)}
+        >
+          <span
+            className={
+              hasRange
+                ? "text-[color:var(--color-text)]"
+                : "text-[color:var(--color-text)]/50"
+            }
+          >
+            {display}
+          </span>
+        </button>
+        {hasRange ? (
+          <button
+            type="button"
+            className="absolute right-2 top-1/2 -translate-y-1/2 text-xs text-[color:var(--color-text)]/50 hover:text-[color:var(--color-text)]"
+            onClick={(e) => {
+              e.stopPropagation();
+              onClear();
+            }}
+            aria-label={`Clear ${label} range`}
+            title="Clear"
+          >
+            x
+          </button>
+        ) : null}
+      </div>
+      {open ? (
+        <div
+          ref={popoverRef}
+          className="absolute z-50 w-[560px] max-w-[calc(100vw-32px)] rounded-xl border border-[color:var(--color-border)] bg-[color:var(--color-surface)] p-4 shadow-xl ring-1 ring-black/5"
+          style={{
+            top: openUp ? "auto" : "calc(100% + 6px)",
+            bottom: openUp ? "calc(100% + 6px)" : "auto",
+            left: alignRight ? "auto" : 0,
+            right: alignRight ? 0 : "auto",
+          }}
+        >
+          <div className="flex flex-wrap gap-2">
+            {presets.map((preset) => (
+              <button
+                key={preset.label}
+                type="button"
+                className="rounded-lg border border-[color:var(--color-border)] bg-[color:var(--color-surface-2)] px-3 py-1.5 text-xs font-medium text-[color:var(--color-text)]/80 hover:bg-[color:var(--color-surface-2)]/80"
+                onClick={() => {
+                  applyRange({ from: preset.from, to: preset.to });
+                  setOpen(false);
+                }}
+              >
+                {preset.label}
+              </button>
+            ))}
+          </div>
+          <div className="mt-3 overflow-hidden rounded-lg border border-[color:var(--color-border)] bg-white/60 p-2">
+            <DayPicker
+              mode="range"
+              numberOfMonths={2}
+              selected={selectedRange}
+              defaultMonth={fromDate || toDate || today}
+              onSelect={(range) => applyRange(range)}
+              showOutsideDays
+              classNames={{
+                root: "relative text-sm",
+                months: "flex gap-4 pt-6",
+                month: "min-w-[224px] space-y-2",
+                month_caption: "flex items-center justify-center gap-2",
+                caption_label: "text-sm font-semibold",
+                nav: "absolute left-2 right-2 top-2 flex items-center justify-between",
+                button_previous:
+                  "h-7 w-7 rounded-md border border-[color:var(--color-border)] bg-white hover:bg-[color:var(--color-surface-2)]",
+                button_next:
+                  "h-7 w-7 rounded-md border border-[color:var(--color-border)] bg-white hover:bg-[color:var(--color-surface-2)]",
+                month_grid: "w-full border-collapse",
+                weekdays: "flex",
+                weekday:
+                  "w-8 text-center text-[10px] font-semibold uppercase text-[color:var(--color-text)]/50",
+                weeks: "flex flex-col gap-1",
+                week: "flex w-full",
+                day: "h-8 w-8 p-0 text-center",
+                day_button:
+                  "h-8 w-8 rounded-md text-xs hover:bg-[color:var(--color-surface-2)] focus:outline-none focus-visible:ring-2 focus-visible:ring-[color:var(--color-primary)]/40",
+                range_start:
+                  "bg-[color:var(--color-primary)] text-white font-semibold rounded-full ring-2 ring-white shadow-sm hover:bg-[color:var(--color-primary)]",
+                range_end:
+                  "bg-[color:var(--color-primary)] text-white font-semibold rounded-full ring-2 ring-white shadow-sm hover:bg-[color:var(--color-primary)]",
+                range_middle:
+                  "bg-[color:var(--color-primary)]/10 text-[color:var(--color-text)]/80",
+                selected:
+                  "bg-[color:var(--color-primary)] text-white hover:bg-[color:var(--color-primary)]",
+                today: "font-semibold text-[color:var(--color-text)]",
+                outside: "text-[color:var(--color-text)]/30",
+              }}
+            />
+          </div>
+          <div className="mt-3 flex items-center justify-between">
+            <button
+              type="button"
+              className="btn-ghost h-8 px-3 text-xs border border-[color:var(--color-border)] bg-[color:var(--color-surface-2)]/70 text-[color:var(--color-text)]/80 hover:text-[color:var(--color-text)]"
+              onClick={onClear}
+            >
+              Clear
+            </button>
+            <button
+              type="button"
+              className="btn-primary h-8 px-3 text-xs"
+              onClick={() => setOpen(false)}
+            >
+              Done
+            </button>
           </div>
         </div>
       ) : null}
@@ -585,7 +824,7 @@ export default function CrmManualEffortsView() {
       </header>
 
       <section className="card px-6 py-5">
-        <div className="grid gap-4 lg:grid-cols-[1.2fr_1fr_1fr_1fr_1fr]">
+        <div className="grid gap-4 lg:grid-cols-[1.2fr_1fr_1fr_1.4fr]">
           <div>
             <label className="text-xs font-medium text-[color:var(--color-text)]/70">Search</label>
             <input
@@ -609,24 +848,17 @@ export default function CrmManualEffortsView() {
             onChange={setWorkstreamFilters}
             placeholder="All workstreams"
           />
-          <div>
-            <label className="text-xs font-medium text-[color:var(--color-text)]/70">From</label>
-            <input
-              type="date"
-              className="input h-10 w-full"
-              value={fromDate}
-              onChange={(e) => setFromDate(e.target.value)}
-            />
-          </div>
-          <div>
-            <label className="text-xs font-medium text-[color:var(--color-text)]/70">To</label>
-            <input
-              type="date"
-              className="input h-10 w-full"
-              value={toDate}
-              onChange={(e) => setToDate(e.target.value)}
-            />
-          </div>
+          <DateRangeField
+            label="Date range"
+            from={fromDate}
+            to={toDate}
+            onChangeFrom={setFromDate}
+            onChangeTo={setToDate}
+            onClear={() => {
+              setFromDate("");
+              setToDate("");
+            }}
+          />
         </div>
         <div className="mt-4 flex flex-wrap items-center gap-2">
           <button className="btn-ghost h-9 px-3 text-xs" type="button" onClick={clearFilters}>
@@ -760,14 +992,13 @@ export default function CrmManualEffortsView() {
               >
                 <div>
                   <label className="text-xs font-medium text-[color:var(--color-text)]/70">Date</label>
-                  <input
-                    type="date"
-                    className="input h-10 w-full"
+                  <DatePicker
                     value={entry.effortDate}
-                    onChange={(e) =>
+                    ariaLabel="Effort date"
+                    onChange={(value) =>
                       setDraftEntries((prev) =>
                         prev.map((item) =>
-                          item.id === entry.id ? { ...item, effortDate: e.target.value } : item,
+                          item.id === entry.id ? { ...item, effortDate: value } : item,
                         ),
                       )
                     }
