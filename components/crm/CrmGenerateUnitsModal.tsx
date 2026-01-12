@@ -26,7 +26,7 @@ const BRAND_SEGMENTS: Record<string, string[]> = {
 
   Europcar: ["Publics", "Privilege"],
 
-  Goldcar: ["Users", "Clubbers"],
+  Goldcar: ["User", "Clubber"],
 
 };
 

@@ -18,6 +18,7 @@ import {
   PieChart,
   Pie,
   Cell,
+  LabelList,
 } from "recharts";
 import { chartTheme } from "@/components/charts/theme";
 import { canonicalGeo, geoEmoji, geoFlagClass, EMOJI_UNKNOWN } from "@/lib/geoFlags";
@@ -165,6 +166,11 @@ const formatPercent = (value: number) => {
   return percentFormatter.format(value);
 };
 
+const formatPercentInt = (value: number) => {
+  if (!Number.isFinite(value)) return "--";
+  return `${Math.round(value * 100)}%`;
+};
+
 const formatAsOfDate = (value: string) => {
   const [year, month, day] = value.split("-");
   const idx = Number(month) - 1;
@@ -212,6 +218,24 @@ const addMetric = (target: ProductionMetric, metric: ProductionMetric, scale = 1
   target.units += metric.units * scale;
 };
 
+const normalizeMarketKey = (value: string) => {
+  const trimmed = value.trim();
+  const upper = trimmed.toUpperCase();
+  if (upper === "EN" || upper === "UK") return "UK";
+  return trimmed;
+};
+
+const mergeMarketBreakdown = (items: Array<{ key: string } & ProductionMetric>) => {
+  const merged = new Map<string, ProductionMetric>();
+  items.forEach((entry) => {
+    const normalized = normalizeMarketKey(entry.key);
+    const target = merged.get(normalized) ?? createMetric();
+    addMetric(target, entry);
+    merged.set(normalized, target);
+  });
+  return Array.from(merged, ([key, metric]) => ({ key, ...metric }));
+};
+
 const riskToneClass: Record<"ok" | "warn" | "danger", string> = {
   ok: "border-emerald-200 bg-emerald-50 text-emerald-700",
   warn: "border-amber-200 bg-amber-50 text-amber-700",
@@ -236,13 +260,22 @@ type MarketYAxisTickProps = {
 };
 
 type BrandYAxisTickProps = MarketYAxisTickProps;
-type BrandSliceLabelProps = {
+type DonutShareLabelProps = {
   cx?: number;
   cy?: number;
   midAngle?: number;
-  innerRadius?: number;
   outerRadius?: number;
+  innerRadius?: number;
+  percent?: number;
+  payload?: { name?: string; share?: number };
   name?: string;
+};
+type MarketDonutLabelProps = DonutShareLabelProps;
+type DonutLabelLineProps = {
+  cx?: number;
+  cy?: number;
+  midAngle?: number;
+  outerRadius?: number;
 };
 
 const BRAND_LOGOS: Record<string, { src: string; alt: string }> = {
@@ -250,6 +283,8 @@ const BRAND_LOGOS: Record<string, { src: string; alt: string }> = {
   goldcar: { src: "/logos/gc_logo.png", alt: "Goldcar" },
 };
 const BRAND_SLICE_SIZE = 26;
+const DONUT_LABEL_OFFSET = 14;
+const DONUT_LINE_OFFSET = 12;
 
 function MarketYAxisTick({ x, y, payload }: MarketYAxisTickProps) {
   const label = String(payload?.value ?? "");
@@ -301,39 +336,183 @@ function BrandYAxisTick({ x, y, payload }: BrandYAxisTickProps) {
   );
 }
 
-function renderBrandSliceLabel({
+function renderDonutShareLabel({
   cx,
   cy,
   midAngle,
-  innerRadius,
   outerRadius,
-  name,
-}: BrandSliceLabelProps) {
+  percent,
+  payload,
+}: DonutShareLabelProps) {
   if (
     typeof cx !== "number" ||
     typeof cy !== "number" ||
     typeof midAngle !== "number" ||
-    typeof innerRadius !== "number" ||
     typeof outerRadius !== "number"
   ) {
     return null;
   }
-  const label = String(name ?? "");
-  const key = label.trim().toLowerCase();
-  const logo = BRAND_LOGOS[key];
-  if (!logo) return null;
-  const radius = innerRadius + (outerRadius - innerRadius) * 0.6;
+  const shareValue =
+    typeof payload?.share === "number" ? payload.share : typeof percent === "number" ? percent : 0;
+  if (!Number.isFinite(shareValue) || shareValue <= 0) return null;
+  const radius = outerRadius + DONUT_LABEL_OFFSET;
   const angle = (-midAngle * Math.PI) / 180;
-  const x = cx + radius * Math.cos(angle) - BRAND_SLICE_SIZE / 2;
-  const y = cy + radius * Math.sin(angle) - BRAND_SLICE_SIZE / 2;
+  const x = cx + radius * Math.cos(angle);
+  const y = cy + radius * Math.sin(angle);
   return (
-    <image
-      href={logo.src}
+    <text
       x={x}
       y={y}
-      width={BRAND_SLICE_SIZE}
-      height={BRAND_SLICE_SIZE}
-      aria-label={logo.alt}
+      fill="var(--chart-axis)"
+      fontSize={11}
+      textAnchor={x > cx ? "start" : "end"}
+      dominantBaseline="central"
+    >
+      {formatPercentInt(shareValue)}
+    </text>
+  );
+}
+
+function renderMarketDonutLabel(props: MarketDonutLabelProps) {
+  if (
+    typeof props.cx !== "number" ||
+    typeof props.cy !== "number" ||
+    typeof props.midAngle !== "number" ||
+    typeof props.outerRadius !== "number" ||
+    typeof props.innerRadius !== "number"
+  ) {
+    return null;
+  }
+  const label = String(props.payload?.name ?? props.name ?? "");
+  const trimmed = label.trim();
+  const showFlag = /^[A-Za-z]{2,3}$/.test(trimmed) && trimmed.toLowerCase() !== "other";
+  const canonical = showFlag ? canonicalGeo(trimmed) : "";
+  const flagClass = showFlag ? geoFlagClass(canonical) : undefined;
+  const emoji = showFlag ? geoEmoji(canonical) : null;
+  const hasEmoji = !!emoji && emoji !== EMOJI_UNKNOWN && !flagClass;
+  const shareValue =
+    typeof props.payload?.share === "number"
+      ? props.payload.share
+      : typeof props.percent === "number"
+        ? props.percent
+        : 0;
+
+  const innerRadius = props.innerRadius;
+  const outerRadius = props.outerRadius;
+  const angle = (-props.midAngle * Math.PI) / 180;
+  const iconRadius = innerRadius + (outerRadius - innerRadius) * 0.6;
+  const iconX = props.cx + iconRadius * Math.cos(angle);
+  const iconY = props.cy + iconRadius * Math.sin(angle);
+  const labelRadius = outerRadius + DONUT_LABEL_OFFSET;
+  const labelX = props.cx + labelRadius * Math.cos(angle);
+  const labelY = props.cy + labelRadius * Math.sin(angle);
+
+  const percentLabel = Number.isFinite(shareValue) && shareValue > 0 ? formatPercentInt(shareValue) : null;
+  if (!percentLabel) return null;
+  const width = 76;
+  const height = 20;
+  const alignRight = labelX > props.cx;
+  const baseX = alignRight ? labelX : labelX - width;
+  return (
+    <foreignObject x={baseX} y={labelY - height / 2} width={width} height={height}>
+      <div
+        className={`flex items-center gap-1 text-[11px] text-[color:var(--chart-axis)] ${
+          alignRight ? "justify-start" : "justify-end"
+        }`}
+      >
+        <span>{percentLabel}</span>
+        {flagClass ? (
+          <span className={`flag-swatch fi ${flagClass}`} aria-hidden="true" />
+        ) : hasEmoji ? (
+          <span className="flag-emoji" aria-hidden="true">
+            {emoji}
+          </span>
+        ) : null}
+      </div>
+    </foreignObject>
+  );
+}
+
+function renderBrandDonutLabel(props: DonutShareLabelProps) {
+  if (
+    typeof props.cx !== "number" ||
+    typeof props.cy !== "number" ||
+    typeof props.midAngle !== "number" ||
+    typeof props.innerRadius !== "number" ||
+    typeof props.outerRadius !== "number"
+  ) {
+    return null;
+  }
+  const label = String(props.name ?? props.payload?.name ?? "");
+  const key = label.trim().toLowerCase();
+  const logo = BRAND_LOGOS[key];
+  const shareValue =
+    typeof props.payload?.share === "number"
+      ? props.payload.share
+      : typeof props.percent === "number"
+        ? props.percent
+        : 0;
+  const innerRadius = props.innerRadius;
+  const outerRadius = props.outerRadius;
+  const angle = (-props.midAngle * Math.PI) / 180;
+  const logoRadius = innerRadius + (outerRadius - innerRadius) * 0.6;
+  const logoX = props.cx + logoRadius * Math.cos(angle) - BRAND_SLICE_SIZE / 2;
+  const logoY = props.cy + logoRadius * Math.sin(angle) - BRAND_SLICE_SIZE / 2;
+  const labelRadius = outerRadius + DONUT_LABEL_OFFSET;
+  const labelX = props.cx + labelRadius * Math.cos(angle);
+  const labelY = props.cy + labelRadius * Math.sin(angle);
+  return (
+    <g>
+      {logo ? (
+        <image
+          href={logo.src}
+          x={logoX}
+          y={logoY}
+          width={BRAND_SLICE_SIZE}
+          height={BRAND_SLICE_SIZE}
+          aria-label={logo.alt}
+        />
+      ) : null}
+      {Number.isFinite(shareValue) && shareValue > 0 ? (
+        <text
+          x={labelX}
+          y={labelY}
+          fill="var(--chart-axis)"
+          fontSize={11}
+          textAnchor={labelX > props.cx ? "start" : "end"}
+          dominantBaseline="central"
+        >
+          {formatPercentInt(shareValue)}
+        </text>
+      ) : null}
+    </g>
+  );
+}
+
+function renderDonutLabelLine({ cx, cy, midAngle, outerRadius }: DonutLabelLineProps) {
+  if (
+    typeof cx !== "number" ||
+    typeof cy !== "number" ||
+    typeof midAngle !== "number" ||
+    typeof outerRadius !== "number"
+  ) {
+    return null;
+  }
+  const angle = (-midAngle * Math.PI) / 180;
+  const startRadius = outerRadius + 2;
+  const endRadius = outerRadius + DONUT_LINE_OFFSET;
+  const x1 = cx + startRadius * Math.cos(angle);
+  const y1 = cy + startRadius * Math.sin(angle);
+  const x2 = cx + endRadius * Math.cos(angle);
+  const y2 = cy + endRadius * Math.sin(angle);
+  return (
+    <line
+      x1={x1}
+      y1={y1}
+      x2={x2}
+      y2={y2}
+      stroke="rgba(15, 23, 42, 0.35)"
+      strokeWidth={1}
     />
   );
 }
@@ -1123,27 +1302,38 @@ export default function CrmBudgetExecutionView() {
   );
 
   const productionRoleChartData = useMemo(() => {
-    if (!data) return [];
-    const roleScopes = data.roleScopes || {};
-    const entityRoleScope = data.monthlyEntityRoleScope ?? {};
-    return data.breakdowns.roles
-      .filter((role) => !hasRoleFilter || roleFilterSet.has(role.roleId))
-      .map((role) => {
-        let actual = 0;
-        if (hasEntityFilter) {
-          entityFilters.forEach((entity) => {
-            const scopeMap = entityRoleScope[entity]?.[role.roleId] ?? {};
-            actual += sumSeries(scopeMap[PRODUCTION_SCOPE]);
-          });
-        } else {
-          const scopeMap = roleScopes[role.roleId] ?? {};
-          actual = scopeMap[PRODUCTION_SCOPE] ?? 0;
-        }
-        return { roleName: role.roleName, actual };
-      })
+    if (!data?.production?.byPerson) return [];
+    const roleNameMap = new Map(data.breakdowns.roles.map((role) => [role.roleId, role.roleName]));
+    const totalsByRole = new Map<string, ProductionMetric>();
+
+    data.table.rows.forEach((row) => {
+      const personBreakdown = data.production?.byPerson?.[row.key];
+      if (!personBreakdown) return;
+      if (hasEntityFilter && !entityFilterSet.has(row.entity)) return;
+      if (!row.roleShares.length) return;
+
+      row.roleShares.forEach((share) => {
+        if (hasRoleFilter && !roleFilterSet.has(share.roleId)) return;
+        const entry = totalsByRole.get(share.roleId) ?? createMetric();
+        addMetric(entry, personBreakdown.totals, share.share);
+        totalsByRole.set(share.roleId, entry);
+      });
+    });
+
+    const totalBudget = Array.from(totalsByRole.values()).reduce((acc, entry) => acc + entry.budget, 0);
+
+    return Array.from(totalsByRole.entries())
+      .map(([roleId, metric]) => ({
+        roleId,
+        roleName: roleNameMap.get(roleId) ?? roleId,
+        actual: metric.budget,
+        days: metric.days,
+        units: metric.units,
+        share: totalBudget > 0 ? metric.budget / totalBudget : 0,
+      }))
       .filter((entry) => entry.actual > 0)
       .sort((a, b) => b.actual - a.actual);
-  }, [data, hasRoleFilter, roleFilterSet, hasEntityFilter, entityFilters]);
+  }, [data, hasRoleFilter, roleFilterSet, hasEntityFilter, entityFilterSet]);
 
   const workstreamShare = actualTotalFiltered > 0 ? workstreamActual / actualTotalFiltered : 0;
   const workstreamFilteredTotal = useMemo(
@@ -1244,6 +1434,11 @@ export default function CrmBudgetExecutionView() {
         ? "Days"
         : "Email units";
 
+  const normalizedMarketData = useMemo(
+    () => mergeMarketBreakdown(productionAggregate.byMarket),
+    [productionAggregate.byMarket],
+  );
+
   const formatProductionMetric = (value: number) => {
     if (productionMetric === "budget") return formatCurrency(value);
     if (productionMetric === "days") return `${formatDays(value)} d`;
@@ -1255,7 +1450,7 @@ export default function CrmBudgetExecutionView() {
       productionDimension === "brand"
         ? productionAggregate.byBrand
         : productionDimension === "market"
-          ? productionAggregate.byMarket
+          ? normalizedMarketData
           : productionDimension === "segment"
             ? productionAggregate.bySegment
             : productionAggregate.byScope;
@@ -1275,7 +1470,7 @@ export default function CrmBudgetExecutionView() {
       top.push({ key: "Other", ...other });
     }
     return top;
-  }, [productionAggregate, productionDimension, productionMetricKey]);
+  }, [normalizedMarketData, productionAggregate, productionDimension, productionMetricKey]);
 
   const productionMetricTotal = productionAggregate.totals[productionMetricKey] ?? 0;
 
@@ -1297,6 +1492,17 @@ export default function CrmBudgetExecutionView() {
   const productionTopLabel =
     productionDimensionOptions.find((option) => option.key === productionDimension)?.label ??
     "Group";
+  const productionBarMarginRight = productionDimension === "market" ? 56 : 24;
+  const loyaltySegmentStats = useMemo(() => {
+    const totals = createMetric();
+    const loyaltyKeys = new Set(["privilege", "clubber"]);
+    productionAggregate.bySegment.forEach((entry) => {
+      if (!loyaltyKeys.has(entry.key.trim().toLowerCase())) return;
+      addMetric(totals, entry);
+    });
+    const share = productionAggregate.totals.budget > 0 ? totals.budget / productionAggregate.totals.budget : 0;
+    return { ...totals, share };
+  }, [productionAggregate.bySegment, productionAggregate.totals.budget]);
 
   const buildDonutData = useCallback(
     (items: Array<{ key: string } & ProductionMetric>, limit = 6) => {
@@ -1329,8 +1535,8 @@ export default function CrmBudgetExecutionView() {
   );
 
   const productionMarketDonut = useMemo(
-    () => buildDonutData(productionAggregate.byMarket),
-    [buildDonutData, productionAggregate.byMarket],
+    () => buildDonutData(normalizedMarketData),
+    [buildDonutData, normalizedMarketData],
   );
 
   const productionBrandDonut = useMemo(
@@ -1762,7 +1968,7 @@ export default function CrmBudgetExecutionView() {
                 <BarChart
                   data={productionRoleChartData}
                   layout="vertical"
-                  margin={{ top: 8, right: 16, left: 16, bottom: 0 }}
+                  margin={{ top: 8, right: 56, left: 16, bottom: 0 }}
                 >
                   <CartesianGrid stroke={chartTheme.grid} horizontal={false} />
                   <XAxis
@@ -1781,17 +1987,56 @@ export default function CrmBudgetExecutionView() {
                     tickLine={chartTheme.tickLine}
                   />
                   <Tooltip
-                    contentStyle={chartTheme.tooltip.contentStyle}
-                    itemStyle={chartTheme.tooltip.itemStyle}
-                    labelStyle={chartTheme.tooltip.labelStyle}
-                    formatter={(value) => formatCurrency(Number(value), true)}
+                    cursor={false}
+                    content={({ active, payload }) => {
+                      if (!active || !payload || payload.length === 0) return null;
+                      const entry = payload[0].payload as {
+                        roleName: string;
+                        actual: number;
+                        days: number;
+                        share: number;
+                      };
+                      return (
+                        <div className="rounded-lg border border-[color:var(--color-border)] bg-[color:var(--color-surface)] px-3 py-2 text-xs text-[color:var(--color-text)] shadow-lg">
+                          <div className="font-semibold">{entry.roleName}</div>
+                          <div className="mt-1 flex items-center justify-between gap-3">
+                            <span>Budget</span>
+                            <span className="font-semibold">{formatCurrency(entry.actual)}</span>
+                          </div>
+                          <div className="mt-1 flex items-center justify-between gap-3">
+                            <span>Days</span>
+                            <span className="font-semibold">{formatUnits(Math.round(entry.days))} d</span>
+                          </div>
+                          <div className="mt-1 flex items-center justify-between gap-3">
+                            <span>Email units</span>
+                            <span className="font-semibold">{formatUnits(Math.round(entry.units))}</span>
+                          </div>
+                        </div>
+                      );
+                    }}
                   />
                   <Bar
                     dataKey="actual"
                     name="Production actual"
                     fill="var(--chart-1)"
+                    fillOpacity={0.85}
                     radius={[6, 6, 6, 6]}
-                  />
+                    activeBar={{
+                      fill: "var(--chart-2)",
+                      stroke: "var(--color-primary)",
+                      strokeWidth: 2,
+                      fillOpacity: 1,
+                    }}
+                  >
+                    <LabelList
+                      dataKey="share"
+                      position="right"
+                      offset={10}
+                      formatter={(value: number) => formatPercentInt(Number(value))}
+                      fill={chartTheme.tick.fill}
+                      fontSize={11}
+                    />
+                  </Bar>
                 </BarChart>
               </ResponsiveContainer>
             )}
@@ -1851,7 +2096,7 @@ export default function CrmBudgetExecutionView() {
                   <BarChart
                     data={productionChartData}
                     layout="vertical"
-                    margin={{ top: 8, right: 24, left: 16, bottom: 0 }}
+                    margin={{ top: 8, right: productionBarMarginRight, left: 16, bottom: 0 }}
                   >
                     <CartesianGrid stroke={chartTheme.grid} horizontal={false} />
                     <XAxis
@@ -1904,15 +2149,15 @@ export default function CrmBudgetExecutionView() {
                             </div>
                             <div className="mt-1 flex items-center justify-between gap-3">
                               <span>Budget</span>
-                              <span className="font-semibold">{formatCurrency(entry.budget, true)}</span>
+                              <span className="font-semibold">{formatCurrency(entry.budget)}</span>
                             </div>
                             <div className="mt-1 flex items-center justify-between gap-3">
                               <span>Days</span>
-                              <span className="font-semibold">{formatDays(entry.days)} d</span>
+                              <span className="font-semibold">{formatUnits(Math.round(entry.days))} d</span>
                             </div>
                             <div className="mt-1 flex items-center justify-between gap-3">
                               <span>Email units</span>
-                              <span className="font-semibold">{formatUnits(entry.units)}</span>
+                              <span className="font-semibold">{formatUnits(Math.round(entry.units))}</span>
                             </div>
                             <div className="mt-1 flex items-center justify-between gap-3">
                               <span>Share</span>
@@ -1934,7 +2179,18 @@ export default function CrmBudgetExecutionView() {
                         strokeWidth: 2,
                         fillOpacity: 1,
                       }}
-                    />
+                    >
+                      {productionDimension === "market" ? (
+                        <LabelList
+                          dataKey="share"
+                          position="right"
+                          offset={10}
+                          formatter={(value: number) => formatPercentInt(Number(value))}
+                          fill={chartTheme.tick.fill}
+                          fontSize={11}
+                        />
+                      ) : null}
+                    </Bar>
                   </BarChart>
                 </ResponsiveContainer>
               )}
@@ -1969,6 +2225,40 @@ export default function CrmBudgetExecutionView() {
                         <span className="font-semibold">{formatPercent(productionTopEntry.share)}</span>
                       </div>
                     </div>
+                    {productionDimension === "segment" ? (
+                      <div className="mt-4 border-t border-[color:var(--color-border)] pt-3">
+                        <div className="text-xs font-semibold uppercase tracking-[0.2em] text-[color:var(--color-text)]/55">
+                          Loyalty programs
+                        </div>
+                        <div className="mt-1 text-xs text-[color:var(--color-text)]/60">
+                          Privilege + Clubber
+                        </div>
+                        {loyaltySegmentStats.budget > 0 || loyaltySegmentStats.days > 0 ? (
+                          <div className="mt-2 space-y-2 text-xs text-[color:var(--color-text)]/70">
+                            <div className="flex items-center justify-between gap-3">
+                              <span>Budget</span>
+                              <span className="font-semibold">
+                                {formatCurrency(loyaltySegmentStats.budget, true)}
+                              </span>
+                            </div>
+                            <div className="flex items-center justify-between gap-3">
+                              <span>Days</span>
+                              <span className="font-semibold">
+                                {formatDays(loyaltySegmentStats.days)} d
+                              </span>
+                            </div>
+                            <div className="flex items-center justify-between gap-3">
+                              <span>Share</span>
+                              <span className="font-semibold">{formatPercent(loyaltySegmentStats.share)}</span>
+                            </div>
+                          </div>
+                        ) : (
+                          <p className="mt-2 text-xs text-[color:var(--color-text)]/60">
+                            No loyalty spend available.
+                          </p>
+                        )}
+                      </div>
+                    ) : null}
                   </>
                 ) : (
                   <p className="mt-2 text-sm text-[color:var(--color-text)]/65">
@@ -2017,8 +2307,14 @@ export default function CrmBudgetExecutionView() {
                             outerRadius="80%"
                             paddingAngle={3}
                             stroke="transparent"
-                            label={block.kind === "brand" ? renderBrandSliceLabel : undefined}
-                            labelLine={block.kind === "brand" ? false : undefined}
+                            label={
+                              block.kind === "brand"
+                                ? renderBrandDonutLabel
+                                : block.kind === "market"
+                                  ? renderMarketDonutLabel
+                                  : renderDonutShareLabel
+                            }
+                            labelLine={block.kind === "brand" ? false : renderDonutLabelLine}
                           >
                             {block.data.map((entry, index) => (
                               <Cell
