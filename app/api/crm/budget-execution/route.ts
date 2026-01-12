@@ -312,7 +312,12 @@ export async function GET(request: Request) {
       person_id?: string | null;
       owner?: string | null;
       hours_total?: number | string | null;
+      days_total?: number | string | null;
       send_date?: string | null;
+      brand?: string | null;
+      market?: string | null;
+      scope?: string | null;
+      segment?: string | null;
     };
 
     type ManualEffortRow = {
@@ -338,7 +343,7 @@ export async function GET(request: Request) {
     const campaignRows = await fetchPaged<CampaignRow>((from, to) =>
       supabase
         .from("campaign_email_units")
-        .select("person_id, owner, hours_total, send_date")
+        .select("person_id, owner, hours_total, days_total, send_date, brand, market, scope, segment")
         .eq("client_slug", client)
         .gte("send_date", yearStart)
         .lte("send_date", yearEnd)
@@ -376,6 +381,63 @@ export async function GET(request: Request) {
     let totalDays = 0;
     let lastDate: Date | null = null;
     let unmappedTotal = 0;
+
+    type ProductionMetric = { budget: number; hours: number; days: number; units: number };
+    type ProductionBreakdown = Record<string, ProductionMetric>;
+    type ProductionPerson = {
+      totals: ProductionMetric;
+      byBrand: ProductionBreakdown;
+      byMarket: ProductionBreakdown;
+      bySegment: ProductionBreakdown;
+      byScope: ProductionBreakdown;
+    };
+
+    const createMetric = (): ProductionMetric => ({
+      budget: 0,
+      hours: 0,
+      days: 0,
+      units: 0,
+    });
+
+    const addMetric = (target: ProductionMetric, metric: ProductionMetric, scale = 1) => {
+      target.budget += metric.budget * scale;
+      target.hours += metric.hours * scale;
+      target.days += metric.days * scale;
+      target.units += metric.units * scale;
+    };
+
+    const updateBreakdown = (
+      breakdown: ProductionBreakdown,
+      key: string,
+      metric: ProductionMetric,
+      scale = 1,
+    ) => {
+      const entry = breakdown[key] ?? createMetric();
+      addMetric(entry, metric, scale);
+      breakdown[key] = entry;
+    };
+
+    const productionByPerson = new Map<string, ProductionPerson>();
+    const productionTotals = createMetric();
+
+    const ensureProductionPerson = (personKey: string) => {
+      const existing = productionByPerson.get(personKey);
+      if (existing) return existing;
+      const created = {
+        totals: createMetric(),
+        byBrand: {},
+        byMarket: {},
+        bySegment: {},
+        byScope: {},
+      };
+      productionByPerson.set(personKey, created);
+      return created;
+    };
+
+    const normalizeDimension = (value: string | null | undefined, fallback: string) => {
+      const trimmed = String(value ?? "").trim();
+      return trimmed.length > 0 ? trimmed : fallback;
+    };
 
     const ensureMonthSeries = (map: Map<string, number[]>, key: string) => {
       const existing = map.get(key);
@@ -452,13 +514,13 @@ export async function GET(request: Request) {
       dateValue: string | null,
       scopeLabel: string,
     ) => {
-      if (!Number.isFinite(hours) || hours <= 0) return;
+      if (!Number.isFinite(hours) || hours <= 0) return null;
       const ownerKey = normalizeKey(owner);
       const resolvedPersonId = personId || (ownerKey ? aliasMap.get(ownerKey) ?? null : null);
       const rate =
         (resolvedPersonId ? rateByPerson.get(resolvedPersonId) : null) ||
         (ownerKey ? rateByOwner.get(ownerKey) : null);
-      if (!rate || rate.dailyRate <= 0) return;
+      if (!rate || rate.dailyRate <= 0) return null;
       const days = hours / 7;
       const amount = days * rate.dailyRate;
       const entityKey = resolvedPersonId
@@ -514,6 +576,15 @@ export async function GET(request: Request) {
         }
         if (!lastDate || d > lastDate) lastDate = d;
       }
+      return {
+        personKey: resolvedPersonId ?? UNMAPPED_KEY,
+        resolvedPersonId,
+        roleShares,
+        amount,
+        hours,
+        days,
+        entityKey,
+      };
     };
 
     contribRows.forEach((row) => {
@@ -536,13 +607,31 @@ export async function GET(request: Request) {
 
     campaignRows.forEach((row) => {
       const hours = Number(row.hours_total ?? 0);
-      addSpend(
+      const result = addSpend(
         row.person_id ? String(row.person_id) : null,
         row.owner ?? null,
         hours,
         row.send_date ?? null,
         "Production",
       );
+      if (!result) return;
+      const metric: ProductionMetric = {
+        budget: result.amount,
+        hours,
+        days: result.days,
+        units: 1,
+      };
+      const personBucket = ensureProductionPerson(result.personKey);
+      addMetric(personBucket.totals, metric);
+      addMetric(productionTotals, metric);
+      const brand = normalizeDimension(row.brand, "Unknown brand");
+      const market = normalizeDimension(row.market, "Unknown market");
+      const segment = normalizeDimension(row.segment, "Unknown segment");
+      const scope = normalizeDimension(row.scope, "Unknown scope");
+      updateBreakdown(personBucket.byBrand, brand, metric);
+      updateBreakdown(personBucket.byMarket, market, metric);
+      updateBreakdown(personBucket.bySegment, segment, metric);
+      updateBreakdown(personBucket.byScope, scope, metric);
     });
 
     manualRows.forEach((row) => {
@@ -712,6 +801,11 @@ export async function GET(request: Request) {
       entityByPerson[personId] = entity;
     });
 
+    const productionByPersonPayload: Record<string, ProductionPerson> = {};
+    productionByPerson.forEach((value, personKey) => {
+      productionByPersonPayload[personKey] = value;
+    });
+
     const roleCurrencySet = new Set(activeRoles.map((role) => role.currency).filter(Boolean));
     const currency =
       roleCurrencySet.size === 1
@@ -749,6 +843,10 @@ export async function GET(request: Request) {
       monthlyScope: monthlyScopePayload,
       monthlyRole: monthlyRolePayload,
       monthlyRoleScope: monthlyRoleScopePayload,
+      production: {
+        totals: productionTotals,
+        byPerson: productionByPersonPayload,
+      },
       table: {
         rows: tableRows,
         roles: roleOptions,
