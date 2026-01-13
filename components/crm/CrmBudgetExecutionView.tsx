@@ -1342,6 +1342,35 @@ export default function CrmBudgetExecutionView() {
   );
   const workstreamSelectedShare =
     actualTotalFiltered > 0 ? workstreamFilteredTotal / actualTotalFiltered : 0;
+  const workstreamDonutData = useMemo(() => {
+    const total = workstreamChartData.reduce((acc, entry) => acc + entry.actual, 0);
+    if (total <= 0) return [];
+    const sorted = [...workstreamChartData].sort((a, b) => b.actual - a.actual);
+    const limit = 6;
+    if (sorted.length <= limit) {
+      return sorted.map((entry) => ({
+        name: entry.scope,
+        actual: entry.actual,
+        share: entry.actual / total,
+      }));
+    }
+    const top = sorted.slice(0, limit);
+    const remainder = sorted.slice(limit);
+    const otherActual = remainder.reduce((acc, entry) => acc + entry.actual, 0);
+    const result = top.map((entry) => ({
+      name: entry.scope,
+      actual: entry.actual,
+      share: entry.actual / total,
+    }));
+    if (otherActual > 0) {
+      result.push({
+        name: "Other Streams",
+        actual: otherActual,
+        share: otherActual / total,
+      });
+    }
+    return result;
+  }, [workstreamChartData]);
 
   const productionAggregate = useMemo(() => {
     const totals = createMetric();
@@ -1710,7 +1739,7 @@ export default function CrmBudgetExecutionView() {
               </div>
             ) : (
               <ResponsiveContainer width="100%" height={CHART_HEIGHT}>
-                <LineChart data={burnData} margin={{ top: 8, right: 16, left: 0, bottom: 0 }}>
+                <LineChart data={burnData} margin={{ top: 8, right: 16, left: 24, bottom: 0 }}>
                   <CartesianGrid stroke={chartTheme.grid} vertical={false} />
                   <XAxis
                     dataKey="month"
@@ -1722,6 +1751,8 @@ export default function CrmBudgetExecutionView() {
                     tick={chartTheme.tick}
                     axisLine={chartTheme.axisLine}
                     tickLine={chartTheme.tickLine}
+                    width={90}
+                    tickMargin={8}
                     tickFormatter={(value) => formatCurrency(Number(value))}
                   />
                   <Tooltip
@@ -1933,6 +1964,8 @@ export default function CrmBudgetExecutionView() {
                     tick={chartTheme.tick}
                     axisLine={chartTheme.axisLine}
                     tickLine={chartTheme.tickLine}
+                    width={90}
+                    tickMargin={8}
                     tickFormatter={(value) => formatCurrency(Number(value))}
                   />
                   <Tooltip
@@ -2338,13 +2371,13 @@ export default function CrmBudgetExecutionView() {
         <div className="flex flex-wrap items-start justify-between gap-4">
           <div>
             <p className="text-xs uppercase tracking-[0.2em] text-[color:var(--color-text)]/60">
-              Workstreams
+              Other Workstreams
             </p>
             <h3 className="mt-1 text-lg font-semibold text-[color:var(--color-text)]">
-              Data Quality + Manual Efforts
+              Consulting, Governance & Data Quality
             </h3>
             <p className="mt-1 text-xs text-[color:var(--color-text)]/60">
-              Effort logged on DQ tickets and manual entries, grouped by workstream.
+              Effort logged across consulting, strategy/governance, and data quality, grouped by workstream.
             </p>
           </div>
           <div className="grid gap-2 sm:grid-cols-3">
@@ -2406,7 +2439,7 @@ export default function CrmBudgetExecutionView() {
               <div className="flex h-full items-center justify-center text-sm text-[color:var(--color-text)]/65">
                 Loading chart...
               </div>
-            ) : workstreamChartData.length === 0 ? (
+            ) : workstreamDonutData.length === 0 ? (
               <div className="flex h-full items-center justify-center text-sm text-[color:var(--color-text)]/65">
                 No workstream data available.
               </div>
@@ -2421,17 +2454,19 @@ export default function CrmBudgetExecutionView() {
                   />
                   <Legend verticalAlign="bottom" height={36} />
                   <Pie
-                    data={workstreamChartData}
+                    data={workstreamDonutData}
                     dataKey="actual"
-                    nameKey="scope"
+                    nameKey="name"
                     innerRadius="55%"
                     outerRadius="80%"
                     paddingAngle={3}
                     stroke="transparent"
+                    label={renderDonutShareLabel}
+                    labelLine={renderDonutLabelLine}
                   >
-                    {workstreamChartData.map((entry, index) => (
+                    {workstreamDonutData.map((entry, index) => (
                       <Cell
-                        key={`${entry.scope}-${index}`}
+                        key={`${entry.name}-${index}`}
                         fill={chartTheme.palette[index % chartTheme.palette.length]}
                       />
                     ))}
@@ -2447,7 +2482,7 @@ export default function CrmBudgetExecutionView() {
               </div>
             ) : (
               <ResponsiveContainer width="100%" height={CHART_HEIGHT}>
-                <LineChart data={workstreamTrendData} margin={{ top: 8, right: 16, left: 0, bottom: 0 }}>
+                <LineChart data={workstreamTrendData} margin={{ top: 8, right: 16, left: 2, bottom: 0 }}>
                   <CartesianGrid stroke={chartTheme.grid} vertical={false} />
                   <XAxis
                     dataKey="month"
@@ -2459,6 +2494,8 @@ export default function CrmBudgetExecutionView() {
                     tick={chartTheme.tick}
                     axisLine={chartTheme.axisLine}
                     tickLine={chartTheme.tickLine}
+                    width={82}
+                    tickMargin={3}
                     tickFormatter={(value) => formatCurrency(Number(value))}
                   />
                   <Tooltip

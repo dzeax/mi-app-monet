@@ -41,6 +41,7 @@ type Filters = {
   dueTo: string;
   daysBucket: string;
   needsEffort: boolean;
+  hasWork: boolean;
   workstream: string[];
 };
 
@@ -729,6 +730,7 @@ export default function CrmDataQualityView() {
     dueTo: "",
     daysBucket: "",
     needsEffort: false,
+    hasWork: false,
     workstream: [],
   });
   const [rows, setRows] = useState<DataQualityTicket[]>([]);
@@ -1196,6 +1198,11 @@ export default function CrmDataQualityView() {
     if (exclude !== "needsEffort" && filters.needsEffort) {
       if (!isNeedsEffortTicket(t)) return false;
     }
+    if (exclude !== "hasWork" && filters.hasWork) {
+      const contribs = filterContributionsByWorkstream(getTicketContributions(t));
+      const totalWork = contribs.reduce((acc, c) => acc + (c.workHours ?? 0), 0);
+      if (totalWork <= 0) return false;
+    }
     return true;
   }, [
     filters.assignedFrom,
@@ -1205,6 +1212,7 @@ export default function CrmDataQualityView() {
     filters.dueFrom,
     filters.dueTo,
     filters.needsEffort,
+    filters.hasWork,
     filters.owner,
     filters.priority,
     filters.search,
@@ -1219,6 +1227,14 @@ export default function CrmDataQualityView() {
   const needsEffortCount = useMemo(
     () => rows.filter((ticket) => isNeedsEffortTicket(ticket)).length,
     [rows, isNeedsEffortTicket],
+  );
+  const hasWorkCount = useMemo(
+    () =>
+      rows.filter((ticket) => {
+        const contribs = filterContributionsByWorkstream(getTicketContributions(ticket));
+        return contribs.some((c) => (c.workHours ?? 0) > 0);
+      }).length,
+    [rows, filterContributionsByWorkstream],
   );
 
   const activeChips = useMemo(() => {
@@ -1262,6 +1278,11 @@ export default function CrmDataQualityView() {
       chips.push({
         label: `Needs effort${needsEffortCount ? `: ${needsEffortCount}` : ""}`,
         onClear: () => handleChange("needsEffort", false),
+      });
+    if (filters.hasWork)
+      chips.push({
+        label: `Work logged${hasWorkCount ? `: ${hasWorkCount}` : ""}`,
+        onClear: () => handleChange("hasWork", false),
       });
     const createdLabel = formatRangeLabel(
       "Created",
@@ -1714,6 +1735,7 @@ export default function CrmDataQualityView() {
       dueTo: "",
       daysBucket: "",
       needsEffort: false,
+      hasWork: false,
       workstream: [],
     });
     setSearchInput("");
@@ -2208,6 +2230,24 @@ export default function CrmDataQualityView() {
                 title="Show tickets moved to Validation/Done in the last sync without effort"
               >
                 Needs effort: {needsEffortCount}
+              </button>
+              <button
+                type="button"
+                className={[
+                  "inline-flex items-center gap-2 rounded-full border px-3 py-1.5 text-xs font-semibold transition",
+                  filters.hasWork
+                    ? "border-[color:var(--color-primary)] bg-[color:var(--color-primary)]/10 text-[color:var(--color-primary)]"
+                    : "border-[color:var(--color-border)] bg-[color:var(--color-surface)] text-[color:var(--color-text)]/70",
+                  hasWorkCount === 0
+                    ? "cursor-not-allowed opacity-50"
+                    : "hover:bg-[color:var(--color-surface-2)]/80",
+                ].join(" ")}
+                onClick={() => handleChange("hasWork", !filters.hasWork)}
+                disabled={hasWorkCount === 0}
+                aria-pressed={filters.hasWork}
+                title="Show tickets with work hours logged"
+              >
+                Work logged: {hasWorkCount}
               </button>
               {isEditor || isAdmin ? (
                 <>
