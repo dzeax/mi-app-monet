@@ -14,8 +14,9 @@ export default async function proxy(req: NextRequest) {
 
   const isAuthCallback = pathname.startsWith("/auth/callback");
   const isSetPassword = pathname.startsWith("/set-password");
+  const isShareRoute = pathname.startsWith("/share") || pathname.startsWith("/api/share");
 
-  if (hasAuthParams && !isAuthCallback && !isSetPassword) {
+  if (hasAuthParams && !isAuthCallback && !isSetPassword && !isShareRoute) {
     const url = req.nextUrl.clone();
     url.pathname = "/auth/callback";
 
