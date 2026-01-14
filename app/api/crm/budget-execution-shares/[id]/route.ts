@@ -30,13 +30,15 @@ async function requireAdmin() {
   return { supabase };
 }
 
-export async function DELETE(_: Request, { params }: { params: { id: string } }) {
+export async function DELETE(req: Request, { params }: { params: { id: string } }) {
   const auth = await requireAdmin();
   if ("error" in auth) return auth.error;
   const { supabase } = auth;
-  const id = params.id;
+  const url = new URL(req.url);
+  const pathId = url.pathname.split("/").pop();
+  const id = params?.id || url.searchParams.get("id") || pathId;
 
-  if (!id) {
+  if (!id || id === "budget-execution-shares") {
     return NextResponse.json({ error: "Missing share id." }, { status: 400 });
   }
 
