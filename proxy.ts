@@ -49,9 +49,11 @@ export default async function proxy(req: NextRequest) {
     pathname.startsWith("/reset") ||
     pathname.startsWith("/auth") ||
     pathname.startsWith("/set-password") ||
+    pathname.startsWith("/share") ||
     pathname.startsWith("/_next") ||
     pathname.startsWith("/favicon") ||
     pathname.startsWith("/api/auth") ||
+    pathname.startsWith("/api/share") ||
     pathname.startsWith("/api/public") ||
     pathname.startsWith("/assets");
 
