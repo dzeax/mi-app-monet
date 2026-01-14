@@ -2,7 +2,19 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { usePathname } from "next/navigation";
-import { Activity, CreditCard, PiggyBank, Wallet } from "lucide-react";
+import {
+  Activity,
+  ArrowDown,
+  ArrowUp,
+  ChevronDown,
+  ChevronUp,
+  CreditCard,
+  Download,
+  Info,
+  Link2,
+  PiggyBank,
+  Wallet,
+} from "lucide-react";
 import {
   ResponsiveContainer,
   LineChart,
@@ -22,8 +34,17 @@ import {
 } from "recharts";
 import { chartTheme } from "@/components/charts/theme";
 import { canonicalGeo, geoEmoji, geoFlagClass, EMOJI_UNKNOWN } from "@/lib/geoFlags";
+import IfAdmin from "@/components/guards/IfAdmin";
+import CrmBudgetExecutionShareModal from "@/components/crm/CrmBudgetExecutionShareModal";
 
 type Option = { label: string; value: string };
+
+type BudgetExecutionViewProps = {
+  clientOverride?: string;
+  shareToken?: string;
+  shareMode?: boolean;
+  initialYear?: number;
+};
 
 type RoleBreakdown = {
   roleId: string;
@@ -75,6 +96,7 @@ type TableRow = {
 
 type BudgetExecutionResponse = {
   year: number;
+  allowedYears?: number[];
   currency: string;
   planTotal: number;
   actualTotal: number;
@@ -88,6 +110,8 @@ type BudgetExecutionResponse = {
   monthlyEntityScope: Record<string, Record<string, number[]>>;
   monthlyEntityRole: Record<string, Record<string, number[]>>;
   monthlyEntityRoleScope: Record<string, Record<string, Record<string, number[]>>>;
+  monthlyPerson: Record<string, number[]>;
+  monthlyPersonScope: Record<string, Record<string, number[]>>;
   totals: {
     hours: number;
     days: number;
@@ -132,6 +156,7 @@ type ColumnKey =
   | "risk";
 
 type ColumnPreset = "Minimal" | "Finance" | "Full";
+type SortDirection = "asc" | "desc";
 
 const PRESET_STORAGE_KEY = "crm_budget_exec_preset";
 const MONTHS = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
@@ -240,6 +265,13 @@ const riskToneClass: Record<"ok" | "warn" | "danger", string> = {
   ok: "border-emerald-200 bg-emerald-50 text-emerald-700",
   warn: "border-amber-200 bg-amber-50 text-amber-700",
   danger: "border-red-200 bg-red-50 text-red-700",
+};
+const riskOrder: Record<string, number> = {
+  Unmapped: 5,
+  Unplanned: 4,
+  ">100%": 3,
+  "90-99%": 2,
+  OK: 1,
 };
 
 const arraysEqual = (left: string[], right: string[]) =>
@@ -670,25 +702,52 @@ function MultiSelect({
   );
 }
 
-export default function CrmBudgetExecutionView() {
+export default function CrmBudgetExecutionView({
+  clientOverride,
+  shareToken,
+  shareMode = false,
+  initialYear,
+}: BudgetExecutionViewProps) {
   const pathname = usePathname();
   const segments = pathname?.split("/").filter(Boolean) ?? [];
-  const clientSlug = segments[1] || "emg";
+  const clientSlug = clientOverride || segments[1] || "emg";
+  const clientLogo = clientSlug === "emg" ? "/logos/emg-logo.png" : null;
   const nowYear = new Date().getFullYear();
-  const [year, setYear] = useState(nowYear);
+  const [year, setYear] = useState(initialYear ?? nowYear);
   const [data, setData] = useState<BudgetExecutionResponse | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [roleFilters, setRoleFilters] = useState<string[]>([]);
   const [workstreamFilters, setWorkstreamFilters] = useState<string[]>([]);
   const [entityFilters, setEntityFilters] = useState<string[]>([]);
-  const [searchQuery, setSearchQuery] = useState("");
+  const [resourceFilters, setResourceFilters] = useState<string[]>([]);
   const [riskOnly, setRiskOnly] = useState(false);
   const [columnPreset, setColumnPreset] = useState<ColumnPreset>("Finance");
   const [productionMetric, setProductionMetric] = useState<"budget" | "days" | "units">("budget");
   const [productionDimension, setProductionDimension] = useState<
     "brand" | "market" | "segment" | "scope"
   >("brand");
+  const [productionOpen, setProductionOpen] = useState(false);
+  const [workstreamsOpen, setWorkstreamsOpen] = useState(false);
+  const [detailRiskFilters, setDetailRiskFilters] = useState<string[]>([]);
+  const [detailSort, setDetailSort] = useState<{ key: ColumnKey; direction: SortDirection } | null>(
+    null,
+  );
+  const [detailRow, setDetailRow] = useState<
+    (TableRow & {
+      actual: number;
+      plan: number;
+      remaining: number;
+      utilization: number;
+      delta: number;
+      risk: { label: string; tone: "ok" | "warn" | "danger" };
+    }) | null
+  >(null);
+  const [detailOpen, setDetailOpen] = useState(false);
+  const [shareOpen, setShareOpen] = useState(false);
+  const [shareAllowedYears, setShareAllowedYears] = useState<number[] | null>(null);
+  const [workstreamDetailOpen, setWorkstreamDetailOpen] = useState(false);
+  const [workstreamDetailScope, setWorkstreamDetailScope] = useState<string | null>(null);
 
   useEffect(() => {
     if (typeof window === "undefined") return;
@@ -703,19 +762,62 @@ export default function CrmBudgetExecutionView() {
     window.localStorage.setItem(PRESET_STORAGE_KEY, columnPreset);
   }, [columnPreset]);
 
+  const panelStorageKey = useCallback(
+    (panel: "production" | "workstreams") =>
+      `crm_budget_exec_${panel}_open_${clientSlug}_${year}`,
+    [clientSlug, year],
+  );
+
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+    const savedProduction = window.localStorage.getItem(panelStorageKey("production"));
+    const savedWorkstreams = window.localStorage.getItem(panelStorageKey("workstreams"));
+    setProductionOpen(savedProduction ? savedProduction === "true" : false);
+    setWorkstreamsOpen(savedWorkstreams ? savedWorkstreams === "true" : false);
+  }, [panelStorageKey]);
+
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+    window.localStorage.setItem(panelStorageKey("production"), String(productionOpen));
+  }, [panelStorageKey, productionOpen]);
+
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+    window.localStorage.setItem(panelStorageKey("workstreams"), String(workstreamsOpen));
+  }, [panelStorageKey, workstreamsOpen]);
+
   useEffect(() => {
     let active = true;
     const load = async () => {
+      if (shareMode && !shareToken) {
+        setError("Missing share token.");
+        setLoading(false);
+        return;
+      }
       setLoading(true);
       setError(null);
       try {
-        const res = await fetch(`/api/crm/budget-execution?client=${clientSlug}&year=${year}`);
+        const endpoint = shareMode
+          ? `/api/share/budget-execution?client=${clientSlug}&year=${year}&token=${encodeURIComponent(
+              shareToken ?? "",
+            )}`
+          : `/api/crm/budget-execution?client=${clientSlug}&year=${year}`;
+        const res = await fetch(endpoint);
         const body = await res.json().catch(() => null);
         if (!res.ok) {
           throw new Error(body?.error || `Failed to load budget execution (${res.status})`);
         }
         if (active) {
           setData(body as BudgetExecutionResponse);
+          if (shareMode && Array.isArray(body?.allowedYears)) {
+            const allowed = body.allowedYears.map((val: number) => Number(val)).filter((val: number) => Number.isFinite(val));
+            if (allowed.length) {
+              setShareAllowedYears(allowed);
+              if (!allowed.includes(year)) {
+                setYear(allowed[0]);
+              }
+            }
+          }
         }
       } catch (err) {
         if (active) {
@@ -729,12 +831,18 @@ export default function CrmBudgetExecutionView() {
     return () => {
       active = false;
     };
-  }, [clientSlug, year]);
+  }, [clientSlug, year, shareMode, shareToken]);
 
   const yearOptions = useMemo(() => {
+    if (shareMode && shareAllowedYears && shareAllowedYears.length) {
+      return [...shareAllowedYears].sort((a, b) => b - a);
+    }
     const base = new Set<number>([nowYear - 1, nowYear, nowYear + 1]);
+    if (Number.isFinite(initialYear ?? NaN)) {
+      base.add(initialYear as number);
+    }
     return Array.from(base).sort((a, b) => b - a);
-  }, [nowYear]);
+  }, [shareMode, shareAllowedYears, nowYear, initialYear]);
 
   const currency = data?.currency || "EUR";
   const currencyFormatter = useMemo(() => {
@@ -793,6 +901,8 @@ export default function CrmBudgetExecutionView() {
     [workstreamFilters],
   );
   const entityFilterSet = useMemo(() => new Set(entityFilters), [entityFilters]);
+  const resourceFilterSet = useMemo(() => new Set(resourceFilters), [resourceFilters]);
+  const detailRiskFilterSet = useMemo(() => new Set(detailRiskFilters), [detailRiskFilters]);
   const hasRoleFilter = roleFilters.length > 0;
   const hasWorkstreamFilter = workstreamFilters.length > 0;
   const hasEntityFilter = entityFilters.length > 0;
@@ -840,13 +950,16 @@ export default function CrmBudgetExecutionView() {
     [riskOnly, roleShareForRow],
   );
 
-  const { roleCounts, workstreamCounts, entityCounts } = useMemo(() => {
+  const { roleCounts, workstreamCounts, entityCounts, resourceCounts } = useMemo(() => {
     const roleCounts: Record<string, number> = {};
     const workstreamCounts: Record<string, number> = {};
     const entityCounts: Record<string, number> = {};
-    if (!data) return { roleCounts, workstreamCounts, entityCounts };
+    const resourceCounts: Record<string, number> = {};
+    if (!data) return { roleCounts, workstreamCounts, entityCounts, resourceCounts };
 
     data.table.rows.forEach((row) => {
+      if (resourceFilterSet.size > 0 && (!row.personId || !resourceFilterSet.has(row.personId)))
+        return;
       const entityRow = buildRow(row, roleFilterSet, EMPTY_SET, EMPTY_SET, true);
       if (entityRow) {
         entityCounts[row.entity] = (entityCounts[row.entity] ?? 0) + 1;
@@ -854,6 +967,8 @@ export default function CrmBudgetExecutionView() {
     });
 
     data.table.rows.forEach((row) => {
+      if (resourceFilterSet.size > 0 && (!row.personId || !resourceFilterSet.has(row.personId)))
+        return;
       const roleRow = buildRow(row, EMPTY_SET, EMPTY_SET, entityFilterSet, true);
       if (!roleRow) return;
       if (row.isUnassigned) {
@@ -866,6 +981,8 @@ export default function CrmBudgetExecutionView() {
     });
 
     data.table.rows.forEach((row) => {
+      if (resourceFilterSet.size > 0 && (!row.personId || !resourceFilterSet.has(row.personId)))
+        return;
       const workstreamRow = buildRow(row, roleFilterSet, EMPTY_SET, entityFilterSet, true);
       if (!workstreamRow) return;
       const roleShare = roleShareForRow(row, roleFilterSet);
@@ -879,15 +996,26 @@ export default function CrmBudgetExecutionView() {
       });
     });
 
-    return { roleCounts, workstreamCounts, entityCounts };
-  }, [data, roleFilterSet, entityFilterSet, buildRow, roleShareForRow]);
+    data.table.rows.forEach((row) => {
+      if (!row.personId) return;
+      const resourceRow = buildRow(row, roleFilterSet, EMPTY_SET, entityFilterSet, true);
+      if (!resourceRow) return;
+      resourceCounts[row.personId] = (resourceCounts[row.personId] ?? 0) + 1;
+    });
+
+    return { roleCounts, workstreamCounts, entityCounts, resourceCounts };
+  }, [data, roleFilterSet, entityFilterSet, resourceFilterSet, buildRow, roleShareForRow]);
 
   const baseRows = useMemo(() => {
     if (!data) return [];
     return data.table.rows
-      .map((row) => buildRow(row, roleFilterSet, EMPTY_SET, entityFilterSet, false))
+      .map((row) => {
+        if (resourceFilterSet.size > 0 && (!row.personId || !resourceFilterSet.has(row.personId)))
+          return null;
+        return buildRow(row, roleFilterSet, EMPTY_SET, entityFilterSet, false);
+      })
       .filter((row): row is TableRow & { actual: number; plan: number; remaining: number; utilization: number; delta: number; risk: { label: string; tone: "ok" | "warn" | "danger" } } => Boolean(row));
-  }, [data, buildRow, roleFilterSet, entityFilterSet]);
+  }, [data, buildRow, roleFilterSet, entityFilterSet, resourceFilterSet]);
 
   const planTotalFiltered = useMemo(
     () => baseRows.reduce((acc, row) => acc + row.plan, 0),
@@ -949,9 +1077,25 @@ export default function CrmBudgetExecutionView() {
 
   const filteredMonthlyActual = useMemo(() => {
     if (!data) return Array(12).fill(0);
+
+    if (resourceFilterSet.size > 0 && data.monthlyPerson) {
+      const seriesList: number[][] = [];
+      data.table.rows.forEach((row) => {
+        if (!row.personId || !resourceFilterSet.has(row.personId)) return;
+        if (hasEntityFilter && !entityFilterSet.has(row.entity)) return;
+        const baseSeries = data.monthlyPerson?.[row.personId];
+        if (!Array.isArray(baseSeries)) return;
+        const scale = hasRoleFilter ? roleShareForRow(row, roleFilterSet) : 1;
+        if (scale <= 0) return;
+        seriesList.push(baseSeries.map((value) => value * scale));
+      });
+      return sumSeriesList(seriesList);
+    }
+
     if (!hasRoleFilter && !hasEntityFilter) {
       return data.monthlyActual ?? Array(12).fill(0);
     }
+
     const monthlyRole = data.monthlyRole ?? {};
     const monthlyEntity = data.monthlyEntity ?? {};
     const monthlyEntityRole = data.monthlyEntityRole ?? {};
@@ -985,6 +1129,9 @@ export default function CrmBudgetExecutionView() {
     hasEntityFilter,
     roleFilters,
     entityFilters,
+    resourceFilterSet,
+    entityFilterSet,
+    roleShareForRow,
   ]);
 
   const burnData = useMemo(() => {
@@ -1036,6 +1183,27 @@ export default function CrmBudgetExecutionView() {
     () => (data?.table.entities ?? []).map((entity) => ({ label: entity, value: entity })),
     [data],
   );
+  const roleNameById = useMemo(
+    () =>
+      new Map<string, string>(
+        (data?.breakdowns.roles ?? []).map((role) => [role.roleId, role.roleName]),
+      ),
+    [data],
+  );
+  const resourceOptionsRaw = useMemo<Option[]>(() => {
+    const options: Array<{ id: string; name: string }> = [];
+    if (!data?.table.rows) return [];
+    const seen = new Set<string>();
+    data.table.rows.forEach((row) => {
+      if (!row.personId) return;
+      if (seen.has(row.personId)) return;
+      seen.add(row.personId);
+      options.push({ id: row.personId, name: row.name });
+    });
+    return options
+      .sort((a, b) => a.name.localeCompare(b.name, "en", { sensitivity: "base" }))
+      .map((entry) => ({ label: entry.name, value: entry.id }));
+  }, [data]);
 
   const filterOptionsByCount = useCallback(
     (options: Option[], counts: Record<string, number>) => {
@@ -1057,12 +1225,17 @@ export default function CrmBudgetExecutionView() {
     () => filterOptionsByCount(entityOptionsRaw, entityCounts),
     [filterOptionsByCount, entityOptionsRaw, entityCounts],
   );
+  const resourceOptions = useMemo(
+    () => filterOptionsByCount(resourceOptionsRaw, resourceCounts),
+    [filterOptionsByCount, resourceOptionsRaw, resourceCounts],
+  );
 
   useEffect(() => {
     if (!data) return;
     const roleSet = new Set(roleOptions.map((opt) => opt.value));
     const workstreamSet = new Set(workstreamOptions.map((opt) => opt.value));
     const entitySet = new Set(entityOptions.map((opt) => opt.value));
+    const resourceSet = new Set(resourceOptions.map((opt) => opt.value));
     setRoleFilters((prev) => {
       const next = prev.filter((value) => roleSet.has(value));
       return arraysEqual(prev, next) ? prev : next;
@@ -1075,10 +1248,47 @@ export default function CrmBudgetExecutionView() {
       const next = prev.filter((value) => entitySet.has(value));
       return arraysEqual(prev, next) ? prev : next;
     });
-  }, [data, roleOptions, workstreamOptions, entityOptions]);
+    setResourceFilters((prev) => {
+      const next = prev.filter((value) => resourceSet.has(value));
+      return arraysEqual(prev, next) ? prev : next;
+    });
+  }, [data, roleOptions, workstreamOptions, entityOptions, resourceOptions]);
 
   const roleChartData = useMemo(() => {
     if (!data) return [];
+    if (resourceFilterSet.size > 0) {
+      const roleTotals = new Map<string, { plan: number; actual: number }>();
+      data.table.rows.forEach((row) => {
+        if (!row.personId || !resourceFilterSet.has(row.personId)) return;
+        if (hasEntityFilter && !entityFilterSet.has(row.entity)) return;
+        const actual = sumRecord(row.scopeSpend ?? {});
+        if (row.roleShares.length > 0) {
+          row.roleShares.forEach((share) => {
+            if (hasRoleFilter && !roleFilterSet.has(share.roleId)) return;
+            const entry = roleTotals.get(share.roleId) ?? { plan: 0, actual: 0 };
+            entry.plan += row.plan * share.share;
+            entry.actual += actual * share.share;
+            roleTotals.set(share.roleId, entry);
+          });
+        } else if (row.isUnassigned) {
+          if (hasRoleFilter && !roleFilterSet.has("unassigned")) return;
+          const entry = roleTotals.get("unassigned") ?? { plan: 0, actual: 0 };
+          entry.plan += row.plan;
+          entry.actual += actual;
+          roleTotals.set("unassigned", entry);
+        }
+      });
+      const roleNameMap = new Map(data.breakdowns.roles.map((role) => [role.roleId, role.roleName]));
+      return Array.from(roleTotals.entries())
+        .map(([roleId, totals]) => ({
+          roleName: roleNameMap.get(roleId) ?? "Unassigned",
+          plan: totals.plan,
+          actual: totals.actual,
+        }))
+        .filter((entry) => entry.plan > 0 || entry.actual > 0)
+        .sort((a, b) => b.actual - a.actual);
+    }
+
     const roleScopes = data.roleScopes || {};
     const rolePlanById = new Map<string, number>();
     if (hasEntityFilter) {
@@ -1133,13 +1343,25 @@ export default function CrmBudgetExecutionView() {
     hasEntityFilter,
     entityFilters,
     entityFilterSet,
+    resourceFilterSet,
+    roleShareForRow,
   ]);
 
   const scopeTotalsData = useMemo(() => {
     if (!data) return [];
     const roleScopes = data.roleScopes || {};
     const scopeTotals: Record<string, number> = {};
-    if (hasEntityFilter) {
+    if (resourceFilterSet.size > 0) {
+      data.table.rows.forEach((row) => {
+        if (!row.personId || !resourceFilterSet.has(row.personId)) return;
+        if (hasEntityFilter && !entityFilterSet.has(row.entity)) return;
+        const roleShare = hasRoleFilter ? roleShareForRow(row, roleFilterSet) : 1;
+        if (roleShare <= 0) return;
+        Object.entries(row.scopeSpend ?? {}).forEach(([scope, value]) => {
+          scopeTotals[scope] = (scopeTotals[scope] ?? 0) + (Number(value || 0) * roleShare);
+        });
+      });
+    } else if (hasEntityFilter) {
       if (hasRoleFilter) {
         const entityRoleScope = data.monthlyEntityRoleScope ?? {};
         entityFilters.forEach((entity) => {
@@ -1180,6 +1402,9 @@ export default function CrmBudgetExecutionView() {
     roleFilters,
     hasEntityFilter,
     entityFilters,
+    resourceFilterSet,
+    entityFilterSet,
+    roleShareForRow,
   ]);
 
   const productionActual = useMemo(
@@ -1217,6 +1442,21 @@ export default function CrmBudgetExecutionView() {
   const sumMonthlyForScopes = useCallback(
     (scopes: string[]) => {
       if (!data || scopes.length === 0) return Array(12).fill(0);
+      if (resourceFilterSet.size > 0 && data.monthlyPersonScope) {
+        const seriesList: number[][] = [];
+        data.table.rows.forEach((row) => {
+          if (!row.personId || !resourceFilterSet.has(row.personId)) return;
+          if (hasEntityFilter && !entityFilterSet.has(row.entity)) return;
+          const scopeMap = data.monthlyPersonScope?.[row.personId] ?? {};
+          const scale = hasRoleFilter ? roleShareForRow(row, roleFilterSet) : 1;
+          if (scale <= 0) return;
+          scopes.forEach((scope) => {
+            const series = scopeMap[scope];
+            if (series) seriesList.push(series.map((value) => value * scale));
+          });
+        });
+        return sumSeriesList(seriesList);
+      }
       const monthlyRoleScope = data.monthlyRoleScope ?? {};
       const monthlyScope = data.monthlyScope ?? {};
       const monthlyEntityScope = data.monthlyEntityScope ?? {};
@@ -1262,7 +1502,16 @@ export default function CrmBudgetExecutionView() {
         .filter((series): series is number[] => Array.isArray(series));
       return sumSeriesList(seriesList);
     },
-    [data, hasEntityFilter, hasRoleFilter, entityFilters, roleFilters],
+    [
+      data,
+      hasEntityFilter,
+      hasRoleFilter,
+      entityFilters,
+      roleFilters,
+      resourceFilterSet,
+      entityFilterSet,
+      roleShareForRow,
+    ],
   );
 
   const productionMonthlyActual = useMemo(
@@ -1309,6 +1558,8 @@ export default function CrmBudgetExecutionView() {
     data.table.rows.forEach((row) => {
       const personBreakdown = data.production?.byPerson?.[row.key];
       if (!personBreakdown) return;
+      if (resourceFilterSet.size > 0 && (!row.personId || !resourceFilterSet.has(row.personId)))
+        return;
       if (hasEntityFilter && !entityFilterSet.has(row.entity)) return;
       if (!row.roleShares.length) return;
 
@@ -1333,7 +1584,14 @@ export default function CrmBudgetExecutionView() {
       }))
       .filter((entry) => entry.actual > 0)
       .sort((a, b) => b.actual - a.actual);
-  }, [data, hasRoleFilter, roleFilterSet, hasEntityFilter, entityFilterSet]);
+  }, [
+    data,
+    hasRoleFilter,
+    roleFilterSet,
+    hasEntityFilter,
+    entityFilterSet,
+    resourceFilterSet,
+  ]);
 
   const workstreamShare = actualTotalFiltered > 0 ? workstreamActual / actualTotalFiltered : 0;
   const workstreamFilteredTotal = useMemo(
@@ -1372,6 +1630,118 @@ export default function CrmBudgetExecutionView() {
     return result;
   }, [workstreamChartData]);
 
+  const workstreamDetailScopes = useMemo(() => {
+    if (!workstreamDetailScope) return [];
+    if (workstreamDetailScope !== "Other Streams") return [workstreamDetailScope];
+    const topSet = new Set(
+      workstreamDonutData
+        .filter((entry) => entry.name !== "Other Streams")
+        .map((entry) => entry.name),
+    );
+    return workstreamChartData
+      .filter((entry) => !topSet.has(entry.scope))
+      .map((entry) => entry.scope);
+  }, [workstreamDetailScope, workstreamDonutData, workstreamChartData]);
+
+  const workstreamDetailTotal = useMemo(() => {
+    if (workstreamDetailScopes.length === 0) return 0;
+    const scopeSet = new Set(workstreamDetailScopes);
+    return workstreamChartData.reduce(
+      (acc, entry) => (scopeSet.has(entry.scope) ? acc + entry.actual : acc),
+      0,
+    );
+  }, [workstreamDetailScopes, workstreamChartData]);
+
+  const workstreamDetailShare =
+    workstreamFilteredTotal > 0 ? workstreamDetailTotal / workstreamFilteredTotal : 0;
+
+  const workstreamDetailContributors = useMemo(() => {
+    if (!data || workstreamDetailScopes.length === 0) {
+      return { total: 0, rows: [] as Array<{ row: TableRow; actual: number; share: number }> };
+    }
+    const scopeSet = new Set(workstreamDetailScopes);
+    const total = workstreamDetailTotal;
+    const full = data.table.rows
+      .map((row) => {
+        if (resourceFilterSet.size > 0) {
+          if (!row.personId || !resourceFilterSet.has(row.personId)) return null;
+        }
+        if (hasEntityFilter && !entityFilterSet.has(row.entity)) return null;
+        const roleShare = roleShareForRow(row, roleFilterSet);
+        if (roleShare <= 0) return null;
+        const scopedActual = sumRecord(row.scopeSpend ?? {}, scopeSet) * roleShare;
+        if (scopedActual <= 0) return null;
+        return {
+          row,
+          actual: scopedActual,
+          share: total > 0 ? scopedActual / total : 0,
+        };
+      })
+      .filter((entry): entry is { row: TableRow; actual: number; share: number } => Boolean(entry))
+      .sort((a, b) => b.actual - a.actual);
+
+    return { total: full.length, rows: full.slice(0, 10) };
+  }, [
+    data,
+    workstreamDetailScopes,
+    workstreamDetailTotal,
+    resourceFilterSet,
+    hasEntityFilter,
+    entityFilterSet,
+    roleShareForRow,
+    roleFilterSet,
+  ]);
+
+  const workstreamDetailChartSeries = useMemo(() => {
+    if (!data?.monthlyPersonScope || workstreamDetailScopes.length === 0) return [];
+    const scopeSet = new Set(workstreamDetailScopes);
+    const base = workstreamDetailContributors.rows
+      .map(({ row }) => {
+        if (!row.personId) return null;
+        const scopeMap = data.monthlyPersonScope[row.personId];
+        if (!scopeMap) return null;
+        const series = Array(12).fill(0);
+        Object.entries(scopeMap).forEach(([scope, values]) => {
+          if (!scopeSet.has(scope)) return;
+          if (!Array.isArray(values)) return;
+          values.forEach((value, idx) => {
+            series[idx] += value || 0;
+          });
+        });
+        const scale = hasRoleFilter ? roleShareForRow(row, roleFilterSet) : 1;
+        const scaled = series.map((value) => value * scale);
+        const total = scaled.reduce((acc, value) => acc + value, 0);
+        if (total <= 0) return null;
+        return { name: row.name, key: row.key, series: scaled };
+      })
+      .filter(
+        (entry): entry is { name: string; key: string; series: number[] } => Boolean(entry),
+      );
+    return base.map((entry, idx) => ({
+      ...entry,
+      dataKey: `s${idx}`,
+      color: chartTheme.palette[idx % chartTheme.palette.length],
+    }));
+  }, [
+    data,
+    workstreamDetailScopes,
+    workstreamDetailContributors.rows,
+    hasRoleFilter,
+    roleShareForRow,
+    roleFilterSet,
+  ]);
+
+  const workstreamDetailChartData = useMemo(() => {
+    if (workstreamDetailChartSeries.length === 0) return [];
+    return MONTHS.map((month, idx) => {
+      const entry: Record<string, number | string> = { month };
+      workstreamDetailChartSeries.forEach((series) => {
+        entry[series.dataKey] = series.series[idx] ?? 0;
+      });
+      return entry;
+    });
+  }, [workstreamDetailChartSeries]);
+
   const productionAggregate = useMemo(() => {
     const totals = createMetric();
     const byBrand = new Map<string, ProductionMetric>();
@@ -1394,6 +1764,8 @@ export default function CrmBudgetExecutionView() {
       const personKey = row.key;
       const personBreakdown = byPerson[personKey];
       if (!personBreakdown) return;
+      if (resourceFilterSet.size > 0 && (!row.personId || !resourceFilterSet.has(row.personId)))
+        return;
       if (hasEntityFilter && !entityFilterSet.has(row.entity)) return;
       const share = roleShareForRow(row, roleFilterSet);
       if (share <= 0) return;
@@ -1435,7 +1807,7 @@ export default function CrmBudgetExecutionView() {
       bySegment: toArray(bySegment),
       byScope: toArray(byScope),
     };
-  }, [data, hasEntityFilter, entityFilterSet, roleShareForRow, roleFilterSet]);
+  }, [data, hasEntityFilter, entityFilterSet, roleShareForRow, roleFilterSet, resourceFilterSet]);
 
   const productionAggregateShare =
     actualTotalFiltered > 0 ? productionAggregate.totals.budget / actualTotalFiltered : 0;
@@ -1586,23 +1958,148 @@ export default function CrmBudgetExecutionView() {
   const processedRows = useMemo(() => {
     return baseRows
       .filter((row) => {
-        if (searchQuery) {
-          const query = searchQuery.toLowerCase();
-          const roleText = row.roles.join(" ").toLowerCase();
-          const entityText = row.entity.toLowerCase();
-          if (
-            !row.name.toLowerCase().includes(query) &&
-            !roleText.includes(query) &&
-            !entityText.includes(query)
-          ) {
-            return false;
-          }
-        }
         if (riskOnly && row.risk.label === "OK") return false;
         return true;
       })
       .sort((a, b) => b.actual - a.actual);
-  }, [baseRows, searchQuery, riskOnly]);
+  }, [baseRows, riskOnly]);
+
+  const toggleDetailSort = useCallback((key: ColumnKey) => {
+    const numericKeys: ColumnKey[] = ["plan", "actual", "remaining", "utilization", "delta", "risk"];
+    const defaultDir: SortDirection = numericKeys.includes(key) ? "desc" : "asc";
+    setDetailSort((prev) => {
+      if (!prev || prev.key !== key) return { key, direction: defaultDir };
+      if (prev.direction === "desc") return { key, direction: "asc" };
+      return null;
+    });
+  }, []);
+
+  const detailRows = useMemo(() => {
+    const rows = detailRiskFilterSet.size
+      ? processedRows.filter((row) => detailRiskFilterSet.has(row.risk.label))
+      : processedRows;
+    if (!detailSort) return rows;
+    const sorted = [...rows];
+    sorted.sort((a, b) => {
+      const dir = detailSort.direction === "asc" ? 1 : -1;
+      const key = detailSort.key;
+      const aVal = (() => {
+        switch (key) {
+          case "name":
+            return a.name.toLowerCase();
+          case "entity":
+            return a.entity.toLowerCase();
+          case "roles":
+            return a.roles.join(", ").toLowerCase();
+          case "plan":
+            return a.plan;
+          case "actual":
+            return a.actual;
+          case "remaining":
+            return a.remaining;
+          case "utilization":
+            return a.utilization;
+          case "delta":
+            return a.delta;
+          case "risk":
+            return riskOrder[a.risk.label] ?? 0;
+          default:
+            return 0;
+        }
+      })();
+      const bVal = (() => {
+        switch (key) {
+          case "name":
+            return b.name.toLowerCase();
+          case "entity":
+            return b.entity.toLowerCase();
+          case "roles":
+            return b.roles.join(", ").toLowerCase();
+          case "plan":
+            return b.plan;
+          case "actual":
+            return b.actual;
+          case "remaining":
+            return b.remaining;
+          case "utilization":
+            return b.utilization;
+          case "delta":
+            return b.delta;
+          case "risk":
+            return riskOrder[b.risk.label] ?? 0;
+          default:
+            return 0;
+        }
+      })();
+      if (typeof aVal === "string" && typeof bVal === "string") {
+        return aVal.localeCompare(bVal) * dir;
+      }
+      return (Number(aVal) - Number(bVal)) * dir;
+    });
+    return sorted;
+  }, [processedRows, detailRiskFilterSet, detailSort]);
+
+  const detailTotals = useMemo(() => {
+    const totals = detailRows.reduce(
+      (acc, row) => {
+        acc.plan += row.plan;
+        acc.actual += row.actual;
+        return acc;
+      },
+      { plan: 0, actual: 0 },
+    );
+    const remaining = totals.plan - totals.actual;
+    const delta = totals.actual - totals.plan;
+    const utilization = totals.plan > 0 ? totals.actual / totals.plan : 0;
+    return { ...totals, remaining, delta, utilization };
+  }, [detailRows]);
+
+  const detailRoleAllocations = useMemo(() => {
+    if (!detailRow) return [];
+    if (detailRow.roleShares.length === 0) {
+      return detailRow.isUnassigned
+        ? [
+            {
+              roleName: "Unassigned",
+              share: 1,
+              plan: detailRow.plan,
+              actual: detailRow.actual,
+            },
+          ]
+        : [];
+    }
+    return detailRow.roleShares.map((share) => ({
+      roleName: roleNameById.get(share.roleId) ?? share.roleId,
+      share: share.share,
+      plan: detailRow.plan * share.share,
+      actual: detailRow.actual * share.share,
+    }));
+  }, [detailRow, roleNameById]);
+
+  const detailProductionSpend = detailRow?.scopeSpend?.[PRODUCTION_SCOPE] ?? 0;
+  const detailWorkstreamSpend = detailRow ? detailRow.actual - detailProductionSpend : 0;
+  const detailSourceShare = detailRow?.actual ? detailProductionSpend / detailRow.actual : 0;
+
+  const detailWorkstreamList = useMemo(() => {
+    if (!detailRow) return [];
+    return Object.entries(detailRow.scopeSpend ?? {})
+      .filter(([scope]) => scope !== PRODUCTION_SCOPE)
+      .map(([scope, amount]) => ({ scope, amount }))
+      .filter((entry) => entry.amount > 0)
+      .sort((a, b) => b.amount - a.amount)
+      .slice(0, 6);
+  }, [detailRow]);
+
+  const detailMonthlyData = useMemo(() => {
+    if (!detailRow?.personId || !data?.monthlyPerson) return [];
+    const base = data.monthlyPerson[detailRow.personId];
+    if (!Array.isArray(base)) return [];
+    const scale = hasRoleFilter ? roleShareForRow(detailRow, roleFilterSet) : 1;
+    return MONTHS.map((label, idx) => ({
+      month: label,
+      actual: (base[idx] ?? 0) * scale,
+    }));
+  }, [detailRow, data, hasRoleFilter, roleShareForRow, roleFilterSet]);
 
   const visibleColumns = COLUMN_PRESETS[columnPreset];
 
@@ -1610,9 +2107,30 @@ export default function CrmBudgetExecutionView() {
     setRoleFilters([]);
     setWorkstreamFilters([]);
     setEntityFilters([]);
-    setSearchQuery("");
+    setResourceFilters([]);
     setRiskOnly(false);
   };
+
+  const detailRiskOptions = ["Unmapped", "Unplanned", ">100%", "90-99%", "OK"];
+  const toggleDetailRiskFilter = useCallback((label: string) => {
+    setDetailRiskFilters((prev) =>
+      prev.includes(label) ? prev.filter((item) => item !== label) : [...prev, label],
+    );
+  }, []);
+
+  const closeDetail = useCallback(() => {
+    setDetailOpen(false);
+  }, []);
+
+  const openWorkstreamDetail = useCallback((scope: string) => {
+    setWorkstreamDetailScope(scope);
+    setWorkstreamDetailOpen(true);
+  }, []);
+
+  const closeWorkstreamDetail = useCallback(() => {
+    setWorkstreamDetailOpen(false);
+    setWorkstreamDetailScope(null);
+  }, []);
 
   return (
     <div className="space-y-6" data-page="crm-budget-execution">
@@ -1621,7 +2139,17 @@ export default function CrmBudgetExecutionView() {
         <div className="relative z-10 flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
           <div>
             <p className="text-xs uppercase tracking-[0.3em] text-[color:var(--color-text)]/65">CRM</p>
-            <h1 className="mt-2 text-2xl font-semibold text-[color:var(--color-text)]">Budget Execution</h1>
+            <div className="mt-2 flex flex-wrap items-center gap-3">
+              {clientLogo ? (
+                <span className="inline-flex h-8 w-16 items-center justify-center rounded-full border border-[color:var(--color-border)] bg-[color:var(--color-surface)] px-2">
+                  <img src={clientLogo} alt="EMG" className="h-5 w-full object-contain" />
+                </span>
+              ) : null}
+              <h1 className="text-2xl font-semibold text-[color:var(--color-text)]">Budget Execution</h1>
+              <span className="rounded-full border border-[color:var(--color-primary)] bg-[color:var(--color-primary)]/10 px-2.5 py-1 text-sm font-semibold text-[color:var(--color-primary)]">
+                {year}
+              </span>
+            </div>
             <p className="mt-2 text-sm text-[color:var(--color-text)]/70">
               Execution tracking by role and entity across Production and Workstreams for{" "}
               {clientSlug.toUpperCase()}.
@@ -1640,8 +2168,29 @@ export default function CrmBudgetExecutionView() {
                 </option>
               ))}
             </select>
-            <button className="btn-ghost h-10 px-4" type="button" disabled aria-disabled="true">
-              Export
+            {!shareMode ? (
+              <IfAdmin>
+                <button
+                  className="btn-ghost h-10 px-3"
+                  type="button"
+                  onClick={() => setShareOpen(true)}
+                >
+                  <span className="flex items-center gap-2 text-sm">
+                    <Link2 className="h-4 w-4" />
+                    Share
+                  </span>
+                </button>
+              </IfAdmin>
+            ) : null}
+            <button
+              className="btn-ghost h-12 w-12 px-0 text-[color:var(--color-text)]/70 opacity-100 pointer-events-none"
+              type="button"
+              aria-disabled="true"
+              aria-label="Export"
+              title="Export"
+              tabIndex={-1}
+            >
+              <Download className="h-7 w-7" />
             </button>
           </div>
         </div>
@@ -1676,7 +2225,15 @@ export default function CrmBudgetExecutionView() {
       </header>
 
       <section className="card px-6 py-5">
-        <div className="grid gap-4 lg:grid-cols-[1.1fr_1.1fr_1fr]">
+        <div className="grid gap-4 lg:grid-cols-[1.1fr_1.1fr_1.1fr]">
+          <MultiSelect
+            label="Entity"
+            options={entityOptions}
+            values={entityFilters}
+            onChange={setEntityFilters}
+            placeholder="All entities"
+            counts={entityCounts}
+          />
           <MultiSelect
             label="Role"
             options={roleOptions}
@@ -1686,23 +2243,13 @@ export default function CrmBudgetExecutionView() {
             counts={roleCounts}
           />
           <MultiSelect
-            label="Entity"
-            options={entityOptions}
-            values={entityFilters}
-            onChange={setEntityFilters}
-            placeholder="All entities"
-            counts={entityCounts}
+            label="Resource"
+            options={resourceOptions}
+            values={resourceFilters}
+            onChange={setResourceFilters}
+            placeholder="All resources"
+            counts={resourceCounts}
           />
-          <div className="flex flex-col gap-1">
-            <label className="text-xs font-medium text-[color:var(--color-text)]/70">Search</label>
-            <input
-              type="search"
-              className="input h-10 w-full"
-              placeholder="Resource or role..."
-              value={searchQuery}
-              onChange={(e) => setSearchQuery(e.target.value)}
-            />
-          </div>
         </div>
         <div className="mt-4 flex flex-wrap items-center justify-between gap-3">
           <div className="flex flex-wrap items-center gap-2">
@@ -1911,40 +2458,61 @@ export default function CrmBudgetExecutionView() {
             <p className="text-xs uppercase tracking-[0.2em] text-[color:var(--color-text)]/60">
               Production
             </p>
-            <h3 className="mt-1 text-lg font-semibold text-[color:var(--color-text)]">
+            <h3 className="mt-1 flex items-center gap-2 text-lg font-semibold text-[color:var(--color-text)]">
+              <img
+                src="/animations/conveyor-belt.gif"
+                alt=""
+                aria-hidden="true"
+                className="h-8 w-8 rounded-full border border-[color:var(--color-border)] bg-[color:var(--color-surface-2)] object-contain motion-reduce:hidden"
+              />
               Campaign production
             </h3>
             <p className="mt-1 text-xs text-[color:var(--color-text)]/60">
               Production spend for ICP newsletters, local activations, and lifecycle builds/revamps.
             </p>
           </div>
-          <div className="grid gap-2 sm:grid-cols-2">
-            <div className="rounded-2xl border border-[color:var(--color-border)] bg-[color:var(--color-surface-2)]/60 p-3">
-              <p className="text-xs uppercase tracking-[0.2em] text-[color:var(--color-text)]/55">
-                Spent
-              </p>
-              <p className="mt-1 text-lg font-semibold text-[color:var(--color-text)]">
-                {formatCurrency(productionAggregate.totals.budget)}
-              </p>
-              <p className="text-xs text-[color:var(--color-text)]/60">
-                {formatPercent(productionAggregateShare)} of total
-              </p>
+          <div className="flex flex-wrap items-center gap-3">
+            <div className="grid gap-2 sm:grid-cols-2">
+              <div className="rounded-2xl border border-[color:var(--color-border)] bg-[color:var(--color-surface-2)]/60 p-3">
+                <p className="text-xs uppercase tracking-[0.2em] text-[color:var(--color-text)]/55">
+                  Spent
+                </p>
+                <p className="mt-1 text-lg font-semibold text-[color:var(--color-text)]">
+                  {formatCurrency(productionAggregate.totals.budget)}
+                </p>
+                <p className="text-xs text-[color:var(--color-text)]/60">
+                  {formatPercent(productionAggregateShare)} of total
+                </p>
+              </div>
+              <div className="rounded-2xl border border-[color:var(--color-border)] bg-[color:var(--color-surface-2)]/60 p-3">
+                <p className="text-xs uppercase tracking-[0.2em] text-[color:var(--color-text)]/55">
+                  Active roles
+                </p>
+                <p className="mt-1 text-lg font-semibold text-[color:var(--color-text)]">
+                  {productionRoleChartData.length}
+                </p>
+                <p className="text-xs text-[color:var(--color-text)]/60">
+                  Roles with production spend
+                </p>
+              </div>
             </div>
-            <div className="rounded-2xl border border-[color:var(--color-border)] bg-[color:var(--color-surface-2)]/60 p-3">
-              <p className="text-xs uppercase tracking-[0.2em] text-[color:var(--color-text)]/55">
-                Active roles
-              </p>
-              <p className="mt-1 text-lg font-semibold text-[color:var(--color-text)]">
-                {productionRoleChartData.length}
-              </p>
-              <p className="text-xs text-[color:var(--color-text)]/60">
-                Roles with production spend
-              </p>
-            </div>
+            <button
+              type="button"
+              className="inline-flex items-center gap-1 rounded-full border border-[color:var(--color-border)] bg-[color:var(--color-surface)] px-2 py-1 text-[11px] font-medium text-[color:var(--color-text)]/70 hover:bg-[color:var(--color-surface-2)]"
+              aria-expanded={productionOpen}
+              aria-label={productionOpen ? "Collapse production details" : "Expand production details"}
+              title={productionOpen ? "Collapse section" : "Expand section"}
+              onClick={() => setProductionOpen((open) => !open)}
+            >
+              <span>Details</span>
+              {productionOpen ? <ChevronUp className="h-3.5 w-3.5" /> : <ChevronDown className="h-3.5 w-3.5" />}
+            </button>
           </div>
         </div>
 
-        <div className="mt-4 grid gap-4 lg:grid-cols-2">
+        {productionOpen ? (
+          <>
+            <div className="mt-4 grid gap-4 lg:grid-cols-2">
           <div className="min-h-[220px] rounded-2xl border border-[color:var(--color-border)] bg-[color:var(--color-surface-2)]/40 p-3">
             {loading ? (
               <div className="flex h-full items-center justify-center text-sm text-[color:var(--color-text)]/65">
@@ -2365,6 +2933,8 @@ export default function CrmBudgetExecutionView() {
             </div>
           </div>
         </div>
+          </>
+        ) : null}
       </section>
 
       <section className="card px-6 py-5">
@@ -2373,151 +2943,176 @@ export default function CrmBudgetExecutionView() {
             <p className="text-xs uppercase tracking-[0.2em] text-[color:var(--color-text)]/60">
               Other Workstreams
             </p>
-            <h3 className="mt-1 text-lg font-semibold text-[color:var(--color-text)]">
+            <h3 className="mt-1 flex items-center gap-2 text-lg font-semibold text-[color:var(--color-text)]">
+              <img
+                src="/animations/analytics.gif"
+                alt=""
+                aria-hidden="true"
+                className="h-8 w-8 rounded-full border border-[color:var(--color-border)] bg-[color:var(--color-surface-2)] object-contain motion-reduce:hidden"
+              />
               Consulting, Governance & Data Quality
             </h3>
             <p className="mt-1 text-xs text-[color:var(--color-text)]/60">
               Effort logged across consulting, strategy/governance, and data quality, grouped by workstream.
             </p>
           </div>
-          <div className="grid gap-2 sm:grid-cols-3">
-            <div className="rounded-2xl border border-[color:var(--color-border)] bg-[color:var(--color-surface-2)]/60 p-3">
-              <p className="text-xs uppercase tracking-[0.2em] text-[color:var(--color-text)]/55">
-                Spent total
-              </p>
-              <p className="mt-1 text-lg font-semibold text-[color:var(--color-text)]">
-                {formatCurrency(workstreamActual)}
-              </p>
-              <p className="text-xs text-[color:var(--color-text)]/60">
-                {formatPercent(workstreamShare)} of total
-              </p>
+          <div className="flex flex-wrap items-center gap-3">
+            <div className="grid gap-2 sm:grid-cols-3">
+              <div className="rounded-2xl border border-[color:var(--color-border)] bg-[color:var(--color-surface-2)]/60 p-3">
+                <p className="text-xs uppercase tracking-[0.2em] text-[color:var(--color-text)]/55">
+                  Spent total
+                </p>
+                <p className="mt-1 text-lg font-semibold text-[color:var(--color-text)]">
+                  {formatCurrency(workstreamActual)}
+                </p>
+                <p className="text-xs text-[color:var(--color-text)]/60">
+                  {formatPercent(workstreamShare)} of total
+                </p>
+              </div>
+              <div className="rounded-2xl border border-[color:var(--color-border)] bg-[color:var(--color-surface-2)]/60 p-3">
+                <p className="text-xs uppercase tracking-[0.2em] text-[color:var(--color-text)]/55">
+                  Selected
+                </p>
+                <p className="mt-1 text-lg font-semibold text-[color:var(--color-text)]">
+                  {formatCurrency(workstreamFilteredTotal)}
+                </p>
+                <p className="text-xs text-[color:var(--color-text)]/60">
+                  {formatPercent(workstreamSelectedShare)} of total
+                </p>
+              </div>
+              <div className="rounded-2xl border border-[color:var(--color-border)] bg-[color:var(--color-surface-2)]/60 p-3">
+                <p className="text-xs uppercase tracking-[0.2em] text-[color:var(--color-text)]/55">
+                  Workstreams
+                </p>
+                <p className="mt-1 text-lg font-semibold text-[color:var(--color-text)]">
+                  {workstreamChartData.length}
+                </p>
+                <p className="text-xs text-[color:var(--color-text)]/60">
+                  {workstreamTotals.length} total available
+                </p>
+              </div>
             </div>
-            <div className="rounded-2xl border border-[color:var(--color-border)] bg-[color:var(--color-surface-2)]/60 p-3">
-              <p className="text-xs uppercase tracking-[0.2em] text-[color:var(--color-text)]/55">
-                Selected
-              </p>
-              <p className="mt-1 text-lg font-semibold text-[color:var(--color-text)]">
-                {formatCurrency(workstreamFilteredTotal)}
-              </p>
-              <p className="text-xs text-[color:var(--color-text)]/60">
-                {formatPercent(workstreamSelectedShare)} of total
-              </p>
-            </div>
-            <div className="rounded-2xl border border-[color:var(--color-border)] bg-[color:var(--color-surface-2)]/60 p-3">
-              <p className="text-xs uppercase tracking-[0.2em] text-[color:var(--color-text)]/55">
-                Workstreams
-              </p>
-              <p className="mt-1 text-lg font-semibold text-[color:var(--color-text)]">
-                {workstreamChartData.length}
-              </p>
-              <p className="text-xs text-[color:var(--color-text)]/60">
-                {workstreamTotals.length} total available
-              </p>
-            </div>
+            <button
+              type="button"
+              className="inline-flex items-center gap-1 rounded-full border border-[color:var(--color-border)] bg-[color:var(--color-surface)] px-2 py-1 text-[11px] font-medium text-[color:var(--color-text)]/70 hover:bg-[color:var(--color-surface-2)]"
+              aria-expanded={workstreamsOpen}
+              aria-label={workstreamsOpen ? "Collapse workstreams details" : "Expand workstreams details"}
+              title={workstreamsOpen ? "Collapse section" : "Expand section"}
+              onClick={() => setWorkstreamsOpen((open) => !open)}
+            >
+              <span>Details</span>
+              {workstreamsOpen ? <ChevronUp className="h-3.5 w-3.5" /> : <ChevronDown className="h-3.5 w-3.5" />}
+            </button>
           </div>
         </div>
 
-        <div className="mt-4 grid gap-4 lg:grid-cols-[1.1fr_2fr]">
-          <MultiSelect
-            label="Workstream"
-            options={workstreamOptions}
-            values={workstreamFilters}
-            onChange={setWorkstreamFilters}
-            placeholder="All workstreams"
-            counts={workstreamCounts}
-          />
-          <div className="flex items-end">
-            <p className="text-xs text-[color:var(--color-text)]/60">
-              Workstream filters apply only to workstream charts and totals.
-            </p>
-          </div>
-        </div>
+        {workstreamsOpen ? (
+          <>
+            <div className="mt-4 grid gap-4 lg:grid-cols-[1.1fr_2fr]">
+              <MultiSelect
+                label="Workstream"
+                options={workstreamOptions}
+                values={workstreamFilters}
+                onChange={setWorkstreamFilters}
+                placeholder="All workstreams"
+                counts={workstreamCounts}
+              />
+              <div className="flex items-end">
+                <p className="text-xs text-[color:var(--color-text)]/60">
+                  Workstream filters apply only to workstream charts and totals.
+                </p>
+              </div>
+            </div>
 
-        <div className="mt-4 grid gap-4 lg:grid-cols-[1.1fr_1fr]">
-          <div className="min-h-[220px] rounded-2xl border border-[color:var(--color-border)] bg-[color:var(--color-surface-2)]/40 p-3">
-            {loading ? (
-              <div className="flex h-full items-center justify-center text-sm text-[color:var(--color-text)]/65">
-                Loading chart...
-              </div>
-            ) : workstreamDonutData.length === 0 ? (
-              <div className="flex h-full items-center justify-center text-sm text-[color:var(--color-text)]/65">
-                No workstream data available.
-              </div>
-            ) : (
-              <ResponsiveContainer width="100%" height={CHART_HEIGHT}>
-                <PieChart>
-                  <Tooltip
-                    contentStyle={chartTheme.tooltip.contentStyle}
-                    itemStyle={chartTheme.tooltip.itemStyle}
-                    labelStyle={chartTheme.tooltip.labelStyle}
-                    formatter={(value) => formatCurrency(Number(value), true)}
-                  />
-                  <Legend verticalAlign="bottom" height={36} />
-                  <Pie
-                    data={workstreamDonutData}
-                    dataKey="actual"
-                    nameKey="name"
-                    innerRadius="55%"
-                    outerRadius="80%"
-                    paddingAngle={3}
-                    stroke="transparent"
-                    label={renderDonutShareLabel}
-                    labelLine={renderDonutLabelLine}
-                  >
-                    {workstreamDonutData.map((entry, index) => (
-                      <Cell
-                        key={`${entry.name}-${index}`}
-                        fill={chartTheme.palette[index % chartTheme.palette.length]}
+            <div className="mt-4 grid gap-4 lg:grid-cols-[1.1fr_1fr]">
+              <div className="min-h-[220px] rounded-2xl border border-[color:var(--color-border)] bg-[color:var(--color-surface-2)]/40 p-3">
+                {loading ? (
+                  <div className="flex h-full items-center justify-center text-sm text-[color:var(--color-text)]/65">
+                    Loading chart...
+                  </div>
+                ) : workstreamDonutData.length === 0 ? (
+                  <div className="flex h-full items-center justify-center text-sm text-[color:var(--color-text)]/65">
+                    No workstream data available.
+                  </div>
+                ) : (
+                  <ResponsiveContainer width="100%" height={CHART_HEIGHT}>
+                    <PieChart>
+                      <Tooltip
+                        contentStyle={chartTheme.tooltip.contentStyle}
+                        itemStyle={chartTheme.tooltip.itemStyle}
+                        labelStyle={chartTheme.tooltip.labelStyle}
+                        formatter={(value) => formatCurrency(Number(value), true)}
                       />
-                    ))}
-                  </Pie>
-                </PieChart>
-              </ResponsiveContainer>
-            )}
-          </div>
-          <div className="min-h-[220px] rounded-2xl border border-[color:var(--color-border)] bg-[color:var(--color-surface-2)]/40 p-3">
-            {loading ? (
-              <div className="flex h-full items-center justify-center text-sm text-[color:var(--color-text)]/65">
-                Loading chart...
+                      <Legend verticalAlign="bottom" height={36} />
+                      <Pie
+                        data={workstreamDonutData}
+                        dataKey="actual"
+                        nameKey="name"
+                        innerRadius="55%"
+                        outerRadius="80%"
+                        paddingAngle={3}
+                        stroke="transparent"
+                        label={renderDonutShareLabel}
+                        labelLine={renderDonutLabelLine}
+                      >
+                        {workstreamDonutData.map((entry, index) => (
+                          <Cell
+                            key={`${entry.name}-${index}`}
+                            fill={chartTheme.palette[index % chartTheme.palette.length]}
+                            className="cursor-pointer"
+                            onClick={() => openWorkstreamDetail(entry.name)}
+                          />
+                        ))}
+                      </Pie>
+                    </PieChart>
+                  </ResponsiveContainer>
+                )}
               </div>
-            ) : (
-              <ResponsiveContainer width="100%" height={CHART_HEIGHT}>
-                <LineChart data={workstreamTrendData} margin={{ top: 8, right: 16, left: 2, bottom: 0 }}>
-                  <CartesianGrid stroke={chartTheme.grid} vertical={false} />
-                  <XAxis
-                    dataKey="month"
-                    tick={chartTheme.tick}
-                    axisLine={chartTheme.axisLine}
-                    tickLine={chartTheme.tickLine}
-                  />
-                  <YAxis
-                    tick={chartTheme.tick}
-                    axisLine={chartTheme.axisLine}
-                    tickLine={chartTheme.tickLine}
-                    width={82}
-                    tickMargin={3}
-                    tickFormatter={(value) => formatCurrency(Number(value))}
-                  />
-                  <Tooltip
-                    contentStyle={chartTheme.tooltip.contentStyle}
-                    itemStyle={chartTheme.tooltip.itemStyle}
-                    labelStyle={chartTheme.tooltip.labelStyle}
-                    formatter={(value) => formatCurrency(Number(value), true)}
-                  />
-                  <Legend />
-                  <Line
-                    type="monotone"
-                    dataKey="actual"
-                    name="Workstreams actual"
-                    stroke="var(--chart-3)"
-                    strokeWidth={2.5}
-                    dot={{ r: 2 }}
-                  />
-                </LineChart>
-              </ResponsiveContainer>
-            )}
-          </div>
-        </div>
+              <div className="min-h-[220px] rounded-2xl border border-[color:var(--color-border)] bg-[color:var(--color-surface-2)]/40 p-3">
+                {loading ? (
+                  <div className="flex h-full items-center justify-center text-sm text-[color:var(--color-text)]/65">
+                    Loading chart...
+                  </div>
+                ) : (
+                  <ResponsiveContainer width="100%" height={CHART_HEIGHT}>
+                    <LineChart data={workstreamTrendData} margin={{ top: 8, right: 16, left: 2, bottom: 0 }}>
+                      <CartesianGrid stroke={chartTheme.grid} vertical={false} />
+                      <XAxis
+                        dataKey="month"
+                        tick={chartTheme.tick}
+                        axisLine={chartTheme.axisLine}
+                        tickLine={chartTheme.tickLine}
+                      />
+                      <YAxis
+                        tick={chartTheme.tick}
+                        axisLine={chartTheme.axisLine}
+                        tickLine={chartTheme.tickLine}
+                        width={82}
+                        tickMargin={3}
+                        tickFormatter={(value) => formatCurrency(Number(value))}
+                      />
+                      <Tooltip
+                        contentStyle={chartTheme.tooltip.contentStyle}
+                        itemStyle={chartTheme.tooltip.itemStyle}
+                        labelStyle={chartTheme.tooltip.labelStyle}
+                        formatter={(value) => formatCurrency(Number(value), true)}
+                      />
+                      <Legend />
+                      <Line
+                        type="monotone"
+                        dataKey="actual"
+                        name="Workstreams actual"
+                        stroke="var(--chart-3)"
+                        strokeWidth={2.5}
+                        dot={{ r: 2 }}
+                      />
+                    </LineChart>
+                  </ResponsiveContainer>
+                )}
+              </div>
+            </div>
+          </>
+        ) : null}
       </section>
 
       <section className="card overflow-hidden">
@@ -2525,7 +3120,7 @@ export default function CrmBudgetExecutionView() {
           <div>
             <h3 className="text-lg font-semibold text-[color:var(--color-text)]">Execution details</h3>
             <p className="text-xs text-[color:var(--color-text)]/60">
-              {processedRows.length} resources shown
+              {detailRows.length} resources shown
             </p>
           </div>
           <div className="flex flex-wrap items-center gap-2">
@@ -2542,19 +3137,75 @@ export default function CrmBudgetExecutionView() {
             ))}
           </div>
         </div>
+        <div className="flex flex-wrap items-center justify-between gap-3 border-t border-[color:var(--color-border)] bg-[color:var(--color-surface)] px-6 py-3">
+          <div className="flex flex-wrap items-center gap-2">
+            <button
+              type="button"
+              className={`h-8 rounded-full border px-3 text-xs font-medium transition ${
+                detailRiskFilterSet.size === 0
+                  ? "border-[color:var(--color-primary)] bg-[color:var(--color-primary)]/15 text-[color:var(--color-primary)] shadow-sm"
+                  : "border-[color:var(--color-border)] text-[color:var(--color-text)]/70 hover:bg-[color:var(--color-surface-2)]"
+              }`}
+              onClick={() => setDetailRiskFilters([])}
+            >
+              All
+            </button>
+            {detailRiskOptions.map((label) => (
+              <button
+                key={label}
+                type="button"
+                className={`h-8 rounded-full border px-3 text-xs font-medium transition ${
+                  detailRiskFilterSet.has(label)
+                    ? "border-[color:var(--color-primary)] bg-[color:var(--color-primary)]/15 text-[color:var(--color-primary)] shadow-sm"
+                    : "border-[color:var(--color-border)] text-[color:var(--color-text)]/70 hover:bg-[color:var(--color-surface-2)]"
+                }`}
+                onClick={() => toggleDetailRiskFilter(label)}
+              >
+                {label}
+              </button>
+            ))}
+          </div>
+          <span className="text-xs text-[color:var(--color-text)]/60">
+            {detailRiskFilterSet.size ? `${detailRiskFilterSet.size} risk filters active` : "No risk filters"}
+          </span>
+        </div>
         <div className="border-t border-[color:var(--color-border)] px-6 py-4">
-          <div className="overflow-x-auto">
+          <div className="max-h-[520px] overflow-auto">
             <table className="min-w-[720px] w-full text-sm">
-              <thead className="bg-[color:var(--color-surface-2)]/50 text-[color:var(--color-text)]/80">
+              <thead className="bg-[color:var(--color-surface-2)] text-[color:var(--color-text)]/80">
                 <tr>
                   {visibleColumns.map((key) => (
                     <th
                       key={key}
-                      className={`px-3 py-2 text-left font-semibold ${
+                      className={`sticky top-0 z-10 px-3 py-2 text-left font-semibold ${
                         key !== "name" && key !== "roles" && key !== "entity" ? "text-right" : ""
-                      }`}
+                      } ${key === "name" ? "left-0 z-20 bg-[color:var(--color-surface-2)]" : "bg-[color:var(--color-surface-2)]"}`}
                     >
-                      {COLUMN_LABELS[key]}
+                      <button
+                        type="button"
+                        className={`flex w-full items-center gap-1 ${
+                          key !== "name" && key !== "roles" && key !== "entity" ? "justify-end" : "justify-start"
+                        }`}
+                        onClick={() => toggleDetailSort(key)}
+                      >
+                        <span>{COLUMN_LABELS[key]}</span>
+                        {key === "delta" ? (
+                          <span
+                            className="ml-1 inline-flex h-4 w-4 items-center justify-center text-[color:var(--color-text)]/55"
+                            title="Delta = Actual - Plan. Positive means overspend; negative means underspend."
+                            aria-label="Delta help"
+                          >
+                            <Info className="h-3 w-3" />
+                          </span>
+                        ) : null}
+                        {detailSort?.key === key ? (
+                          detailSort.direction === "asc" ? (
+                            <ArrowUp className="h-3 w-3 text-[color:var(--color-text)]/60" />
+                          ) : (
+                            <ArrowDown className="h-3 w-3 text-[color:var(--color-text)]/60" />
+                          )
+                        ) : null}
+                      </button>
                     </th>
                   ))}
                 </tr>
@@ -2566,18 +3217,29 @@ export default function CrmBudgetExecutionView() {
                       Loading execution details...
                     </td>
                   </tr>
-                ) : processedRows.length === 0 ? (
+                ) : detailRows.length === 0 ? (
                   <tr>
                     <td className="px-4 py-6 text-center text-[color:var(--color-text)]/60" colSpan={visibleColumns.length}>
                       No rows match the current filters.
                     </td>
                   </tr>
                 ) : (
-                  processedRows.map((row) => (
-                    <tr key={row.key}>
+                  detailRows.map((row) => (
+                    <tr
+                      key={row.key}
+                      className="cursor-pointer hover:bg-[color:var(--color-surface-2)]/40"
+                      onClick={() => {
+                        setDetailRow(row);
+                        setDetailOpen(true);
+                      }}
+                    >
                       {visibleColumns.map((key) => {
                         if (key === "name") {
-                          return <td key={key} className="px-3 py-2 font-semibold">{row.name}</td>;
+                          return (
+                            <td key={key} className="sticky left-0 z-10 bg-[color:var(--color-surface)] px-3 py-2 font-semibold">
+                              {row.name}
+                            </td>
+                          );
                         }
                         if (key === "entity") {
                           return (
@@ -2644,10 +3306,507 @@ export default function CrmBudgetExecutionView() {
                   ))
                 )}
               </tbody>
+              {detailRows.length > 0 ? (
+                <tfoot className="bg-[color:var(--color-surface-2)]/50 text-[color:var(--color-text)]/80">
+                  <tr>
+                    {visibleColumns.map((key) => {
+                      if (key === "name") {
+                        return (
+                          <td key={key} className="sticky left-0 bg-[color:var(--color-surface-2)] px-3 py-2 font-semibold">
+                            Total
+                          </td>
+                        );
+                      }
+                      if (key === "entity" || key === "roles" || key === "risk") {
+                        return <td key={key} className="px-3 py-2" />;
+                      }
+                      if (key === "plan") {
+                        return (
+                          <td key={key} className="px-3 py-2 text-right font-semibold">
+                            {formatCurrency(detailTotals.plan)}
+                          </td>
+                        );
+                      }
+                      if (key === "actual") {
+                        return (
+                          <td key={key} className="px-3 py-2 text-right font-semibold">
+                            {formatCurrency(detailTotals.actual)}
+                          </td>
+                        );
+                      }
+                      if (key === "remaining") {
+                        return (
+                          <td key={key} className={`px-3 py-2 text-right font-semibold ${detailTotals.remaining < 0 ? "text-red-600" : ""}`}>
+                            {formatCurrency(detailTotals.remaining)}
+                          </td>
+                        );
+                      }
+                      if (key === "utilization") {
+                        return (
+                          <td key={key} className="px-3 py-2 text-right font-semibold">
+                            {formatPercent(detailTotals.utilization)}
+                          </td>
+                        );
+                      }
+                      if (key === "delta") {
+                        const sign = detailTotals.delta > 0 ? "+" : "";
+                        return (
+                          <td key={key} className={`px-3 py-2 text-right font-semibold ${detailTotals.delta > 0 ? "text-red-600" : detailTotals.delta < 0 ? "text-emerald-600" : ""}`}>
+                            {sign}{formatCurrency(detailTotals.delta)}
+                          </td>
+                        );
+                      }
+                      return <td key={key} className="px-3 py-2" />;
+                    })}
+                  </tr>
+                </tfoot>
+              ) : null}
             </table>
           </div>
         </div>
       </section>
+
+      <WorkstreamDetailDrawer
+        open={workstreamDetailOpen}
+        scope={workstreamDetailScope}
+        scopeCount={workstreamDetailScopes.length}
+        total={workstreamDetailTotal}
+        share={workstreamDetailShare}
+        contributors={workstreamDetailContributors.rows}
+        contributorCount={workstreamDetailContributors.total}
+        chartData={workstreamDetailChartData}
+        chartSeries={workstreamDetailChartSeries}
+        onClose={closeWorkstreamDetail}
+        onSelectRow={(row) => {
+          closeWorkstreamDetail();
+          setDetailRow(row);
+          setDetailOpen(true);
+        }}
+        formatCurrency={formatCurrency}
+        formatPercent={formatPercent}
+        formatPercentInt={formatPercentInt}
+      />
+
+      {!shareMode ? (
+        <CrmBudgetExecutionShareModal
+          open={shareOpen}
+          onClose={() => setShareOpen(false)}
+          clientSlug={clientSlug}
+          yearOptions={yearOptions}
+        />
+      ) : null}
+
+      <ExecutionDetailDrawer
+        open={detailOpen}
+        row={detailRow}
+        onClose={closeDetail}
+        roleAllocations={detailRoleAllocations}
+        productionSpend={detailProductionSpend}
+        workstreamSpend={detailWorkstreamSpend}
+        sourceShare={detailSourceShare}
+        workstreams={detailWorkstreamList}
+        monthlyData={detailMonthlyData}
+        clientSlug={clientSlug}
+        formatCurrency={formatCurrency}
+        formatPercent={formatPercent}
+        formatPercentInt={formatPercentInt}
+      />
+    </div>
+  );
+}
+
+function ExecutionDetailDrawer({
+  open,
+  row,
+  onClose,
+  roleAllocations,
+  productionSpend,
+  workstreamSpend,
+  sourceShare,
+  workstreams,
+  monthlyData,
+  clientSlug,
+  formatCurrency,
+  formatPercent,
+  formatPercentInt,
+}: {
+  open: boolean;
+  row: (TableRow & {
+    actual: number;
+    plan: number;
+    remaining: number;
+    utilization: number;
+    delta: number;
+    risk: { label: string; tone: "ok" | "warn" | "danger" };
+  }) | null;
+  onClose: () => void;
+  roleAllocations: Array<{ roleName: string; share: number; plan: number; actual: number }>;
+  productionSpend: number;
+  workstreamSpend: number;
+  sourceShare: number;
+  workstreams: Array<{ scope: string; amount: number }>;
+  monthlyData: Array<{ month: string; actual: number }>;
+  clientSlug: string;
+  formatCurrency: (value: number, detailed?: boolean) => string;
+  formatPercent: (value: number) => string;
+  formatPercentInt: (value: number) => string;
+}) {
+  if (!open || !row) return null;
+
+  return (
+    <div
+      className="fixed inset-0 z-[120] flex items-stretch justify-end bg-black/40 backdrop-blur-sm"
+      role="dialog"
+      aria-modal="true"
+      aria-labelledby="execution-detail-title"
+      onClick={(event) => {
+        if (event.target === event.currentTarget) onClose();
+      }}
+    >
+      <div className="h-full w-full max-w-3xl overflow-y-auto bg-[color:var(--color-surface)] shadow-2xl">
+        <header className="sticky top-0 z-10 border-b border-[color:var(--color-border)] bg-[color:var(--color-surface)]/95 px-6 py-4 backdrop-blur-md">
+          <div className="flex items-start justify-between gap-4">
+            <div>
+              <p className="text-xs uppercase tracking-[0.2em] text-[color:var(--color-text)]/55">
+                Execution details
+              </p>
+              <h2 id="execution-detail-title" className="mt-1 text-xl font-semibold text-[color:var(--color-text)]">
+                {row.name}
+              </h2>
+              <p className="text-sm text-[color:var(--color-text)]/65">
+                {row.entity} · {row.roles.length ? row.roles.join(", ") : "No role assigned"}
+              </p>
+            </div>
+            <button type="button" className="btn-ghost h-9 px-3 text-xs" onClick={onClose}>
+              Close
+            </button>
+          </div>
+        </header>
+
+        <div className="space-y-6 p-6">
+          <section className="grid gap-3 sm:grid-cols-2">
+            <div className="rounded-2xl border border-[color:var(--color-border)] bg-[color:var(--color-surface-2)]/60 p-4">
+              <div className="text-xs uppercase tracking-[0.2em] text-[color:var(--color-text)]/55">Plan</div>
+              <div className="mt-2 text-lg font-semibold text-[color:var(--color-text)]">{formatCurrency(row.plan)}</div>
+              <div className="mt-1 text-xs text-[color:var(--color-text)]/60">Allocated for {row.roles.length || 1} roles</div>
+            </div>
+            <div className="rounded-2xl border border-[color:var(--color-border)] bg-[color:var(--color-surface-2)]/60 p-4">
+              <div className="text-xs uppercase tracking-[0.2em] text-[color:var(--color-text)]/55">Actual</div>
+              <div className="mt-2 text-lg font-semibold text-[color:var(--color-text)]">{formatCurrency(row.actual)}</div>
+              <div className="mt-1 text-xs text-[color:var(--color-text)]/60">
+                Remaining {formatCurrency(row.remaining)} · {formatPercent(row.utilization)} used
+              </div>
+            </div>
+          </section>
+
+          <section className="grid gap-3 md:grid-cols-[1.2fr_1fr]">
+            <div className="rounded-2xl border border-[color:var(--color-border)] bg-[color:var(--color-surface-2)]/40 p-4">
+              <div className="flex items-center justify-between">
+                <h3 className="text-sm font-semibold text-[color:var(--color-text)]">Role allocations</h3>
+                <span className={`inline-flex items-center rounded-full border px-2.5 py-0.5 text-[11px] font-semibold ${riskToneClass[row.risk.tone]}`}>
+                  {row.risk.label}
+                </span>
+              </div>
+              <div className="mt-3 space-y-2 text-sm">
+                {roleAllocations.length ? (
+                  roleAllocations.map((role) => (
+                    <div key={role.roleName} className="flex items-center justify-between gap-3">
+                      <div>
+                        <div className="font-medium text-[color:var(--color-text)]">{role.roleName}</div>
+                        <div className="text-xs text-[color:var(--color-text)]/60">
+                          {formatPercentInt(role.share)} share
+                        </div>
+                      </div>
+                      <div className="text-right">
+                        <div className="text-sm font-semibold text-[color:var(--color-text)]">
+                          {formatCurrency(role.actual)}
+                        </div>
+                        <div className="text-xs text-[color:var(--color-text)]/60">
+                          Plan {formatCurrency(role.plan)}
+                        </div>
+                      </div>
+                    </div>
+                  ))
+                ) : (
+                  <p className="text-xs text-[color:var(--color-text)]/60">No role allocation data.</p>
+                )}
+              </div>
+            </div>
+            <div className="rounded-2xl border border-[color:var(--color-border)] bg-[color:var(--color-surface-2)]/40 p-4">
+              <h3 className="text-sm font-semibold text-[color:var(--color-text)]">Source mix</h3>
+              <div className="mt-3 space-y-3 text-sm">
+                <div className="flex items-center justify-between">
+                  <span className="text-[color:var(--color-text)]/70">Production</span>
+                  <span className="font-semibold text-[color:var(--color-text)]">{formatCurrency(productionSpend)}</span>
+                </div>
+                <div className="flex items-center justify-between">
+                  <span className="text-[color:var(--color-text)]/70">Workstreams</span>
+                  <span className="font-semibold text-[color:var(--color-text)]">{formatCurrency(workstreamSpend)}</span>
+                </div>
+                <div className="mt-2 h-2 overflow-hidden rounded-full bg-[color:var(--color-surface-2)]">
+                  <div
+                    className="h-full bg-[color:var(--color-primary)]"
+                    style={{ width: `${Math.round(sourceShare * 100)}%` }}
+                  />
+                </div>
+                <div className="text-xs text-[color:var(--color-text)]/60">
+                  Production share {formatPercent(sourceShare)}
+                </div>
+              </div>
+            </div>
+          </section>
+
+          <section className="grid gap-3 lg:grid-cols-[1.2fr_1fr]">
+            <div className="rounded-2xl border border-[color:var(--color-border)] bg-[color:var(--color-surface-2)]/40 p-4">
+              <h3 className="text-sm font-semibold text-[color:var(--color-text)]">Monthly trend</h3>
+              <div className="mt-3 h-[140px]">
+                {monthlyData.length ? (
+                  <ResponsiveContainer width="100%" height="100%">
+                    <LineChart data={monthlyData} margin={{ top: 10, right: 10, left: 0, bottom: 0 }}>
+                      <CartesianGrid stroke={chartTheme.grid} vertical={false} />
+                      <XAxis dataKey="month" tick={false} axisLine={false} tickLine={false} />
+                      <YAxis hide domain={[0, "auto"]} />
+                      <Tooltip
+                        contentStyle={chartTheme.tooltip.contentStyle}
+                        itemStyle={chartTheme.tooltip.itemStyle}
+                        labelStyle={chartTheme.tooltip.labelStyle}
+                        formatter={(value) => formatCurrency(Number(value), true)}
+                      />
+                      <Line
+                        type="monotone"
+                        dataKey="actual"
+                        stroke="var(--chart-1)"
+                        strokeWidth={2.5}
+                        dot={false}
+                      />
+                    </LineChart>
+                  </ResponsiveContainer>
+                ) : (
+                  <p className="text-xs text-[color:var(--color-text)]/60">No monthly trend available.</p>
+                )}
+              </div>
+            </div>
+            <div className="rounded-2xl border border-[color:var(--color-border)] bg-[color:var(--color-surface-2)]/40 p-4">
+              <h3 className="text-sm font-semibold text-[color:var(--color-text)]">Top workstreams</h3>
+              <div className="mt-3 space-y-2 text-sm">
+                {workstreams.length ? (
+                  workstreams.map((entry) => (
+                    <div key={entry.scope} className="flex items-center justify-between gap-3">
+                      <span className="text-[color:var(--color-text)]/70">{entry.scope}</span>
+                      <span className="font-semibold text-[color:var(--color-text)]">{formatCurrency(entry.amount)}</span>
+                    </div>
+                  ))
+                ) : (
+                  <p className="text-xs text-[color:var(--color-text)]/60">No workstream spend recorded.</p>
+                )}
+              </div>
+            </div>
+          </section>
+
+          <section className="flex flex-wrap gap-2">
+            <a className="btn-ghost h-9 px-3 text-xs" href={`/crm/${clientSlug}/campaigns`}>
+              Open Campaign Reporting
+            </a>
+            <a className="btn-ghost h-9 px-3 text-xs" href={`/crm/${clientSlug}/ticket-reporting`}>
+              Open Ticket Reporting
+            </a>
+            <a className="btn-ghost h-9 px-3 text-xs" href={`/crm/${clientSlug}/manual-efforts`}>
+              Open Manual Efforts
+            </a>
+          </section>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function WorkstreamDetailDrawer({
+  open,
+  scope,
+  scopeCount,
+  total,
+  share,
+  contributors,
+  contributorCount,
+  chartData,
+  chartSeries,
+  onClose,
+  onSelectRow,
+  formatCurrency,
+  formatPercent,
+  formatPercentInt,
+}: {
+  open: boolean;
+  scope: string | null;
+  scopeCount: number;
+  total: number;
+  share: number;
+  contributors: Array<{ row: TableRow; actual: number; share: number }>;
+  contributorCount: number;
+  chartData: Array<Record<string, number | string>>;
+  chartSeries: Array<{ name: string; dataKey: string; color: string }>;
+  onClose: () => void;
+  onSelectRow: (row: TableRow) => void;
+  formatCurrency: (value: number, detailed?: boolean) => string;
+  formatPercent: (value: number) => string;
+  formatPercentInt: (value: number) => string;
+}) {
+  if (!open || !scope) return null;
+
+  return (
+    <div
+      className="fixed inset-0 z-[120] flex items-stretch justify-end bg-black/40 backdrop-blur-sm"
+      role="dialog"
+      aria-modal="true"
+      aria-labelledby="workstream-detail-title"
+      onClick={(event) => {
+        if (event.target === event.currentTarget) onClose();
+      }}
+    >
+      <div className="h-full w-full max-w-2xl overflow-y-auto bg-[color:var(--color-surface)] shadow-2xl">
+        <header className="sticky top-0 z-10 border-b border-[color:var(--color-border)] bg-[color:var(--color-surface)]/95 px-6 py-4 backdrop-blur-md">
+          <div className="flex items-start justify-between gap-4">
+            <div>
+              <p className="text-xs uppercase tracking-[0.2em] text-[color:var(--color-text)]/55">
+                Workstream details
+              </p>
+              <h2 id="workstream-detail-title" className="mt-1 text-xl font-semibold text-[color:var(--color-text)]">
+                {scope}
+              </h2>
+              {scope === "Other Streams" ? (
+                <p className="text-xs text-[color:var(--color-text)]/60">
+                  Includes {scopeCount} workstreams
+                </p>
+              ) : null}
+            </div>
+            <button type="button" className="btn-ghost h-9 px-3 text-xs" onClick={onClose}>
+              Close
+            </button>
+          </div>
+        </header>
+
+        <div className="space-y-6 p-6">
+          <section className="grid gap-3 sm:grid-cols-3">
+            <div className="rounded-2xl border border-[color:var(--color-border)] bg-[color:var(--color-surface-2)]/60 p-4">
+              <div className="text-xs uppercase tracking-[0.2em] text-[color:var(--color-text)]/55">Spent</div>
+              <div className="mt-2 text-lg font-semibold text-[color:var(--color-text)]">
+                {formatCurrency(total)}
+              </div>
+              <div className="mt-1 text-xs text-[color:var(--color-text)]/60">Share {formatPercent(share)}</div>
+            </div>
+            <div className="rounded-2xl border border-[color:var(--color-border)] bg-[color:var(--color-surface-2)]/60 p-4">
+              <div className="text-xs uppercase tracking-[0.2em] text-[color:var(--color-text)]/55">
+                Contributors
+              </div>
+              <div className="mt-2 text-lg font-semibold text-[color:var(--color-text)]">{contributorCount}</div>
+              <div className="mt-1 text-xs text-[color:var(--color-text)]/60">Top 10 shown</div>
+            </div>
+            <div className="rounded-2xl border border-[color:var(--color-border)] bg-[color:var(--color-surface-2)]/60 p-4">
+              <div className="text-xs uppercase tracking-[0.2em] text-[color:var(--color-text)]/55">
+                Context
+              </div>
+              <div className="mt-2 text-xs text-[color:var(--color-text)]/70">
+                Click a resource to open execution details.
+              </div>
+            </div>
+          </section>
+
+          <section className="rounded-2xl border border-[color:var(--color-border)] bg-[color:var(--color-surface-2)]/40 p-4">
+            <div className="flex items-center justify-between">
+              <h3 className="text-sm font-semibold text-[color:var(--color-text)]">Top contributors</h3>
+              <span className="text-xs text-[color:var(--color-text)]/60">{contributors.length} rows</span>
+            </div>
+            <div className="mt-3 overflow-x-auto">
+              <table className="min-w-[540px] w-full text-sm">
+                <thead className="text-xs uppercase tracking-[0.2em] text-[color:var(--color-text)]/55">
+                  <tr>
+                    <th className="px-2 py-2 text-left">Resource</th>
+                    <th className="px-2 py-2 text-left">Entity</th>
+                    <th className="px-2 py-2 text-left">Roles</th>
+                    <th className="px-2 py-2 text-right">Budget</th>
+                    <th className="px-2 py-2 text-right">Share</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-[color:var(--color-border)]">
+                  {contributors.length === 0 ? (
+                    <tr>
+                      <td className="px-2 py-4 text-center text-[color:var(--color-text)]/60" colSpan={5}>
+                        No contributors found for this workstream.
+                      </td>
+                    </tr>
+                  ) : (
+                    contributors.map(({ row, actual, share: rowShare }) => (
+                      <tr
+                        key={`${row.key}-ws`}
+                        className="cursor-pointer hover:bg-[color:var(--color-surface-2)]/50"
+                        onClick={() => onSelectRow(row)}
+                      >
+                        <td className="px-2 py-2 font-semibold">{row.name}</td>
+                        <td className="px-2 py-2 text-[color:var(--color-text)]/70">{row.entity}</td>
+                        <td className="px-2 py-2 text-[color:var(--color-text)]/70">
+                          {row.roles.length ? row.roles.join(", ") : "Unassigned"}
+                        </td>
+                        <td className="px-2 py-2 text-right">{formatCurrency(actual)}</td>
+                        <td className="px-2 py-2 text-right">{formatPercentInt(rowShare)}</td>
+                      </tr>
+                    ))
+                  )}
+                </tbody>
+              </table>
+            </div>
+          </section>
+
+          <section className="rounded-2xl border border-[color:var(--color-border)] bg-[color:var(--color-surface-2)]/40 p-4">
+            <div className="flex items-center justify-between">
+              <h3 className="text-sm font-semibold text-[color:var(--color-text)]">Monthly trend by contributor</h3>
+              <span className="text-xs text-[color:var(--color-text)]/60">Top 10</span>
+            </div>
+            <div className="mt-3 h-[200px]">
+              {chartSeries.length ? (
+                <ResponsiveContainer width="100%" height="100%">
+                  <LineChart data={chartData} margin={{ top: 10, right: 10, left: 0, bottom: 0 }}>
+                    <CartesianGrid stroke={chartTheme.grid} vertical={false} />
+                    <XAxis dataKey="month" tick={chartTheme.tick} axisLine={false} tickLine={false} />
+                    <YAxis
+                      tick={chartTheme.tick}
+                      axisLine={false}
+                      tickLine={false}
+                      tickFormatter={(value) => formatCurrency(Number(value))}
+                    />
+                    <Tooltip
+                      contentStyle={chartTheme.tooltip.contentStyle}
+                      itemStyle={chartTheme.tooltip.itemStyle}
+                      labelStyle={chartTheme.tooltip.labelStyle}
+                      formatter={(value) => formatCurrency(Number(value))}
+                    />
+                    <Legend
+                      verticalAlign="bottom"
+                      height={36}
+                      wrapperStyle={{ fontSize: "10px", lineHeight: "12px" }}
+                    />
+                    {chartSeries.map((series) => (
+                      <Line
+                        key={series.dataKey}
+                        type="monotone"
+                        dataKey={series.dataKey}
+                        name={series.name}
+                        stroke={series.color}
+                        strokeWidth={2}
+                        dot={false}
+                        activeDot={{ r: 3 }}
+                      />
+                    ))}
+                  </LineChart>
+                </ResponsiveContainer>
+              ) : (
+                <div className="flex h-full items-center justify-center text-sm text-[color:var(--color-text)]/60">
+                  No monthly data for these contributors.
+                </div>
+              )}
+            </div>
+          </section>
+        </div>
+      </div>
     </div>
   );
 }
