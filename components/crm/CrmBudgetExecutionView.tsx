@@ -711,6 +711,15 @@ export default function CrmBudgetExecutionView({
   const pathname = usePathname();
   const segments = pathname?.split("/").filter(Boolean) ?? [];
   const clientSlug = clientOverride || segments[1] || "emg";
+  const derivedShareToken = useMemo(() => {
+    if (!shareMode) return undefined;
+    if (segments.length >= 4 && segments[0] === "share") {
+      const idx = segments.indexOf("budget-execution");
+      if (idx >= 0 && segments[idx + 1]) return segments[idx + 1];
+    }
+    return undefined;
+  }, [shareMode, segments]);
+  const effectiveShareToken = shareToken || derivedShareToken;
   const clientLogo = clientSlug === "emg" ? "/logos/emg-logo.png" : null;
   const nowYear = new Date().getFullYear();
   const [year, setYear] = useState(initialYear ?? nowYear);
@@ -789,7 +798,7 @@ export default function CrmBudgetExecutionView({
   useEffect(() => {
     let active = true;
     const load = async () => {
-      if (shareMode && !shareToken) {
+      if (shareMode && !effectiveShareToken) {
         setError("Missing share token.");
         setLoading(false);
         return;
@@ -799,7 +808,7 @@ export default function CrmBudgetExecutionView({
       try {
         const endpoint = shareMode
           ? `/api/share/budget-execution?client=${clientSlug}&year=${year}&token=${encodeURIComponent(
-              shareToken ?? "",
+              effectiveShareToken ?? "",
             )}`
           : `/api/crm/budget-execution?client=${clientSlug}&year=${year}`;
         const res = await fetch(endpoint);
@@ -831,7 +840,7 @@ export default function CrmBudgetExecutionView({
     return () => {
       active = false;
     };
-  }, [clientSlug, year, shareMode, shareToken]);
+  }, [clientSlug, year, shareMode, effectiveShareToken]);
 
   const yearOptions = useMemo(() => {
     if (shareMode && shareAllowedYears && shareAllowedYears.length) {
