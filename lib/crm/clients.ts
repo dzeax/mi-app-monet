@@ -154,6 +154,46 @@ export const CRM_CLIENTS: CrmClient[] = [
       },
     ],
   },
+  {
+    slug: 'saveurs-et-vie',
+    name: 'Saveurs et Vie',
+    modules: [
+      {
+        slug: 'manual-efforts',
+        type: 'manual_efforts',
+        label: 'Manual Efforts',
+        description: 'Non-ticket effort logging for CRM teams.',
+        icon: 'chart',
+      },
+      {
+        slug: 'budget',
+        type: 'budget',
+        label: 'Budget',
+        description: 'Annual budget planning and tracking.',
+        icon: 'chart',
+      },
+    ],
+  },
+  {
+    slug: 'sfr',
+    name: 'Global PRM',
+    modules: [
+      {
+        slug: 'manual-efforts',
+        type: 'manual_efforts',
+        label: 'Manual Efforts',
+        description: 'Non-ticket effort logging for CRM teams.',
+        icon: 'chart',
+      },
+      {
+        slug: 'budget',
+        type: 'budget',
+        label: 'Budget',
+        description: 'Annual budget planning and tracking.',
+        icon: 'chart',
+      },
+    ],
+  },
 ];
 
 export function getCrmClient(slug?: string | null) {
