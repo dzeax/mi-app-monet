@@ -12,6 +12,9 @@ type BudgetRole = {
   id: string;
   roleName: string;
   poolAmount: number;
+  basePoolAmount?: number;
+  carryoverAmount?: number;
+  adjustedPoolAmount?: number;
   currency: string;
   sortOrder: number;
   year: number;
@@ -60,6 +63,11 @@ const clampDate = (value: Date, min: Date, max: Date) => {
 const diffDays = (start: Date, end: Date) =>
   Math.floor((end.getTime() - start.getTime()) / DAY_MS) + 1;
 const roundAmount = (value: number) => Math.round(value * 100) / 100;
+const getRolePoolAmount = (role: BudgetRole) =>
+  Number(
+    role.adjustedPoolAmount ??
+      (Number(role.poolAmount ?? 0) + Number(role.carryoverAmount ?? 0)),
+  );
 const getAllocationValue = (rolePool: number, assignment: BudgetAssignment) => {
   if (assignment.allocationAmount != null) return Number(assignment.allocationAmount) || 0;
   if (assignment.allocationPct != null) {
@@ -144,11 +152,21 @@ export default function CrmBudgetModal({
     type: "success" | "error";
     message: string;
   } | null>(null);
+  const [carryoverTotal, setCarryoverTotal] = useState<number | null>(null);
+  const [carryoverLoading, setCarryoverLoading] = useState(false);
+  const [carryoverError, setCarryoverError] = useState<string | null>(null);
+  const [carryoverDraft, setCarryoverDraft] = useState<Record<string, number>>({});
+  const [carryoverSaving, setCarryoverSaving] = useState(false);
   const [expandedRoles, setExpandedRoles] = useState<Record<string, boolean>>(
     {},
   );
+  const [activeTab, setActiveTab] = useState<"roles" | "entities" | "carryover">("roles");
+  const [entitySearch, setEntitySearch] = useState("");
+  const [showMissingEntities, setShowMissingEntities] = useState(true);
+  const [roleSearch, setRoleSearch] = useState("");
   const hasInitializedExpanded = useRef(false);
   const initialSignatureRef = useRef("");
+  const carryoverSnapshotRef = useRef<Record<string, number>>({});
   const closeTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   const stopPropagation = (event: ReactMouseEvent) => {
@@ -177,6 +195,12 @@ export default function CrmBudgetModal({
       assignments: baseAssignments,
     });
     setEntityMap(baseEntities);
+    const carryoverMap: Record<string, number> = {};
+    baseRoles.forEach((role) => {
+      carryoverMap[role.id] = Number(role.carryoverAmount ?? 0);
+    });
+    setCarryoverDraft(carryoverMap);
+    carryoverSnapshotRef.current = { ...carryoverMap };
     const nextModes: Record<string, "auto" | "manual"> = {};
     baseRoles.forEach((role) => {
       const hasManual = baseAssignments.some(
@@ -223,6 +247,51 @@ export default function CrmBudgetModal({
     [],
   );
 
+  useEffect(() => {
+    let active = true;
+    const fromYear = year - 1;
+    if (!Number.isFinite(fromYear) || fromYear < 1900) {
+      setCarryoverTotal(null);
+      return;
+    }
+    const loadCarryover = async () => {
+      setCarryoverLoading(true);
+      setCarryoverError(null);
+      try {
+        const res = await fetch(`/api/crm/budget?client=${clientSlug}&year=${fromYear}`);
+        const body = await res.json().catch(() => null);
+        if (!res.ok) {
+          throw new Error(body?.error || `Failed to load ${fromYear} budget`);
+        }
+        const prevRoles = (body?.roles ?? []) as BudgetRole[];
+        if (!prevRoles.length) {
+          if (active) setCarryoverTotal(null);
+          return;
+        }
+        const totalBudget = prevRoles.reduce(
+          (acc, role) => acc + getRolePoolAmount(role),
+          0,
+        );
+        const totalSpent = Object.values(body?.spendByPerson ?? {}).reduce(
+          (acc, value) => acc + Number(value ?? 0),
+          0,
+        );
+        if (active) setCarryoverTotal(roundAmount(totalBudget - totalSpent));
+      } catch (err) {
+        if (active) {
+          setCarryoverError(err instanceof Error ? err.message : "Unable to load carry-over");
+          setCarryoverTotal(null);
+        }
+      } finally {
+        if (active) setCarryoverLoading(false);
+      }
+    };
+    void loadCarryover();
+    return () => {
+      active = false;
+    };
+  }, [clientSlug, year]);
+
   const hasUnsavedChanges = useMemo(() => {
     if (!initialSignatureRef.current) return false;
     return (
@@ -236,9 +305,32 @@ export default function CrmBudgetModal({
     );
   }, [draft.roles, draft.assignments, deletedRoleIds, deletedAssignmentIds, entityMap]);
 
+  const hasCarryoverChanges = useMemo(() => {
+    const snapshot = carryoverSnapshotRef.current;
+    return draft.roles.some((role) => {
+      const draftValue = Number(carryoverDraft[role.id] ?? 0);
+      const savedValue = Number(snapshot[role.id] ?? 0);
+      return roundAmount(draftValue) !== roundAmount(savedValue);
+    });
+  }, [draft.roles, carryoverDraft]);
+
+  const hasChanges = hasUnsavedChanges || hasCarryoverChanges;
+
   const getRoleMode = useCallback(
     (roleId: string) => allocationModeByRole[roleId] ?? "auto",
     [allocationModeByRole],
+  );
+
+  const getRoleAdjustedPool = useCallback(
+    (role: BudgetRole) => {
+      const base = Number(role.poolAmount ?? 0);
+      const draftCarry = carryoverDraft[role.id];
+      const carry = Number.isFinite(draftCarry)
+        ? Number(draftCarry)
+        : Number(role.carryoverAmount ?? 0);
+      return base + carry;
+    },
+    [carryoverDraft],
   );
 
   const computeAutoAllocationsForRole = useCallback(
@@ -269,16 +361,17 @@ export default function CrmBudgetModal({
         return allocations;
       }
 
+      const rolePool = getRoleAdjustedPool(role);
       const raw = activeAssignments.map((assignment) => ({
         id: assignment.id,
-        amount: role.poolAmount * ((daysByAssignment.get(assignment.id) ?? 0) / totalDays),
+        amount: rolePool * ((daysByAssignment.get(assignment.id) ?? 0) / totalDays),
       }));
       const rounded = raw.map((item) => ({
         id: item.id,
         amount: roundAmount(item.amount),
       }));
       const totalRounded = rounded.reduce((acc, item) => acc + item.amount, 0);
-      const diff = roundAmount(role.poolAmount - totalRounded);
+      const diff = roundAmount(rolePool - totalRounded);
       if (rounded.length > 0 && Math.abs(diff) > 0) {
         rounded[rounded.length - 1] = {
           id: rounded[rounded.length - 1].id,
@@ -288,7 +381,7 @@ export default function CrmBudgetModal({
       rounded.forEach((item) => allocations.set(item.id, item.amount));
       return allocations;
     },
-    [year],
+    [year, getRoleAdjustedPool],
   );
 
   const handleAllocationModeChange = useCallback(
@@ -313,6 +406,7 @@ export default function CrmBudgetModal({
           (assignment) => assignment.roleId === role.id,
         );
         const allocations = computeAutoAllocationsForRole(role, roleAssignments);
+        const rolePool = getRoleAdjustedPool(role);
         setDraft((prev) => ({
           ...prev,
           assignments: prev.assignments.map((assignment) => {
@@ -320,8 +414,8 @@ export default function CrmBudgetModal({
             const amount = allocations.get(assignment.id);
             const allocationAmount = amount != null ? amount : 0;
             const allocationPct =
-              role.poolAmount > 0
-                ? roundAmount((allocationAmount / role.poolAmount) * 100)
+              rolePool > 0
+                ? roundAmount((allocationAmount / rolePool) * 100)
                 : null;
             return {
               ...assignment,
@@ -332,7 +426,7 @@ export default function CrmBudgetModal({
         }));
       }
     },
-    [computeAutoAllocationsForRole, draft.assignments],
+    [computeAutoAllocationsForRole, draft.assignments, getRoleAdjustedPool],
   );
 
   const allocationStatus = useMemo(() => {
@@ -343,17 +437,35 @@ export default function CrmBudgetModal({
       const roleAssignments = draft.assignments.filter(
         (assignment) => assignment.roleId === role.id && assignment.isActive !== false,
       );
+      const rolePool = getRoleAdjustedPool(role);
       const total = roleAssignments.reduce((acc, assignment) => {
-        return acc + getAllocationValue(role.poolAmount, assignment);
+        return acc + getAllocationValue(rolePool, assignment);
       }, 0);
-      const diff = roundAmount(role.poolAmount - total);
+      const diff = roundAmount(rolePool - total);
       if (Math.abs(diff) > 0.01) {
         byRole[role.id] = { total, diff };
         hasMismatch = true;
       }
     });
     return { byRole, hasMismatch };
-  }, [draft.roles, draft.assignments, getRoleMode]);
+  }, [draft.roles, draft.assignments, getRoleMode, getRoleAdjustedPool]);
+
+  const carryoverAllocated = useMemo(
+    () =>
+      draft.roles.reduce(
+        (acc, role) => acc + Number(carryoverDraft[role.id] ?? 0),
+        0,
+      ),
+    [draft.roles, carryoverDraft],
+  );
+
+  const carryoverDiff = useMemo(() => {
+    if (carryoverTotal == null) return null;
+    return roundAmount(carryoverTotal - carryoverAllocated);
+  }, [carryoverTotal, carryoverAllocated]);
+
+  const carryoverHasMismatch =
+    carryoverTotal != null && Math.abs(carryoverDiff ?? 0) > 0.01;
 
   const allocationMismatchLabels = useMemo(() => {
     if (!allocationStatus.hasMismatch) return [];
@@ -407,6 +519,12 @@ export default function CrmBudgetModal({
     [requiredPersonIds, entityMap],
   );
 
+  useEffect(() => {
+    if (missingEntityIds.length === 0 && showMissingEntities) {
+      setShowMissingEntities(false);
+    }
+  }, [missingEntityIds.length, showMissingEntities]);
+
   const missingEntityLabels = useMemo(
     () =>
       missingEntityIds
@@ -414,6 +532,28 @@ export default function CrmBudgetModal({
         .sort((a, b) => a.localeCompare(b)),
     [missingEntityIds, peopleById],
   );
+
+  const filteredPeople = useMemo(() => {
+    const term = entitySearch.trim().toLowerCase();
+    return requiredPeople.filter((person) => {
+      if (showMissingEntities && entityMap[person.personId]) return false;
+      if (!term) return true;
+      return person.displayName.toLowerCase().includes(term);
+    });
+  }, [requiredPeople, showMissingEntities, entityMap, entitySearch]);
+
+  const hasMissingEntities = missingEntityIds.length > 0;
+  const hasFilteredPeople = filteredPeople.length > 0;
+
+  const filteredRoles = useMemo(() => {
+    const term = roleSearch.trim().toLowerCase();
+    return draft.roles
+      .slice()
+      .sort((a, b) => a.sortOrder - b.sortOrder)
+      .filter((role) =>
+        term ? (role.roleName || "").toLowerCase().includes(term) : true,
+      );
+  }, [draft.roles, roleSearch]);
 
   const handleRoleDelete = (roleId: string) => {
     if (!canDelete && !isTempId(roleId)) return;
@@ -437,6 +577,11 @@ export default function CrmBudgetModal({
       );
     }
     setExpandedRoles((prev) => {
+      const next = { ...prev };
+      delete next[roleId];
+      return next;
+    });
+    setCarryoverDraft((prev) => {
       const next = { ...prev };
       delete next[roleId];
       return next;
@@ -465,6 +610,12 @@ export default function CrmBudgetModal({
       if (allocationStatus.hasMismatch) {
         throw new Error("Manual allocations must match the role pool before saving.");
       }
+      if (carryoverLoading) {
+        throw new Error("Carry-over is still loading. Please try again.");
+      }
+      if (carryoverTotal != null && carryoverHasMismatch) {
+        throw new Error("Carry-over allocations must match the total before saving.");
+      }
       if (missingEntityIds.length > 0) {
         const preview = missingEntityLabels.slice(0, 5).join(", ");
         const suffix =
@@ -489,6 +640,7 @@ export default function CrmBudgetModal({
       const roleIdMap = new Map<string, string>();
       const nextRoles: BudgetRole[] = [];
       for (const role of rolePayloads) {
+        const carryoverAmount = Number(carryoverDraft[role.id] ?? 0);
         const payload: any = {
           client: clientSlug,
           year,
@@ -515,10 +667,51 @@ export default function CrmBudgetModal({
           id: savedId,
           roleName: saved.role_name ?? role.roleName,
           poolAmount: Number(saved.pool_amount ?? role.poolAmount),
+          carryoverAmount,
+          adjustedPoolAmount: Number(saved.pool_amount ?? role.poolAmount) + carryoverAmount,
           currency: saved.currency ?? role.currency,
           sortOrder: Number(saved.sort_order ?? role.sortOrder),
           isActive: saved.is_active ?? role.isActive,
         });
+      }
+
+      if (carryoverTotal != null) {
+        setCarryoverSaving(true);
+        try {
+          const nextCarryoverDraft: Record<string, number> = {};
+          draft.roles.forEach((role) => {
+            const mappedId = roleIdMap.get(role.id) ?? role.id;
+            if (!mappedId) return;
+            nextCarryoverDraft[mappedId] = roundAmount(
+              Number(carryoverDraft[role.id] ?? 0),
+            );
+          });
+          const allocations = Object.entries(nextCarryoverDraft)
+            .map(([roleId, amount]) => ({ roleId, amount }))
+            .filter((entry) => entry.roleId && !isTempId(entry.roleId));
+          const fromYear = year - 1;
+          if (Number.isFinite(fromYear) && fromYear > 1900) {
+            const resCarry = await fetch("/api/crm/budget-adjustments", {
+              method: "POST",
+              headers: { "Content-Type": "application/json" },
+              body: JSON.stringify({
+                client: clientSlug,
+                fromYear,
+                toYear: year,
+                type: "carryover",
+                allocations,
+              }),
+            });
+            const bodyCarry = await resCarry.json().catch(() => null);
+            if (!resCarry.ok) {
+              throw new Error(bodyCarry?.error || `Failed (${resCarry.status})`);
+            }
+            setCarryoverDraft(nextCarryoverDraft);
+            carryoverSnapshotRef.current = { ...nextCarryoverDraft };
+          }
+        } finally {
+          setCarryoverSaving(false);
+        }
       }
 
       const assignmentPayloads = draft.assignments.map((assignment) => ({
@@ -645,6 +838,7 @@ export default function CrmBudgetModal({
       id: `new-${Date.now()}`,
       roleName: "",
       poolAmount: 0,
+      carryoverAmount: 0,
       currency: "EUR",
       sortOrder: draft.roles.length + 1,
       year,
@@ -652,6 +846,7 @@ export default function CrmBudgetModal({
     };
     setDraft((prev) => ({ ...prev, roles: [...prev.roles, next] }));
     setExpandedRoles((prev) => ({ ...prev, [next.id]: true }));
+    setCarryoverDraft((prev) => ({ ...prev, [next.id]: 0 }));
   };
 
   const addAssignment = (roleId: string) => {
@@ -727,6 +922,7 @@ export default function CrmBudgetModal({
           year,
           roleName: role.roleName || "",
           poolAmount: Number(role.poolAmount ?? 0),
+          carryoverAmount: 0,
           currency: role.currency || "EUR",
         };
       });
@@ -752,6 +948,11 @@ export default function CrmBudgetModal({
         })
         .filter(Boolean) as BudgetAssignment[];
       setDraft({ roles: nextRoles, assignments: nextAssignments });
+      const nextCarryover: Record<string, number> = {};
+      nextRoles.forEach((role) => {
+        nextCarryover[role.id] = 0;
+      });
+      setCarryoverDraft(nextCarryover);
       setDeletedRoleIds([]);
       setDeletedAssignmentIds([]);
       setExpandedRoles(() => {
@@ -801,7 +1002,7 @@ export default function CrmBudgetModal({
   };
 
   const handleRequestClose = () => {
-    if (hasUnsavedChanges) {
+    if (hasChanges) {
       const confirmClose = window.confirm(
         "You have unsaved changes. Are you sure you want to close?",
       );
@@ -834,19 +1035,22 @@ export default function CrmBudgetModal({
           </button>
           <button
             className={`btn-primary h-9 px-4 ${
-              hasUnsavedChanges ? "ring-2 ring-emerald-200/70" : ""
+              hasChanges ? "ring-2 ring-emerald-200/70" : ""
             }`}
             onClick={handleSaveAll}
             disabled={
               savingAll ||
               !canEdit ||
               missingEntityIds.length > 0 ||
-              allocationStatus.hasMismatch
+              allocationStatus.hasMismatch ||
+              carryoverLoading ||
+              carryoverSaving ||
+              (carryoverTotal != null && carryoverHasMismatch)
             }
           >
             {savingAll
               ? "Saving..."
-              : hasUnsavedChanges
+              : hasChanges
                 ? "Save Changes *"
                 : "Save Changes"}
           </button>
@@ -854,7 +1058,7 @@ export default function CrmBudgetModal({
       }
     >
       <form
-        className="space-y-6"
+        className="space-y-5"
         data-variant="clean-tech"
         onSubmit={(event) => event.preventDefault()}
       >
@@ -877,105 +1081,362 @@ export default function CrmBudgetModal({
             {allocationMismatchLabels.join(", ")}.
           </div>
         ) : null}
-        <section className="space-y-3">
-          <div className="flex items-center justify-between">
-            <h3 className="text-sm font-semibold text-[color:var(--color-text)]">Entities</h3>
-            <span className="text-xs text-[color:var(--color-text)]/60">
-              Required for budget and execution splits.
-            </span>
-          </div>
-          {requiredPeople.length === 0 ? (
-            <div className="text-sm text-[color:var(--color-text)]/70">
-              Add members to assign entities.
-            </div>
-          ) : (
-            <div className="space-y-2">
-              {requiredPeople.map((person) => {
-                const value = entityMap[person.personId] ?? "";
-                const isMissing = !value;
-                return (
-                  <div
-                    key={person.personId}
+        <div className="rounded-2xl border border-[color:var(--color-border)] bg-[color:var(--color-surface)] px-3 py-2">
+          <div className="segmented">
+            {[
+              { key: "roles", label: `Roles (${draft.roles.length})` },
+              {
+                key: "entities",
+                label: `Entities (${requiredPeople.length})`,
+                meta: `Missing: ${missingEntityIds.length}`,
+                metaTone: missingEntityIds.length > 0 ? "warn" : "muted",
+              },
+              {
+                key: "carryover",
+                label: "Carry-over",
+                badge: carryoverHasMismatch ? "!" : null,
+              },
+            ].map((tab) => (
+              <button
+                key={tab.key}
+                type="button"
+                role="tab"
+                aria-selected={activeTab === tab.key}
+                className="segmented-tab"
+                onClick={() => setActiveTab(tab.key as typeof activeTab)}
+              >
+                <span>{tab.label}</span>
+                {tab.meta ? (
+                  <span
                     className={[
-                      "flex flex-wrap items-center gap-3 rounded-xl border bg-[color:var(--color-surface)]/90 p-2",
-                      isMissing ? "border-red-200" : "border-[color:var(--color-border)]",
+                      "ml-2 rounded-full px-2 py-0.5 text-[10px] font-semibold",
+                      tab.metaTone === "warn"
+                        ? "bg-amber-100 text-amber-700"
+                        : "bg-[color:var(--color-surface-2)] text-[color:var(--color-text)]/60",
                     ].join(" ")}
                   >
-                    <div className="min-w-[180px] flex-1">
-                      <div className="text-sm font-semibold text-[color:var(--color-text)]">
-                        {person.displayName}
-                      </div>
-                      {isMissing ? (
-                        <div className="text-xs text-red-600">Entity required</div>
-                      ) : null}
-                    </div>
-                    <select
-                      className={[
-                        "input h-9 min-w-[180px]",
-                        isMissing ? "border-red-300" : "",
-                      ].join(" ")}
-                      value={value}
-                      onChange={(e) =>
-                        setEntityMap((prev) => ({
-                          ...prev,
-                          [person.personId]: e.target.value,
-                        }))
+                    {tab.meta}
+                  </span>
+                ) : null}
+                {tab.badge ? (
+                  <span className="ml-2 rounded-full bg-amber-100 px-2 py-0.5 text-[10px] font-semibold text-amber-700">
+                    {tab.badge}
+                  </span>
+                ) : null}
+              </button>
+            ))}
+          </div>
+        </div>
+        {activeTab === "entities" ? (
+          <section className="space-y-3">
+            <div className="flex flex-wrap items-center justify-between gap-3">
+              <div>
+                <h3 className="text-sm font-semibold text-[color:var(--color-text)]">Entities</h3>
+                <span className="text-xs text-[color:var(--color-text)]/60">
+                  Required for budget and execution splits.
+                </span>
+              </div>
+              <div className="flex flex-wrap items-center gap-2">
+                <button
+                  type="button"
+                  className={`btn-ghost h-9 px-3 ${
+                    showMissingEntities
+                      ? "border-[color:var(--color-primary)] text-[color:var(--color-primary)]"
+                      : ""
+                  } ${!hasMissingEntities ? "opacity-50" : ""}`}
+                  aria-pressed={showMissingEntities}
+                  disabled={!hasMissingEntities}
+                  title={hasMissingEntities ? "Show missing entities only" : "No missing entities"}
+                  onClick={() => setShowMissingEntities((prev) => !prev)}
+                >
+                  Missing only
+                </button>
+                {canEdit ? (
+                  <>
+                    <button
+                      type="button"
+                      className={`btn-ghost h-9 px-3 ${!hasFilteredPeople ? "opacity-50" : ""}`}
+                      disabled={!hasFilteredPeople}
+                      title={
+                        hasFilteredPeople
+                          ? "Set all visible to Dataventure"
+                          : "No people in the current filter"
+                      }
+                      onClick={() =>
+                        setEntityMap((prev) => {
+                          const next = { ...prev };
+                          filteredPeople.forEach((person) => {
+                            next[person.personId] = "Dataventure";
+                          });
+                          return next;
+                        })
                       }
                     >
-                      <option value="">Select entity</option>
-                      {ENTITY_OPTIONS.map((entity) => (
-                        <option key={entity} value={entity}>
-                          {entity}
-                        </option>
-                      ))}
-                    </select>
-                  </div>
-                );
-              })}
+                      Set to Dataventure
+                    </button>
+                    <button
+                      type="button"
+                      className={`btn-ghost h-9 px-3 ${!hasFilteredPeople ? "opacity-50" : ""}`}
+                      disabled={!hasFilteredPeople}
+                      title={
+                        hasFilteredPeople
+                          ? "Set all visible to Equancy"
+                          : "No people in the current filter"
+                      }
+                      onClick={() =>
+                        setEntityMap((prev) => {
+                          const next = { ...prev };
+                          filteredPeople.forEach((person) => {
+                            next[person.personId] = "Equancy";
+                          });
+                          return next;
+                        })
+                      }
+                    >
+                      Set to Equancy
+                    </button>
+                  </>
+                ) : null}
+              </div>
             </div>
-          )}
-          {missingEntityLabels.length > 0 ? (
-            <div className="rounded-xl border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-900">
-              Missing entities: {missingEntityLabels.join(", ")}.
+            <div className="flex flex-wrap items-center gap-3">
+              <input
+                className="input h-9 min-w-[220px]"
+                placeholder="Search person..."
+                value={entitySearch}
+                onChange={(e) => setEntitySearch(e.target.value)}
+              />
+              <span className="text-xs text-[color:var(--color-text)]/60">
+                {filteredPeople.length} shown
+              </span>
             </div>
-          ) : null}
-        </section>
-        <div className="flex items-center justify-between">
-          <h3 className="text-sm font-semibold text-[color:var(--color-text)]">
-            Roles
-          </h3>
-          {canEdit ? (
-            <button className="btn-ghost h-9 px-3" onClick={addRole}>
-              Add role
-            </button>
-          ) : null}
-        </div>
+            {requiredPeople.length === 0 ? (
+              <div className="text-sm text-[color:var(--color-text)]/70">
+                Add members to assign entities.
+              </div>
+            ) : filteredPeople.length === 0 ? (
+              <div className="text-sm text-[color:var(--color-text)]/70">
+                No people match the current filter.
+              </div>
+            ) : (
+              <div className="space-y-2">
+                {filteredPeople.map((person) => {
+                  const value = entityMap[person.personId] ?? "";
+                  const isMissing = !value;
+                  return (
+                    <div
+                      key={person.personId}
+                      className={[
+                        "flex flex-wrap items-center gap-3 rounded-xl border bg-[color:var(--color-surface)]/90 p-2",
+                        isMissing ? "border-red-200" : "border-[color:var(--color-border)]",
+                      ].join(" ")}
+                    >
+                      <div className="min-w-[180px] flex-1">
+                        <div className="text-sm font-semibold text-[color:var(--color-text)]">
+                          {person.displayName}
+                        </div>
+                        {isMissing ? (
+                          <div className="text-xs text-red-600">Entity required</div>
+                        ) : null}
+                      </div>
+                      <select
+                        className={[
+                          "input h-9 min-w-[180px]",
+                          isMissing ? "border-red-300" : "",
+                        ].join(" ")}
+                        value={value}
+                        onChange={(e) =>
+                          setEntityMap((prev) => ({
+                            ...prev,
+                            [person.personId]: e.target.value,
+                          }))
+                        }
+                      >
+                        <option value="">Select entity</option>
+                        {ENTITY_OPTIONS.map((entity) => (
+                          <option key={entity} value={entity}>
+                            {entity}
+                          </option>
+                        ))}
+                      </select>
+                    </div>
+                  );
+                })}
+              </div>
+            )}
+            {missingEntityLabels.length > 0 ? (
+              <div className="rounded-xl border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-900">
+                Missing entities: {missingEntityLabels.join(", ")}.
+              </div>
+            ) : null}
+          </section>
+        ) : null}
 
-        <div className="space-y-4">
-          {draft.roles.length === 0 ? (
-            <div className="text-sm text-[color:var(--color-text)]/70">
-              No roles yet.
-            </div>
-          ) : (
-            draft.roles.map((role) => {
-              const roleAssignments = draft.assignments.filter(
-                (a) => a.roleId === role.id,
-              );
-              const isExpanded = expandedRoles[role.id] ?? false;
-              const memberCount = roleAssignments.length;
-              const memberLabel =
-                memberCount === 1 ? "1 member" : `${memberCount} members`;
-              const roleMode = getRoleMode(role.id);
-              const isManual = roleMode === "manual";
-              const roleMismatch = allocationStatus.byRole[role.id];
-              const memberGridCols = isManual
-                ? "sm:grid-cols-[minmax(0,1.6fr)_minmax(0,0.8fr)_minmax(0,0.8fr)_minmax(0,0.8fr)_minmax(0,0.4fr)_auto]"
-                : "sm:grid-cols-[minmax(0,1.6fr)_minmax(0,0.8fr)_minmax(0,0.8fr)_minmax(0,0.4fr)_auto]";
-              return (
-                <div
-                  key={role.id}
-                  className="space-y-3 rounded-2xl border border-[color:var(--color-border)] bg-[color:var(--color-surface)]/95 p-4 shadow-sm"
+        {activeTab === "carryover" ? (
+          <section className="space-y-3 rounded-2xl border border-[color:var(--color-border)] bg-[color:var(--color-surface)]/95 p-4 shadow-sm">
+            <div className="flex flex-wrap items-start justify-between gap-3">
+              <div>
+                <p className="text-xs uppercase tracking-[0.2em] text-[color:var(--color-text)]/60">
+                  Carry-over
+                </p>
+                <h3 className="mt-1 text-sm font-semibold text-[color:var(--color-text)]">
+                  Allocate remaining {year - 1} budget
+                </h3>
+                <p className="mt-1 text-xs text-[color:var(--color-text)]/60">
+                  Distribute remaining or overspend across {year} role pools.
+                </p>
+              </div>
+              <div className="text-right">
+                <p className="text-[11px] uppercase tracking-[0.2em] text-[color:var(--color-text)]/55">
+                  Total
+                </p>
+                <p
+                  className={`mt-1 text-lg font-semibold ${
+                    carryoverTotal != null && carryoverTotal < 0
+                      ? "text-red-600"
+                      : "text-emerald-600"
+                  }`}
                 >
+                  {carryoverTotal == null
+                    ? "--"
+                    : `${carryoverTotal.toLocaleString("es-ES", { minimumFractionDigits: 2, maximumFractionDigits: 2 })} €`}
+                </p>
+                <p className="text-xs text-[color:var(--color-text)]/60">
+                  {carryoverTotal == null
+                    ? "No prior-year data"
+                    : carryoverTotal < 0
+                      ? "Overspend"
+                      : "Remaining"}
+                </p>
+              </div>
+            </div>
+
+            {carryoverLoading ? (
+              <div className="text-sm text-[color:var(--color-text)]/70">
+                Loading carry-over...
+              </div>
+            ) : carryoverError ? (
+              <div className="rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-xs text-red-700">
+                {carryoverError}
+              </div>
+            ) : carryoverTotal == null ? (
+              <div className="text-sm text-[color:var(--color-text)]/70">
+                No carry-over available for {year - 1}.
+              </div>
+            ) : (
+              <>
+                <div className="grid grid-cols-[1fr_160px] gap-3 px-2 text-[11px] font-semibold uppercase tracking-[0.2em] text-[color:var(--color-text)]/55">
+                  <span>Role</span>
+                  <span className="text-right">Carry-over (€)</span>
+                </div>
+                <div className="space-y-2">
+                  {draft.roles
+                    .slice()
+                    .sort((a, b) => a.sortOrder - b.sortOrder)
+                    .map((role) => (
+                      <div
+                        key={`carryover-${role.id}`}
+                        className="grid grid-cols-[1fr_160px] items-center gap-3 rounded-lg border border-[color:var(--color-border)] bg-[color:var(--color-surface)] px-3 py-2"
+                      >
+                        <span className="text-sm font-medium text-[color:var(--color-text)]">
+                          {role.roleName || "Untitled role"}
+                        </span>
+                        <input
+                          className="input h-8 w-full text-right"
+                          type="number"
+                          step="1"
+                          value={Number(carryoverDraft[role.id] ?? 0)}
+                          disabled={!canEdit || carryoverSaving}
+                          onChange={(e) =>
+                            setCarryoverDraft((prev) => ({
+                              ...prev,
+                              [role.id]: Number(e.target.value),
+                            }))
+                          }
+                        />
+                      </div>
+                    ))}
+                </div>
+                <div className="flex flex-wrap items-center justify-between gap-3 rounded-lg border border-[color:var(--color-border)] bg-[color:var(--color-surface-2)]/60 px-3 py-2 text-xs">
+                  <div className="text-[color:var(--color-text)]/70">
+                    Allocated:{" "}
+                    <span className="font-semibold text-[color:var(--color-text)]">
+                      {carryoverAllocated.toLocaleString("es-ES", { minimumFractionDigits: 2, maximumFractionDigits: 2 })} €
+                    </span>
+                  </div>
+                  <div
+                    className={`text-[color:var(--color-text)]/70 ${
+                      carryoverHasMismatch ? "text-red-600" : "text-emerald-600"
+                    }`}
+                  >
+                    Remaining:{" "}
+                    <span className="font-semibold">
+                      {carryoverDiff?.toLocaleString("es-ES", { minimumFractionDigits: 2, maximumFractionDigits: 2 })} €
+                    </span>
+                  </div>
+                </div>
+                {carryoverHasMismatch ? (
+                  <div className="rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-800">
+                    Allocate the full carry-over total before saving.
+                  </div>
+                ) : null}
+              </>
+            )}
+          </section>
+        ) : null}
+
+        {activeTab === "roles" ? (
+          <>
+            <div className="flex flex-wrap items-center justify-between gap-3">
+              <div>
+                <h3 className="text-sm font-semibold text-[color:var(--color-text)]">
+                  Roles
+                </h3>
+                <span className="text-xs text-[color:var(--color-text)]/60">
+                  Manage role pools and assignments.
+                </span>
+              </div>
+              <div className="flex items-center gap-2">
+                <input
+                  className="input h-9 min-w-[220px]"
+                  placeholder="Search role..."
+                  value={roleSearch}
+                  onChange={(e) => setRoleSearch(e.target.value)}
+                />
+                {canEdit ? (
+                  <button className="btn-ghost h-9 px-3" onClick={addRole}>
+                    Add role
+                  </button>
+                ) : null}
+              </div>
+            </div>
+
+            <div className="space-y-4">
+              {filteredRoles.length === 0 ? (
+                <div className="text-sm text-[color:var(--color-text)]/70">
+                  No roles match the current search.
+                </div>
+              ) : (
+                filteredRoles.map((role) => {
+                  const rolePool = getRoleAdjustedPool(role);
+                  const roleAssignments = draft.assignments.filter(
+                    (a) => a.roleId === role.id,
+                  );
+                  const isExpanded = expandedRoles[role.id] ?? false;
+                  const memberCount = roleAssignments.length;
+                  const memberLabel =
+                    memberCount === 1 ? "1 member" : `${memberCount} members`;
+                  const roleMode = getRoleMode(role.id);
+                  const isManual = roleMode === "manual";
+                  const roleMismatch = allocationStatus.byRole[role.id];
+                  const memberGridCols = isManual
+                    ? "sm:grid-cols-[minmax(0,1.6fr)_minmax(0,0.8fr)_minmax(0,0.8fr)_minmax(0,0.8fr)_minmax(0,0.4fr)_auto]"
+                    : "sm:grid-cols-[minmax(0,1.6fr)_minmax(0,0.8fr)_minmax(0,0.8fr)_minmax(0,0.4fr)_auto]";
+                  return (
+                    <div
+                      key={role.id}
+                      className="space-y-3 rounded-2xl border border-[color:var(--color-border)] bg-[color:var(--color-surface)]/95 p-4 shadow-sm"
+                    >
                   <div
                     className="flex flex-nowrap items-center gap-3 cursor-pointer"
                     onClick={() => toggleRoleExpanded(role.id)}
@@ -1280,8 +1741,8 @@ export default function CrmBudgetModal({
                                         const amount =
                                           raw === "" ? null : Number.parseFloat(raw);
                                         const allocationPct =
-                                          amount != null && role.poolAmount > 0
-                                            ? roundAmount((amount / role.poolAmount) * 100)
+                                          amount != null && rolePool > 0
+                                            ? roundAmount((amount / rolePool) * 100)
                                             : null;
                                         setDraft((prev) => ({
                                           ...prev,
@@ -1298,10 +1759,10 @@ export default function CrmBudgetModal({
                                       }}
                                     />
                                     <div className="mt-1 text-[10px] text-[color:var(--color-text)]/60 text-right">
-                                      {role.poolAmount > 0
+                                      {rolePool > 0
                                         ? `${roundAmount(
                                             ((assignment.allocationAmount ?? 0) /
-                                              role.poolAmount) *
+                                              rolePool) *
                                               100,
                                           )}%`
                                         : "0%"}
@@ -1374,14 +1835,14 @@ export default function CrmBudgetModal({
                           No members yet.
                         </div>
                       )}
-                    {canEdit ? (
-                      <button
-                        className="btn-ghost h-8 px-2 text-sm text-[color:var(--color-text)]/70 hover:text-[color:var(--color-text)]"
-                        onClick={() => addAssignment(role.id)}
-                        title="Add member"
-                      >
-                        + Add member
-                      </button>
+                      {canEdit ? (
+                        <button
+                          className="btn-ghost h-8 px-2 text-sm text-[color:var(--color-text)]/70 hover:text-[color:var(--color-text)]"
+                          onClick={() => addAssignment(role.id)}
+                          title="Add member"
+                        >
+                          + Add member
+                        </button>
                       ) : null}
                     </div>
                   ) : null}
@@ -1390,6 +1851,8 @@ export default function CrmBudgetModal({
             })
           )}
         </div>
+          </>
+        ) : null}
       </form>
     </ModalShell>
   );

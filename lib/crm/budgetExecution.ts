@@ -58,10 +58,30 @@ export async function getBudgetExecutionData({
     throw new Error(rolesError.message);
   }
 
+  const { data: adjustmentsData, error: adjustmentsError } = await supabase
+    .from("crm_budget_adjustments")
+    .select("role_id, amount")
+    .eq("client_slug", client)
+    .eq("to_year", year)
+    .eq("type", "carryover");
+  if (adjustmentsError) {
+    throw new Error(adjustmentsError.message);
+  }
+
+  const carryoverByRole = new Map<string, number>();
+  (adjustmentsData ?? []).forEach((row: any) => {
+    if (!row?.role_id) return;
+    const amount = Number(row.amount ?? 0);
+    carryoverByRole.set(
+      String(row.role_id),
+      (carryoverByRole.get(String(row.role_id)) ?? 0) + amount,
+    );
+  });
+
   const roles = (rolesData ?? []).map((row: any) => ({
     id: String(row.id),
     roleName: String(row.role_name ?? ""),
-    poolAmount: Number(row.pool_amount ?? 0),
+    poolAmount: Number(row.pool_amount ?? 0) + (carryoverByRole.get(String(row.id)) ?? 0),
     currency: String(row.currency ?? "EUR"),
     isActive: row.is_active ?? true,
   }));

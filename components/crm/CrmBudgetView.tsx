@@ -7,11 +7,15 @@ import { usePathname } from "next/navigation";
 import { useAuth } from "@/context/AuthContext";
 import { ENTITY_OPTIONS } from "@/lib/crm/entities";
 import CrmBudgetModal from "@/components/crm/CrmBudgetModal";
+import Tooltip from "@/components/ui/Tooltip";
 
 type BudgetRole = {
   id: string;
   roleName: string;
   poolAmount: number;
+  basePoolAmount?: number;
+  carryoverAmount?: number;
+  adjustedPoolAmount?: number;
   currency: string;
   sortOrder: number;
   year: number;
@@ -45,6 +49,10 @@ type BudgetResponse = {
   unmappedSpend?: number;
   spendCurrency?: string | null;
   entityByPerson?: Record<string, string>;
+  dailyRatesByPersonId?: Record<string, number>;
+  carryoverByRole?: Record<string, number>;
+  carryoverTotal?: number;
+  carryoverFromYear?: number | null;
 };
 
 const UNASSIGNED_ENTITY = "Unassigned";
@@ -74,6 +82,14 @@ const formatCurrency = (amount: number, currency: string) => {
   } catch {
     return `${amount.toFixed(2)} ${currency}`;
   }
+};
+
+const formatDays = (value?: number | null) => {
+  if (!Number.isFinite(value)) return "--";
+  return Number(value).toLocaleString("es-ES", {
+    minimumFractionDigits: 2,
+    maximumFractionDigits: 2,
+  });
 };
 
 const formatPercent = (value: number) => {
@@ -117,6 +133,12 @@ const kpiValueClass = (tone: "danger" | "warn" | "ok") => {
   return "text-[color:var(--color-text)]";
 };
 
+const getRolePoolAmount = (role: BudgetRole) =>
+  Number(
+    role.adjustedPoolAmount ??
+      (Number(role.poolAmount ?? 0) + Number(role.carryoverAmount ?? 0)),
+  );
+
 export default function CrmBudgetView() {
   const pathname = usePathname();
   const segments = pathname?.split("/").filter(Boolean) ?? [];
@@ -156,6 +178,7 @@ export default function CrmBudgetView() {
   const spendByPerson = data?.spendByPerson ?? {};
   const unmappedSpend = Number(data?.unmappedSpend ?? 0);
   const entityByPerson = data?.entityByPerson ?? {};
+  const dailyRatesByPersonId = data?.dailyRatesByPersonId ?? {};
 
   const peopleById = useMemo(() => {
     const map = new Map<string, Person>();
@@ -185,7 +208,7 @@ export default function CrmBudgetView() {
     }
   }, [entityFilter, entityOptions]);
 
-  const { roleSummaries, personSummaries, totals, missingEntityPeople } = useMemo(() => {
+  const { roleSummaries, personSummaries, totals, missingEntityPeople, missingRatePeople } = useMemo(() => {
     const yearStart = new Date(Date.UTC(year, 0, 1));
     const yearEnd = new Date(Date.UTC(year, 11, 31));
     const hasEntityFilter = Boolean(entityFilter);
@@ -193,12 +216,15 @@ export default function CrmBudgetView() {
       entityByPerson[personId] ?? UNASSIGNED_ENTITY;
     const isEntityMatch = (personId: string) =>
       !hasEntityFilter || entityForPerson(personId) === entityFilter;
+    const dailyRateForPerson = (personId: string) =>
+      Number(dailyRatesByPersonId[personId] ?? 0);
 
     const activeRoles = roles.filter((r) => r.isActive !== false);
     const activeAssignments = assignments.filter((a) => a.isActive !== false);
 
     const roleSummaries = activeRoles
       .map((role) => {
+      const rolePoolAmount = getRolePoolAmount(role);
       const roleAssignments = activeAssignments.filter((a) => a.roleId === role.id);
       const memberMap = new Map<string, { personId: string; activeDays: number; budget: number }>();
       let totalActiveDays = 0;
@@ -220,7 +246,7 @@ export default function CrmBudgetView() {
           assignment.allocationAmount != null
             ? Number(assignment.allocationAmount)
             : assignment.allocationPct != null
-              ? role.poolAmount * (Number(assignment.allocationPct) / 100)
+              ? rolePoolAmount * (Number(assignment.allocationPct) / 100)
               : 0;
         if (existing) {
           existing.activeDays += activeDays;
@@ -241,7 +267,7 @@ export default function CrmBudgetView() {
           if (totalActiveDays <= 0) {
             entry.budget = 0;
           } else {
-            entry.budget = role.poolAmount * (entry.activeDays / totalActiveDays);
+            entry.budget = rolePoolAmount * (entry.activeDays / totalActiveDays);
           }
         });
       }
@@ -252,6 +278,7 @@ export default function CrmBudgetView() {
           ...member,
           displayName: person?.displayName || "Unknown",
           entity: entityForPerson(member.personId),
+          dailyRate: dailyRateForPerson(member.personId),
         };
       });
 
@@ -259,29 +286,59 @@ export default function CrmBudgetView() {
         ? members.filter((member) => isEntityMatch(member.personId))
         : members;
 
-      const spent = visibleMembers.reduce((acc, member) => {
-        const value = spendByPerson[member.personId] ?? 0;
-        return acc + value;
-      }, 0);
+      const membersWithSpend = visibleMembers.map((member) => ({
+        ...member,
+        spent: spendByPerson[member.personId] ?? 0,
+      }));
+      const spent = membersWithSpend.reduce((acc, member) => acc + member.spent, 0);
 
-      const allocated = visibleMembers.reduce((acc, member) => acc + member.budget, 0);
+      const allocated = membersWithSpend.reduce((acc, member) => acc + member.budget, 0);
+      const dayTotals = membersWithSpend.reduce(
+        (acc, member) => {
+          if (member.dailyRate > 0) {
+            acc.pool += member.budget / member.dailyRate;
+            acc.allocated += member.budget / member.dailyRate;
+            acc.spent += member.spent / member.dailyRate;
+            acc.remaining += (member.budget - member.spent) / member.dailyRate;
+          } else {
+            acc.missingRates += 1;
+          }
+          return acc;
+        },
+        { pool: 0, allocated: 0, spent: 0, remaining: 0, missingRates: 0 },
+      );
       if (hasEntityFilter && allocated === 0 && spent === 0) {
         return null;
       }
-      const poolAmount = hasEntityFilter ? allocated : role.poolAmount;
+      const poolAmount = hasEntityFilter ? allocated : rolePoolAmount;
       const remaining = poolAmount - spent;
       const utilization = poolAmount > 0 ? spent / poolAmount : 0;
+      const averageRate =
+        dayTotals.allocated > 0 ? allocated / dayTotals.allocated : 0;
+      const allRatesMissing =
+        membersWithSpend.length > 0 &&
+        dayTotals.missingRates === membersWithSpend.length;
+      const poolDays = allRatesMissing
+        ? null
+        : averageRate > 0
+          ? poolAmount / averageRate
+          : dayTotals.pool;
 
       return {
         roleId: role.id,
-        roleName: role.roleName,
-        poolAmount,
-        currency: role.currency,
-        members: visibleMembers,
-        allocated,
+          roleName: role.roleName,
+          poolAmount,
+          currency: role.currency,
+          members: membersWithSpend,
+          allocated,
         spent,
         remaining,
         utilization,
+        poolDays,
+        allocatedDays: allRatesMissing ? null : dayTotals.allocated,
+        spentDays: allRatesMissing ? null : dayTotals.spent,
+        remainingDays: allRatesMissing ? null : dayTotals.remaining,
+        missingRateCount: dayTotals.missingRates,
       };
     })
     .filter(Boolean) as Array<{
@@ -289,11 +346,24 @@ export default function CrmBudgetView() {
       roleName: string;
       poolAmount: number;
       currency: string;
-      members: Array<{ personId: string; activeDays: number; budget: number; displayName: string; entity: string }>;
+      members: Array<{
+        personId: string;
+        activeDays: number;
+        budget: number;
+        displayName: string;
+        entity: string;
+        dailyRate: number;
+        spent: number;
+      }>;
       allocated: number;
       spent: number;
       remaining: number;
       utilization: number;
+      poolDays: number | null;
+      allocatedDays: number | null;
+      spentDays: number | null;
+      remainingDays: number | null;
+      missingRateCount: number;
     }>;
 
     const budgetByPerson: Record<string, number> = {};
@@ -315,26 +385,37 @@ export default function CrmBudgetView() {
       const entity = entityByPerson[personId];
       return !entity;
     });
+    const missingRatePeople = Array.from(personIds).filter((personId) => {
+      const rate = dailyRateForPerson(personId);
+      const hasMoney =
+        (budgetByPerson[personId] ?? 0) > 0 || (spendByPerson[personId] ?? 0) > 0;
+      return hasMoney && rate <= 0;
+    });
 
     const personSummaries = Array.from(personIds)
       .filter((personId) => isEntityMatch(personId))
       .map((personId) => {
-      const person = peopleById.get(personId);
-      const budget = budgetByPerson[personId] ?? 0;
-      const spent = spendByPerson[personId] ?? 0;
-      const remaining = budget - spent;
-      const utilization = budget > 0 ? spent / budget : 0;
-      return {
-        personId,
-        displayName: person?.displayName || "Unknown",
-        roles: rolesByPerson[personId] ?? [],
-        entity: entityForPerson(personId),
-        budget,
-        spent,
-        remaining,
-        utilization,
-      };
-    })
+        const person = peopleById.get(personId);
+        const budget = budgetByPerson[personId] ?? 0;
+        const spent = spendByPerson[personId] ?? 0;
+        const remaining = budget - spent;
+        const utilization = budget > 0 ? spent / budget : 0;
+        const dailyRate = dailyRateForPerson(personId);
+        return {
+          personId,
+          displayName: person?.displayName || "Unknown",
+          roles: rolesByPerson[personId] ?? [],
+          entity: entityForPerson(personId),
+          budget,
+          spent,
+          remaining,
+          utilization,
+          dailyRate,
+          budgetDays: dailyRate > 0 ? budget / dailyRate : null,
+          spentDays: dailyRate > 0 ? spent / dailyRate : null,
+          remainingDays: dailyRate > 0 ? remaining / dailyRate : null,
+        };
+      })
       .sort((a, b) => b.budget - a.budget);
 
     const budgetTotal = hasEntityFilter
@@ -342,7 +423,7 @@ export default function CrmBudgetView() {
           if (!isEntityMatch(personId)) return acc;
           return acc + value;
         }, 0)
-      : activeRoles.reduce((acc, role) => acc + role.poolAmount, 0);
+      : activeRoles.reduce((acc, role) => acc + getRolePoolAmount(role), 0);
     const spentTotal = Object.entries(spendByPerson).reduce((acc, [personId, value]) => {
       if (!isEntityMatch(personId)) return acc;
       return acc + value;
@@ -354,6 +435,7 @@ export default function CrmBudgetView() {
       roleSummaries,
       personSummaries,
       missingEntityPeople,
+      missingRatePeople,
       totals: {
         budgetTotal,
         spentTotal,
@@ -361,13 +443,28 @@ export default function CrmBudgetView() {
         utilizationTotal,
       },
     };
-  }, [roles, assignments, peopleById, spendByPerson, year, entityByPerson, entityFilter]);
+  }, [
+    roles,
+    assignments,
+    peopleById,
+    spendByPerson,
+    year,
+    entityByPerson,
+    entityFilter,
+    dailyRatesByPersonId,
+  ]);
 
   const missingEntityLabels = useMemo(() => {
     return missingEntityPeople
       .map((personId) => peopleById.get(personId)?.displayName || "Unknown")
       .sort((a, b) => a.localeCompare(b));
   }, [missingEntityPeople, peopleById]);
+
+  const missingRateLabels = useMemo(() => {
+    return missingRatePeople
+      .map((personId) => peopleById.get(personId)?.displayName || "Unknown")
+      .sort((a, b) => a.localeCompare(b));
+  }, [missingRatePeople, peopleById]);
 
   const groupedPersonRows = useMemo(
     () =>
@@ -377,7 +474,16 @@ export default function CrmBudgetView() {
             const spent = spendByPerson[member.personId] ?? 0;
             const remaining = member.budget - spent;
             const utilization = member.budget > 0 ? spent / member.budget : 0;
-            return { ...member, spent, remaining, utilization };
+            const dailyRate = member.dailyRate ?? 0;
+            return {
+              ...member,
+              spent,
+              remaining,
+              utilization,
+              budgetDays: dailyRate > 0 ? member.budget / dailyRate : null,
+              spentDays: dailyRate > 0 ? spent / dailyRate : null,
+              remainingDays: dailyRate > 0 ? remaining / dailyRate : null,
+            };
           })
           .sort((a, b) => a.displayName.localeCompare(b.displayName));
         return { roleName: role.roleName, members };
@@ -526,6 +632,14 @@ export default function CrmBudgetView() {
             {missingEntityLabels.length > 6 ? ` +${missingEntityLabels.length - 6} more` : ""}
           </div>
         ) : null}
+        {missingRateLabels.length > 0 ? (
+          <div className="mt-3 rounded-xl border border-amber-200 bg-amber-50 px-4 py-2 text-sm text-amber-900">
+            Missing daily rates for {missingRateLabels.length} people:{" "}
+            {missingRateLabels.slice(0, 6).join(", ")}
+            {missingRateLabels.length > 6 ? ` +${missingRateLabels.length - 6} more` : ""}
+            . Days may be partial.
+          </div>
+        ) : null}
       </header>
 
       <section className="rounded-3xl border border-[color:var(--color-border)] bg-[color:var(--color-surface)] shadow-sm">
@@ -555,18 +669,103 @@ export default function CrmBudgetView() {
               ) : (
                 roleSummaries.map((role) => (
                   <tr key={role.roleId}>
-                    <td className="px-4 py-3 font-semibold">{role.roleName}</td>
-                    <td className="px-4 py-3 text-right">
-                      {formatCurrency(role.poolAmount, role.currency)}
+                    <td className="px-4 py-3">
+                      <div className="flex flex-wrap items-center gap-2">
+                        <span className="font-semibold">{role.roleName}</span>
+                        <Tooltip
+                          content={
+                            role.members.length ? (
+                              <div className="space-y-1">
+                                <div className="text-xs font-semibold text-[color:var(--color-text)]">
+                                  Members ({role.members.length})
+                                </div>
+                                {role.members
+                                  .slice()
+                                  .sort((a, b) => a.displayName.localeCompare(b.displayName))
+                                  .slice(0, 12)
+                                  .map((member) => (
+                                    <div key={member.personId} className="text-xs text-[color:var(--color-text)]/80">
+                                      {member.displayName} · {member.entity}
+                                    </div>
+                                  ))}
+                                {role.members.length > 12 ? (
+                                  <div className="text-xs text-[color:var(--color-text)]/60">
+                                    +{role.members.length - 12} more
+                                  </div>
+                                ) : null}
+                              </div>
+                            ) : (
+                              "No members assigned."
+                            )
+                          }
+                          side="top"
+                        >
+                          <span className="badge-field inline-flex cursor-default">
+                            {role.members.length}{" "}
+                            {role.members.length === 1 ? "member" : "members"}
+                          </span>
+                        </Tooltip>
+                      </div>
                     </td>
                     <td className="px-4 py-3 text-right">
-                      {formatCurrency(role.allocated, role.currency)}
+                      <div className="flex flex-col items-end">
+                        <span>{formatCurrency(role.poolAmount, role.currency)}</span>
+                        <span
+                          className="text-xs text-[color:var(--color-text)]/60"
+                          title={
+                            role.missingRateCount
+                              ? `${role.missingRateCount} member(s) missing rates; days may be partial.`
+                              : undefined
+                          }
+                        >
+                          {formatDays(role.poolDays)} d
+                        </span>
+                      </div>
                     </td>
                     <td className="px-4 py-3 text-right">
-                      {formatCurrency(role.spent, role.currency)}
+                      <div className="flex flex-col items-end">
+                        <span>{formatCurrency(role.allocated, role.currency)}</span>
+                        <span
+                          className="text-xs text-[color:var(--color-text)]/60"
+                          title={
+                            role.missingRateCount
+                              ? `${role.missingRateCount} member(s) missing rates; days may be partial.`
+                              : undefined
+                          }
+                        >
+                          {formatDays(role.allocatedDays)} d
+                        </span>
+                      </div>
+                    </td>
+                    <td className="px-4 py-3 text-right">
+                      <div className="flex flex-col items-end">
+                        <span>{formatCurrency(role.spent, role.currency)}</span>
+                        <span
+                          className="text-xs text-[color:var(--color-text)]/60"
+                          title={
+                            role.missingRateCount
+                              ? `${role.missingRateCount} member(s) missing rates; days may be partial.`
+                              : undefined
+                          }
+                        >
+                          {formatDays(role.spentDays)} d
+                        </span>
+                      </div>
                     </td>
                     <td className={`px-4 py-3 text-right ${remainingClass(role.remaining)}`}>
-                      {formatCurrency(role.remaining, role.currency)}
+                      <div className="flex flex-col items-end">
+                        <span>{formatCurrency(role.remaining, role.currency)}</span>
+                        <span
+                          className="text-xs text-[color:var(--color-text)]/60"
+                          title={
+                            role.missingRateCount
+                              ? `${role.missingRateCount} member(s) missing rates; days may be partial.`
+                              : undefined
+                          }
+                        >
+                          {formatDays(role.remainingDays)} d
+                        </span>
+                      </div>
                     </td>
                     <td className="px-4 py-3 text-right">
                       <div className="flex flex-col items-end gap-1">
@@ -650,13 +849,37 @@ export default function CrmBudgetView() {
                             {member.entity}
                           </td>
                           <td className="px-3 py-2 text-right">
-                            {formatCurrency(member.budget, budgetCurrency)}
+                            <div className="flex flex-col items-end">
+                              <span>{formatCurrency(member.budget, budgetCurrency)}</span>
+                              <span
+                                className="text-xs text-[color:var(--color-text)]/60"
+                                title={member.dailyRate > 0 ? undefined : "Missing daily rate."}
+                              >
+                                {formatDays(member.budgetDays)} d
+                              </span>
+                            </div>
                           </td>
                           <td className="px-3 py-2 text-right">
-                            {formatCurrency(member.spent, budgetCurrency)}
+                            <div className="flex flex-col items-end">
+                              <span>{formatCurrency(member.spent, budgetCurrency)}</span>
+                              <span
+                                className="text-xs text-[color:var(--color-text)]/60"
+                                title={member.dailyRate > 0 ? undefined : "Missing daily rate."}
+                              >
+                                {formatDays(member.spentDays)} d
+                              </span>
+                            </div>
                           </td>
                           <td className={`px-3 py-2 text-right ${remainingClass(member.remaining)}`}>
-                            {formatCurrency(member.remaining, budgetCurrency)}
+                            <div className="flex flex-col items-end">
+                              <span>{formatCurrency(member.remaining, budgetCurrency)}</span>
+                              <span
+                                className="text-xs text-[color:var(--color-text)]/60"
+                                title={member.dailyRate > 0 ? undefined : "Missing daily rate."}
+                              >
+                                {formatDays(member.remainingDays)} d
+                              </span>
+                            </div>
                           </td>
                           <td className="px-3 py-2 text-right">
                             <div className="flex flex-col items-end gap-1">

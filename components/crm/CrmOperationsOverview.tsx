@@ -3,6 +3,12 @@
 
 import Link from "next/link";
 
+type CrmClientAction = {
+  label: string;
+  href: string;
+  variant: "primary" | "ghost";
+};
+
 type CrmClientCard = {
   name: string;
   slug: string;
@@ -10,63 +16,84 @@ type CrmClientCard = {
   description: string;
   kpis?: { label: string; value: string }[];
   logoSrc?: string;
+  actions?: CrmClientAction[];
 };
 
 const clients: CrmClientCard[] = [
   {
-    name: "EMG · Europcar Mobility Group",
+    name: "EMG - Europcar Mobility Group",
     slug: "emg",
     status: "active",
     description: "Campaign and ticket reporting for EMG.",
     kpis: [
-      { label: "Campaigns (month)", value: "—" },
-      { label: "Ticket reporting", value: "—" },
+      { label: "Campaigns (month)", value: "--" },
+      { label: "Ticket reporting", value: "--" },
     ],
     logoSrc: "/logos/emg-logo.png",
+    actions: [
+      { label: "Campaign Reporting", href: "/crm/emg/campaigns", variant: "primary" },
+      { label: "Ticket Reporting", href: "/crm/emg/ticket-reporting", variant: "ghost" },
+    ],
   },
   {
     name: "Bouygues Telecom",
     slug: "bouygues",
     status: "onboarding",
-    description: "CRM reporting for Bouygues Telecom.",
+    description: "Effort tracking and budget setup for Bouygues Telecom.",
     kpis: [
-      { label: "Campaigns (month)", value: "—" },
-      { label: "Ticket reporting", value: "—" },
+      { label: "Effort entries", value: "--" },
+      { label: "Budget roles", value: "--" },
     ],
     logoSrc: "/logos/bouygues-logo.png",
+    actions: [
+      { label: "Manual Efforts", href: "/crm/bouygues/manual-efforts", variant: "primary" },
+      { label: "Budget", href: "/crm/bouygues/budget", variant: "ghost" },
+    ],
   },
   {
     name: "Taittinger",
     slug: "taittinger",
     status: "onboarding",
-    description: "CRM reporting for Taittinger.",
+    description: "Effort tracking and budget setup for Taittinger.",
     kpis: [
-      { label: "Campaigns (month)", value: "—" },
-      { label: "Ticket reporting", value: "—" },
+      { label: "Effort entries", value: "--" },
+      { label: "Budget roles", value: "--" },
     ],
     logoSrc: "/logos/taittinger-logo.png",
+    actions: [
+      { label: "Manual Efforts", href: "/crm/taittinger/manual-efforts", variant: "primary" },
+      { label: "Budget", href: "/crm/taittinger/budget", variant: "ghost" },
+    ],
   },
   {
     name: "Ponant",
     slug: "ponant",
     status: "onboarding",
-    description: "CRM reporting for Ponant.",
+    description: "Effort tracking and budget setup for Ponant.",
     kpis: [
-      { label: "Campaigns (month)", value: "—" },
-      { label: "Ticket reporting", value: "—" },
+      { label: "Effort entries", value: "--" },
+      { label: "Budget roles", value: "--" },
     ],
     logoSrc: "/logos/ponant-logo.png",
+    actions: [
+      { label: "Manual Efforts", href: "/crm/ponant/manual-efforts", variant: "primary" },
+      { label: "Budget", href: "/crm/ponant/budget", variant: "ghost" },
+    ],
   },
   {
     name: "Petit Forestier",
     slug: "petit-forestier",
     status: "onboarding",
-    description: "CRM reporting for Petit Forestier.",
+    description: "Effort tracking and budget setup for Petit Forestier.",
     kpis: [
-      { label: "Campaigns (month)", value: "—" },
-      { label: "Ticket reporting", value: "—" },
+      { label: "Effort entries", value: "--" },
+      { label: "Budget roles", value: "--" },
     ],
     logoSrc: "/logos/petit-forestier.png",
+    actions: [
+      { label: "Manual Efforts", href: "/crm/petit-forestier/manual-efforts", variant: "primary" },
+      { label: "Budget", href: "/crm/petit-forestier/budget", variant: "ghost" },
+    ],
   },
   {
     name: "SFR",
@@ -74,10 +101,14 @@ const clients: CrmClientCard[] = [
     status: "onboarding",
     description: "CRM reporting for SFR.",
     kpis: [
-      { label: "Campaigns (month)", value: "—" },
-      { label: "Ticket reporting", value: "—" },
+      { label: "Campaigns (month)", value: "--" },
+      { label: "Ticket reporting", value: "--" },
     ],
     logoSrc: "/logos/sfr-logo.png",
+    actions: [
+      { label: "Campaign Reporting", href: "/crm/sfr/campaigns", variant: "primary" },
+      { label: "Ticket Reporting", href: "/crm/sfr/ticket-reporting", variant: "ghost" },
+    ],
   },
   // Add more clients here as they onboard
 ];
@@ -89,7 +120,7 @@ export default function CrmOperationsOverview() {
         <p className="text-xs uppercase tracking-[0.3em] text-[color:var(--color-text)]/65">CRM Operations</p>
         <h1 className="mt-2 text-3xl font-semibold text-[color:var(--color-text)]">Clients</h1>
         <p className="mt-3 max-w-3xl text-sm text-[color:var(--color-text)]/75">
-          Select a client to access Campaign Reporting and Ticket Reporting. More clients will appear here as they join CRM Ops.
+          Select a client to access effort tracking and budget modules. More clients will appear here as they join CRM Ops.
         </p>
         <div className="mt-4 flex flex-wrap gap-2 text-sm">
           <Link href="/" className="btn-ghost">
@@ -146,14 +177,19 @@ export default function CrmOperationsOverview() {
                 ))}
               </div>
             ) : null}
-            <div className="mt-auto flex flex-wrap gap-2">
-              <Link href={`/crm/${client.slug}/campaigns`} className="btn-primary">
-                Campaign Reporting
-              </Link>
-              <Link href={`/crm/${client.slug}/ticket-reporting`} className="btn-ghost">
-                Ticket Reporting
-              </Link>
-            </div>
+            {client.actions?.length ? (
+              <div className="mt-auto flex flex-wrap gap-2">
+                {client.actions.map((action) => (
+                  <Link
+                    key={action.href}
+                    href={action.href}
+                    className={action.variant === "primary" ? "btn-primary" : "btn-ghost"}
+                  >
+                    {action.label}
+                  </Link>
+                ))}
+              </div>
+            ) : null}
           </article>
         ))}
       </section>

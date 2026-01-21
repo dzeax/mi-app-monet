@@ -2,6 +2,7 @@
 
 import { useMemo, useRef, useState } from "react";
 import MiniModal from "@/components/ui/MiniModal";
+import Combobox from "@/components/ui/Combobox";
 
 export type CampaignUnitsBulkPatch = {
   sendDate?: string;
@@ -37,6 +38,11 @@ export default function CrmBulkEditUnitsModal({
   const [status, setStatus] = useState("");
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
+
+  const ownerOptionItems = useMemo(
+    () => ownerOptions.map((option) => ({ value: option, label: option })),
+    [ownerOptions],
+  );
 
   const canSubmit = useMemo(() => {
     if (saving) return false;
@@ -86,6 +92,10 @@ export default function CrmBulkEditUnitsModal({
 
     if (patch.owner != null && patch.owner.trim() === "") {
       setError("Owner is required.");
+      return;
+    }
+    if (patch.owner && !ownerOptions.includes(patch.owner)) {
+      setError("Owner must be selected from the list.");
       return;
     }
 
@@ -209,19 +219,17 @@ export default function CrmBulkEditUnitsModal({
             />
             <div className="flex-1">
               <label className="text-xs font-medium text-[color:var(--color-text)]/70">Owner</label>
-              <select
-                className="input h-10 w-full"
-                value={owner}
-                onChange={(e) => setOwner(e.target.value)}
-                disabled={!updateOwner || saving}
-              >
-                <option value="">{updateOwner ? "Select owner" : "Keep current"}</option>
-                {ownerOptions.map((o) => (
-                  <option key={o} value={o}>
-                    {o}
-                  </option>
-                ))}
-              </select>
+              <Combobox
+                ariaLabel="Owner"
+                className={!updateOwner || saving ? "pointer-events-none opacity-60" : undefined}
+                placeholder={updateOwner ? "Select owner" : "Keep current"}
+                options={ownerOptionItems}
+                value={updateOwner ? owner : ""}
+                onChange={(value) => {
+                  if (!updateOwner || saving) return;
+                  setOwner(value);
+                }}
+              />
             </div>
           </div>
 

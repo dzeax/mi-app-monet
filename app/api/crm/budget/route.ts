@@ -61,6 +61,31 @@ export async function GET(request: Request) {
       return NextResponse.json({ error: rolesError.message }, { status: 500 });
     }
 
+    const { data: adjustmentsData, error: adjustmentsError } = await supabase
+      .from("crm_budget_adjustments")
+      .select("role_id, amount, from_year, type")
+      .eq("client_slug", client)
+      .eq("to_year", year)
+      .eq("type", "carryover");
+    if (adjustmentsError) {
+      return NextResponse.json({ error: adjustmentsError.message }, { status: 500 });
+    }
+
+    const carryoverByRole: Record<string, number> = {};
+    const carryoverFromYears = new Set<number>();
+    (adjustmentsData ?? []).forEach((row: any) => {
+      if (!row?.role_id) return;
+      const amount = Number(row.amount ?? 0);
+      carryoverByRole[String(row.role_id)] =
+        (carryoverByRole[String(row.role_id)] ?? 0) + amount;
+      if (Number.isFinite(Number(row.from_year))) {
+        carryoverFromYears.add(Number(row.from_year));
+      }
+    });
+    const carryoverTotal = Object.values(carryoverByRole).reduce((acc, value) => acc + value, 0);
+    const carryoverFromYear =
+      carryoverFromYears.size === 1 ? Array.from(carryoverFromYears)[0] : null;
+
     const roleIds = (rolesData ?? []).map((r: any) => r.id);
     const { data: assignmentsData, error: assignmentsError } = roleIds.length
       ? await supabase
@@ -132,6 +157,10 @@ export async function GET(request: Request) {
         rateByOwner.set(normalizeKey(row.owner), { dailyRate, currency });
       }
       if (currency) currencySet.add(currency);
+    });
+    const dailyRatesByPersonId: Record<string, number> = {};
+    rateByPerson.forEach((entry, personId) => {
+      dailyRatesByPersonId[personId] = entry.dailyRate;
     });
 
     const contribRows = await fetchPaged<any>((from, to) =>
@@ -213,16 +242,23 @@ export async function GET(request: Request) {
     });
 
     const roles =
-      rolesData?.map((row: any) => ({
-        id: String(row.id),
-        clientSlug: row.client_slug,
-        year: Number(row.year),
-        roleName: String(row.role_name ?? ""),
-        poolAmount: Number(row.pool_amount ?? 0),
-        currency: String(row.currency ?? "EUR"),
-        sortOrder: Number(row.sort_order ?? 0),
-        isActive: row.is_active ?? true,
-      })) ?? [];
+      rolesData?.map((row: any) => {
+        const basePool = Number(row.pool_amount ?? 0);
+        const carryoverAmount = carryoverByRole[String(row.id)] ?? 0;
+        return {
+          id: String(row.id),
+          clientSlug: row.client_slug,
+          year: Number(row.year),
+          roleName: String(row.role_name ?? ""),
+          poolAmount: basePool,
+          basePoolAmount: basePool,
+          carryoverAmount,
+          adjustedPoolAmount: basePool + carryoverAmount,
+          currency: String(row.currency ?? "EUR"),
+          sortOrder: Number(row.sort_order ?? 0),
+          isActive: row.is_active ?? true,
+        };
+      }) ?? [];
 
     const assignments =
       assignmentsData?.map((row: any) => ({
@@ -258,6 +294,10 @@ export async function GET(request: Request) {
       unmappedSpend,
       spendCurrency,
       entityByPerson,
+      dailyRatesByPersonId,
+      carryoverByRole,
+      carryoverTotal,
+      carryoverFromYear,
     });
   } catch (err) {
     const msg = err instanceof Error ? err.message : "Unexpected error";

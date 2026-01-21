@@ -74,6 +74,86 @@ export const CRM_CLIENTS: CrmClient[] = [
       },
     ],
   },
+  {
+    slug: 'bouygues',
+    name: 'Bouygues Telecom',
+    modules: [
+      {
+        slug: 'manual-efforts',
+        type: 'manual_efforts',
+        label: 'Manual Efforts',
+        description: 'Non-ticket effort logging for CRM teams.',
+        icon: 'chart',
+      },
+      {
+        slug: 'budget',
+        type: 'budget',
+        label: 'Budget',
+        description: 'Annual budget planning and tracking.',
+        icon: 'chart',
+      },
+    ],
+  },
+  {
+    slug: 'taittinger',
+    name: 'Taittinger',
+    modules: [
+      {
+        slug: 'manual-efforts',
+        type: 'manual_efforts',
+        label: 'Manual Efforts',
+        description: 'Non-ticket effort logging for CRM teams.',
+        icon: 'chart',
+      },
+      {
+        slug: 'budget',
+        type: 'budget',
+        label: 'Budget',
+        description: 'Annual budget planning and tracking.',
+        icon: 'chart',
+      },
+    ],
+  },
+  {
+    slug: 'ponant',
+    name: 'Ponant',
+    modules: [
+      {
+        slug: 'manual-efforts',
+        type: 'manual_efforts',
+        label: 'Manual Efforts',
+        description: 'Non-ticket effort logging for CRM teams.',
+        icon: 'chart',
+      },
+      {
+        slug: 'budget',
+        type: 'budget',
+        label: 'Budget',
+        description: 'Annual budget planning and tracking.',
+        icon: 'chart',
+      },
+    ],
+  },
+  {
+    slug: 'petit-forestier',
+    name: 'Petit Forestier',
+    modules: [
+      {
+        slug: 'manual-efforts',
+        type: 'manual_efforts',
+        label: 'Manual Efforts',
+        description: 'Non-ticket effort logging for CRM teams.',
+        icon: 'chart',
+      },
+      {
+        slug: 'budget',
+        type: 'budget',
+        label: 'Budget',
+        description: 'Annual budget planning and tracking.',
+        icon: 'chart',
+      },
+    ],
+  },
 ];
 
 export function getCrmClient(slug?: string | null) {

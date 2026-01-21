@@ -586,15 +586,28 @@ export default function CrmCampaignReportingView() {
   }, [rows, rowMatchesFilters, resolveOwnerKey, labelForOwnerKey]);
 
   const bulkEditOwnerOptions = useMemo(() => {
-    const set = new Set<string>();
+    const canonicalLabels = peopleDirectory
+      .map((person) => String(person.displayName ?? "").trim())
+      .filter((label) => label.length > 0);
+    if (canonicalLabels.length > 0) {
+      return Array.from(new Set(canonicalLabels)).sort((a, b) => a.localeCompare(b));
+    }
+    const keySet = new Set<string>();
     Object.values(ratesByYear).forEach((bucket) => {
-      Object.keys(bucket.byOwner).forEach((o) => set.add(o));
+      Object.keys(bucket.byOwner).forEach((owner) => {
+        const key = resolveOwnerKey(owner);
+        keySet.add(key || owner);
+      });
     });
     rows.forEach((r) => {
-      if (r.owner) set.add(r.owner);
+      const key = resolveOwnerKey(r.owner, r.personId);
+      if (key) keySet.add(key);
     });
-    return Array.from(set).sort((a, b) => a.localeCompare(b));
-  }, [ratesByYear, rows]);
+    const labels = Array.from(keySet)
+      .map((key) => labelForOwnerKey(key))
+      .filter((label) => label.trim().length > 0);
+    return Array.from(new Set(labels)).sort((a, b) => a.localeCompare(b));
+  }, [peopleDirectory, ratesByYear, rows, resolveOwnerKey, labelForOwnerKey]);
 
   const bulkEditStatusOptions = useMemo(() => {
     const set = new Set<string>(["Planned", "Done", "Sent"]);

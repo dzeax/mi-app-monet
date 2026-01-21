@@ -2,6 +2,7 @@
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
+import { Check } from "lucide-react";
 import MiniModal from "@/components/ui/MiniModal";
 import { showError, showSuccess } from "@/utils/toast";
 
@@ -42,17 +43,172 @@ type Props = {
   onClose: () => void;
 };
 
+type RateRowProps = {
+  label: string;
+  initialRate: number;
+  personId: string;
+  isInactive: boolean;
+  onSave: (nextRate: number) => Promise<void>;
+};
+
+type OrphanRateRowProps = {
+  row: OrphanRow;
+  candidates: Person[];
+  onLink: (owner: string, personId: string, rate: number) => Promise<void>;
+};
+
+const getInitials = (label: string) => {
+  const parts = label.trim().split(/\s+/).filter(Boolean);
+  if (parts.length === 0) return "--";
+  if (parts.length === 1) return parts[0].slice(0, 2).toUpperCase();
+  return `${parts[0][0]}${parts[parts.length - 1][0]}`.toUpperCase();
+};
+
+function RateRow({ label, initialRate, personId, isInactive, onSave }: RateRowProps) {
+  const [value, setValue] = useState<number>(Number(initialRate ?? 0));
+  const [status, setStatus] = useState<"idle" | "saving" | "success" | "error">("idle");
+
+  useEffect(() => {
+    setValue(Number(initialRate ?? 0));
+  }, [initialRate]);
+
+  useEffect(() => {
+    if (status !== "success") return;
+    const timer = window.setTimeout(() => setStatus("idle"), 2000);
+    return () => window.clearTimeout(timer);
+  }, [status]);
+
+  const handleCommit = async () => {
+    const nextValue = Number.isFinite(value) ? value : 0;
+    if (Number(nextValue) === Number(initialRate ?? 0)) return;
+    setStatus("saving");
+    try {
+      await onSave(nextValue);
+      setStatus("success");
+    } catch {
+      setStatus("error");
+    }
+  };
+
+  return (
+    <div className="grid grid-cols-[minmax(0,1fr)_160px_40px] items-center gap-4 border-b border-[var(--color-border)] px-4 py-3 hover:bg-[var(--color-surface-2)]/60">
+      <div className={`flex items-center gap-3 ${isInactive ? "opacity-60" : ""}`}>
+        <span className="user-button__avatar">
+          <span className="user-button__initials">{getInitials(label)}</span>
+        </span>
+        <div className="min-w-0">
+          <div className="text-sm font-semibold text-[color:var(--color-text)]">{label}</div>
+          {isInactive ? <span className="badge-field mt-1 inline-flex">INACTIVE</span> : null}
+        </div>
+      </div>
+      <div>
+        <div className="relative w-full">
+          <span className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-sm text-[color:var(--color-text)]/50">
+            €
+          </span>
+          <input
+            type="number"
+            step="1"
+            min="0"
+            className="input h-9 w-full pl-8 text-right"
+            value={Number.isFinite(value) ? value : 0}
+            onChange={(e) => setValue(Number(e.target.value))}
+            onBlur={handleCommit}
+            onKeyDown={(e) => {
+              if (e.key === "Enter") {
+                e.preventDefault();
+                handleCommit();
+              }
+            }}
+            data-person-id={personId}
+          />
+        </div>
+      </div>
+      <div className="flex items-center justify-center">
+        {status === "saving" ? (
+          <div className="spinner-dot text-[var(--color-primary)]" />
+        ) : status === "success" ? (
+          <Check className="h-4 w-4 text-emerald-500" />
+        ) : status === "error" ? (
+          <span className="text-xs font-semibold text-red-500">!</span>
+        ) : null}
+      </div>
+    </div>
+  );
+}
+
+function OrphanRateRow({ row, candidates, onLink }: OrphanRateRowProps) {
+  const [rate, setRate] = useState(Number(row.dailyRate ?? 0));
+  const [target, setTarget] = useState("");
+  const [status, setStatus] = useState<"idle" | "linking" | "error">("idle");
+
+  useEffect(() => {
+    setRate(Number(row.dailyRate ?? 0));
+  }, [row.dailyRate]);
+
+  const handleLink = async () => {
+    if (!target) return;
+    setStatus("linking");
+    try {
+      await onLink(row.ownerForSave, target, Number(rate ?? 0));
+      setStatus("idle");
+    } catch {
+      setStatus("error");
+    }
+  };
+
+  return (
+    <div className="grid gap-3 rounded-lg border border-[color:var(--color-border)] bg-[color:var(--color-surface)] p-3 md:grid-cols-[1.2fr_140px_1fr_auto] md:items-center">
+      <div>
+        <div className="text-sm font-semibold text-[color:var(--color-text)]">{row.label}</div>
+        <div className="text-xs text-[color:var(--color-text)]/60">No person linked</div>
+      </div>
+      <div className="relative w-full">
+        <span className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-sm text-[color:var(--color-text)]/50">
+          €
+        </span>
+        <input
+          type="number"
+          step="1"
+          min="0"
+          className="input h-9 w-full pl-8 text-right"
+          value={Number.isFinite(rate) ? rate : 0}
+          onChange={(e) => setRate(Number(e.target.value))}
+        />
+      </div>
+      <select
+        className="input h-9 w-full"
+        value={target}
+        onChange={(e) => setTarget(e.target.value)}
+      >
+        <option value="">Link to person...</option>
+        {candidates.map((p) => (
+          <option key={p.personId} value={p.personId}>
+            {p.displayName}
+          </option>
+        ))}
+      </select>
+      <div className="flex items-center gap-2">
+        <button
+          className="btn-primary h-9 px-3"
+          disabled={!target || status === "linking"}
+          onClick={handleLink}
+        >
+          {status === "linking" ? "Linking..." : "Link"}
+        </button>
+        {status === "error" ? <span className="text-xs text-red-500">Failed</span> : null}
+      </div>
+    </div>
+  );
+}
+
 export default function ManageRatesModal({ clientSlug, onClose }: Props) {
   const currentYear = new Date().getFullYear();
   const [people, setPeople] = useState<Person[]>([]);
   const [ratesByPersonId, setRatesByPersonId] = useState<Record<string, Rate>>({});
   const [orphanRates, setOrphanRates] = useState<Record<string, Rate>>({});
-  const [draftRates, setDraftRates] = useState<Record<string, number>>({});
   const [loading, setLoading] = useState(true);
-  const [savingKey, setSavingKey] = useState<string | null>(null);
   const [showLegacy, setShowLegacy] = useState(false);
-  const [linkTargets, setLinkTargets] = useState<Record<string, string>>({});
-  const [linkingKey, setLinkingKey] = useState<string | null>(null);
   const [selectedYear, setSelectedYear] = useState(currentYear);
   const [availableYears, setAvailableYears] = useState<number[]>([]);
   const [ratesReloadToken, setRatesReloadToken] = useState(0);
@@ -106,8 +262,6 @@ export default function ManageRatesModal({ clientSlug, onClose }: Props) {
     let active = true;
     const loadRates = async () => {
       setLoading(true);
-      setDraftRates({});
-      setLinkTargets({});
       setShowLegacy(false);
       setRatesByPersonId({});
       setOrphanRates({});
@@ -164,13 +318,7 @@ export default function ManageRatesModal({ clientSlug, onClose }: Props) {
     };
   }, [clientSlug, selectedYear, ratesReloadToken]);
 
-  const handleSave = async (
-    key: string,
-    owner: string,
-    rate: number,
-    personId?: string | null,
-  ) => {
-    setSavingKey(key);
+  const handleSave = async (owner: string, rate: number, personId?: string | null) => {
     try {
       const res = await fetch("/api/crm/rates", {
         method: "POST",
@@ -222,10 +370,11 @@ export default function ManageRatesModal({ clientSlug, onClose }: Props) {
         }
       }
       showSuccess("Rate saved");
+      return true;
     } catch (err) {
       showError(err instanceof Error ? err.message : "Save failed");
+      throw err;
     } finally {
-      setSavingKey(null);
     }
   };
 
@@ -289,7 +438,6 @@ export default function ManageRatesModal({ clientSlug, onClose }: Props) {
   const linkablePeople = () => people.filter((p) => !ratesByPersonId[p.personId]);
 
   const handleLinkOrphan = async (owner: string, personId: string, rate: number) => {
-    setLinkingKey(owner);
     try {
       const resAlias = await fetch("/api/crm/people/aliases", {
         method: "POST",
@@ -337,8 +485,8 @@ export default function ManageRatesModal({ clientSlug, onClose }: Props) {
       }
     } catch (err) {
       showError(err instanceof Error ? err.message : "Link failed");
+      throw err;
     } finally {
-      setLinkingKey(null);
     }
   };
 
@@ -374,195 +522,133 @@ export default function ManageRatesModal({ clientSlug, onClose }: Props) {
   };
 
   return (
-    <MiniModal onClose={onClose} title="Manage rates">
-      <div className="space-y-4">
-        <p className="text-sm text-[color:var(--color-text)]/80">
-          Set the daily rate (EUR) per person. For new people, add them in
-          &quot;People &amp; aliases&quot; first.
-        </p>
-        <div className="flex flex-wrap items-end gap-3">
-          <div className="flex flex-col gap-1">
-            <label className="text-xs font-medium text-[color:var(--color-text)]/70">
-              Year
-            </label>
-            <select
-              className="input h-9 min-w-[120px]"
-              value={selectedYear}
-              onChange={(e) => setSelectedYear(Number(e.target.value))}
-            >
-              {yearOptions.map((year) => (
-                <option key={year} value={year}>
-                  {year}
-                </option>
-              ))}
-            </select>
-          </div>
-          <button
-            className="btn-ghost h-9 px-3 text-xs"
-            type="button"
-            disabled={!previousYear || copying}
-            onClick={handleCopyRates}
-            title={
-              previousYear
-                ? `Copy missing rates from ${previousYear}`
-                : "No previous year rates found"
-            }
-          >
-            {copying
-              ? "Copying..."
-              : previousYear
-                ? `Copy from ${previousYear}`
-                : "Copy from previous year"}
-          </button>
-          <span className="text-xs text-[color:var(--color-text)]/60">
-            Rates apply to {selectedYear}.
-          </span>
-        </div>
+    <MiniModal
+      onClose={onClose}
+      title="Manage rates"
+      widthClass="max-w-xl"
+      bodyClassName="modal-body px-0 py-0"
+      footer={
+        <button className="btn-primary" type="button" onClick={onClose}>
+          Close
+        </button>
+      }
+      footerClassName="bg-[#101828] border-t border-white/10"
+    >
+      <div className="min-h-full flex flex-col">
+        <div className="px-4 py-4">
+          <div className="overflow-hidden rounded-2xl border border-[color:var(--color-border)] bg-[color:var(--color-surface)]">
+            <div className="sticky top-0 z-30 border-b border-[color:var(--color-border)] bg-[var(--color-surface)]">
+              <div className="px-4 pt-4 pb-3">
+                <p className="text-sm text-[color:var(--color-text)]/80">
+                  Set the daily rate (EUR) per person. For new people, add them in
+                  &quot;People &amp; aliases&quot; first.
+                </p>
+                <p className="mt-1 text-xs text-[color:var(--color-text)]/60">
+                  Changes are saved automatically on blur.
+                </p>
+              </div>
 
-        <div className="space-y-2">
-          {loading ? (
-            <div className="text-sm text-[color:var(--color-text)]/70">Loading rates...</div>
-          ) : (
-            personRows.map((row) => {
-              const dailyRate =
-                draftRates[row.key] != null ? draftRates[row.key] : Number(row.dailyRate ?? 0);
-              return (
-                <div
-                  key={row.key}
-                  className="flex items-center gap-3 rounded-lg border border-[color:var(--color-border)] bg-[color:var(--color-surface-2)]/70 px-3 py-2"
-                >
-                  <div className="flex-1">
-                    <div className="text-sm font-semibold text-[color:var(--color-text)]">
-                      {row.label}
-                    </div>
-                    <div className="text-xs text-[color:var(--color-text)]/60">
-                      {row.isInactive ? "Inactive" : "Active"}
-                      {row.isUnknown ? " - Unlisted person" : ""}
-                    </div>
+              <div className="px-4 pb-4">
+                <div className="flex flex-wrap items-end gap-3">
+                  <div className="flex flex-col gap-1">
+                    <label className="text-xs font-medium text-[color:var(--color-text)]/70">
+                      Year
+                    </label>
+                    <select
+                      className="input h-9 min-w-[120px] bg-[color:var(--color-surface-2)]"
+                      value={selectedYear}
+                      onChange={(e) => setSelectedYear(Number(e.target.value))}
+                    >
+                      {yearOptions.map((year) => (
+                        <option key={year} value={year}>
+                          {year}
+                        </option>
+                      ))}
+                    </select>
+                    <span className="text-[11px] text-[color:var(--color-text)]/55">
+                      Applies to {selectedYear}
+                    </span>
                   </div>
-                  <input
-                    type="number"
-                    step="1"
-                    min="0"
-                    className="input h-9 w-24 text-right"
-                    value={Number(dailyRate)}
-                    onChange={(e) => {
-                      const val = Number(e.target.value);
-                      setDraftRates((prev) => ({ ...prev, [row.key]: val }));
-                    }}
-                  />
                   <button
-                    className="btn-primary h-9 px-3"
-                    disabled={savingKey === row.key}
-                    onClick={() =>
-                      handleSave(
-                        row.key,
-                        row.ownerForSave,
-                        draftRates[row.key] ?? row.dailyRate ?? 0,
-                        row.personId,
-                      )
+                    className="btn-ghost h-9 px-3 text-xs"
+                    type="button"
+                    disabled={!previousYear || copying}
+                    onClick={handleCopyRates}
+                    title={
+                      previousYear
+                        ? `Copy missing rates from ${previousYear}`
+                        : "No previous year rates found"
                     }
                   >
-                    {savingKey === row.key ? "Saving..." : "Save"}
+                    {copying
+                      ? "Copying..."
+                      : previousYear
+                        ? `Copy from ${previousYear}`
+                        : "Copy from previous year"}
                   </button>
                 </div>
-              );
-            })
-          )}
-        </div>
-
-        {orphanRows.length ? (
-          <section className="space-y-2 rounded-lg border border-[color:var(--color-border)] bg-[color:var(--color-surface-2)]/70 px-3 py-3">
-            <div className="flex items-center justify-between gap-3">
-              <div>
-                <div className="text-sm font-semibold text-[color:var(--color-text)]">
-                  Legacy/orphan rates ({orphanRows.length})
-                </div>
-                <div className="text-xs text-[color:var(--color-text)]/60">
-                  Link these rates to a person to avoid duplicates.
-                </div>
               </div>
-              <button
-                className="btn-ghost h-8 px-3 text-xs"
-                type="button"
-                aria-pressed={showLegacy}
-                onClick={() => setShowLegacy((prev) => !prev)}
-              >
-                {showLegacy ? "Hide" : "Show"}
-              </button>
+
+              <div className="grid grid-cols-[minmax(0,1fr)_160px_40px] gap-4 px-4 pb-2 text-xs font-semibold uppercase text-[color:var(--color-muted)]">
+                <div>Team Member</div>
+                <div className="text-right">Daily Rate</div>
+                <div></div>
+              </div>
             </div>
 
-            {showLegacy ? (
-              <div className="space-y-2">
-                {orphanRows.map((row) => {
-                  const dailyRate =
-                    draftRates[row.key] != null ? draftRates[row.key] : Number(row.dailyRate ?? 0);
-                  const candidates = linkablePeople();
-                  return (
-                    <div
-                      key={row.key}
-                      className="flex flex-wrap items-center gap-3 rounded-lg border border-[color:var(--color-border)] bg-[color:var(--color-surface)] px-3 py-2"
-                    >
-                      <div className="flex-1 min-w-[200px]">
-                        <div className="text-sm font-semibold text-[color:var(--color-text)]">
-                          {row.label}
-                        </div>
-                        <div className="text-xs text-[color:var(--color-text)]/60">
-                          No person linked
-                        </div>
-                      </div>
-                      <input
-                        type="number"
-                        step="1"
-                        min="0"
-                        className="input h-9 w-24 text-right"
-                        value={Number(dailyRate)}
-                        onChange={(e) => {
-                          const val = Number(e.target.value);
-                          setDraftRates((prev) => ({ ...prev, [row.key]: val }));
-                        }}
-                      />
-                      <select
-                        className="input h-9 min-w-[200px]"
-                        value={linkTargets[row.key] ?? ""}
-                        onChange={(e) =>
-                          setLinkTargets((prev) => ({ ...prev, [row.key]: e.target.value }))
-                        }
-                      >
-                        <option value="">Link to person...</option>
-                        {candidates.map((p) => (
-                          <option key={p.personId} value={p.personId}>
-                            {p.displayName}
-                          </option>
-                        ))}
-                      </select>
-                      <button
-                        className="btn-primary h-9 px-3"
-                        disabled={!linkTargets[row.key] || linkingKey === row.key}
-                        onClick={() => {
-                          const target = linkTargets[row.key];
-                          if (!target) return;
-                          handleLinkOrphan(
-                            row.ownerForSave,
-                            target,
-                            draftRates[row.key] ?? row.dailyRate ?? 0,
-                          );
-                        }}
-                      >
-                        {linkingKey === row.key ? "Linking..." : "Link"}
-                      </button>
-                    </div>
-                  );
-                })}
+            {loading ? (
+              <div className="px-4 py-6 text-sm text-[color:var(--color-text)]/70">
+                Loading rates...
               </div>
-            ) : null}
-          </section>
-        ) : null}
+            ) : (
+              personRows.map((row) => (
+                <RateRow
+                  key={row.key}
+                  label={row.label}
+                  initialRate={Number(row.dailyRate ?? 0)}
+                  personId={row.personId}
+                  isInactive={Boolean(row.isInactive)}
+                  onSave={(nextRate) => handleSave(row.ownerForSave, nextRate, row.personId)}
+                />
+              ))
+            )}
+          </div>
 
-        <div className="flex justify-end">
-          <button className="btn-primary" type="button" onClick={onClose}>
-            Close
-          </button>
+          {orphanRows.length ? (
+            <section className="mt-4 space-y-3 rounded-lg border border-amber-200 bg-amber-50 p-4">
+              <div className="flex items-center justify-between gap-3">
+                <div>
+                  <div className="text-sm font-semibold text-[color:var(--color-text)]">
+                    Legacy/orphan rates ({orphanRows.length})
+                  </div>
+                  <div className="text-xs text-[color:var(--color-text)]/60">
+                    Link these rates to a person to avoid duplicates.
+                  </div>
+                </div>
+                <button
+                  className="btn-ghost h-8 px-3 text-xs"
+                  type="button"
+                  aria-pressed={showLegacy}
+                  onClick={() => setShowLegacy((prev) => !prev)}
+                >
+                  {showLegacy ? "Hide" : "Show"}
+                </button>
+              </div>
+
+              {showLegacy ? (
+                <div className="space-y-3">
+                  {orphanRows.map((row) => (
+                    <OrphanRateRow
+                      key={row.key}
+                      row={row}
+                      candidates={linkablePeople()}
+                      onLink={handleLinkOrphan}
+                    />
+                  ))}
+                </div>
+              ) : null}
+            </section>
+          ) : null}
         </div>
       </div>
     </MiniModal>
