@@ -10,7 +10,7 @@ const rootStyle: CSSProperties = {
 } as CSSProperties;
 
 export const metadata: Metadata = {
-  title: 'Monet Email Dashboard',
+  title: 'Data & CRM | Dataventure',
   description: 'Campaign reporting',
   icons: {
     icon: '/dvlogo2.svg',

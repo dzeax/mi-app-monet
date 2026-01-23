@@ -10,7 +10,7 @@ export default function FooterBar() {
     >
       <div className="h-full w-full flex items-center justify-between px-3 sm:px-4">
         <span className="text-[11px] sm:text-xs opacity-80 select-none">
-          © 2025 Dataventure — All Rights Reserved
+          © 2025 Dataventure | All Rights Reserved
         </span>
 
         <span className="text-[11px] sm:text-xs opacity-80 flex items-center whitespace-nowrap select-none">
