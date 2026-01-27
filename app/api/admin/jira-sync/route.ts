@@ -246,17 +246,31 @@ export async function POST(request: Request) {
     // Preserve effort and comments entered in the app when syncing with JIRA.
     // JIRA remains the source of truth for status, title, owner, dates, etc.
     const ticketIds = Array.from(new Set(payload.map((row) => row.ticket_id as string)));
+    const CHUNK_SIZE = 200;
 
     // Fetch existing tickets to preserve effort/comments AND keep the same row id
     // so that contributions (FK with ON DELETE CASCADE) are not lost.
-    const { data: existing, error: existingError } = await supabase
-      .from('crm_data_quality_tickets')
-      .select('id, ticket_id, status, work_hours, prep_hours, comments')
-      .eq('client_slug', client)
-      .in('ticket_id', ticketIds);
-
-    if (existingError) {
-      return NextResponse.json({ error: existingError.message }, { status: 500 });
+    const existingRows: Array<{
+      id: string;
+      ticket_id: string;
+      status: string | null;
+      work_hours: number | null;
+      prep_hours: number | null;
+      comments: string | null;
+    }> = [];
+    for (let i = 0; i < ticketIds.length; i += CHUNK_SIZE) {
+      const slice = ticketIds.slice(i, i + CHUNK_SIZE);
+      const { data: existingChunk, error: existingError } = await supabase
+        .from('crm_data_quality_tickets')
+        .select('id, ticket_id, status, work_hours, prep_hours, comments')
+        .eq('client_slug', client)
+        .in('ticket_id', slice);
+      if (existingError) {
+        return NextResponse.json({ error: existingError.message }, { status: 500 });
+      }
+      if (Array.isArray(existingChunk) && existingChunk.length > 0) {
+        existingRows.push(...existingChunk);
+      }
     }
 
     const existingMap = new Map<
@@ -269,7 +283,7 @@ export async function POST(request: Request) {
         comments: string | null;
       }
     >();
-    (existing ?? []).forEach((row) => {
+    existingRows.forEach((row) => {
       existingMap.set(row.ticket_id as string, {
         id: row.id as string,
         status: String(row.status ?? 'Backlog'),
@@ -294,17 +308,29 @@ export async function POST(request: Request) {
     });
 
     if (existingIds.length > 0) {
-      const { data: contribs, error: contribError } = await admin
-        .from('crm_data_quality_contributions')
-        .select('ticket_id, work_hours, prep_hours')
-        .in('ticket_id', existingIds);
+      const contribRows: Array<{
+        ticket_id?: string | null;
+        work_hours?: unknown;
+        prep_hours?: unknown;
+      }> = [];
+      for (let i = 0; i < existingIds.length; i += CHUNK_SIZE) {
+        const slice = existingIds.slice(i, i + CHUNK_SIZE);
+        const { data: contribChunk, error: contribError } = await admin
+          .from('crm_data_quality_contributions')
+          .select('ticket_id, work_hours, prep_hours')
+          .in('ticket_id', slice);
 
-      if (contribError) {
-        return NextResponse.json({ error: contribError.message }, { status: 500 });
+        if (contribError) {
+          return NextResponse.json({ error: contribError.message }, { status: 500 });
+        }
+        if (Array.isArray(contribChunk) && contribChunk.length > 0) {
+          contribRows.push(...contribChunk);
+        }
       }
 
       const contribTotals = new Map<string, { work: number; prep: number }>();
-      (contribs ?? []).forEach((row: { ticket_id?: string | null; work_hours?: unknown; prep_hours?: unknown }) => {
+      contribRows.forEach(
+        (row: { ticket_id?: string | null; work_hours?: unknown; prep_hours?: unknown }) => {
         const ticketId = row.ticket_id;
         if (!ticketId) return;
         const work = Number(row.work_hours ?? 0);
