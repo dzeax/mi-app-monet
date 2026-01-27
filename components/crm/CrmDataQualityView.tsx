@@ -21,7 +21,11 @@ import {
   startOfMonth,
   startOfYear,
 } from "date-fns";
-import type { CrmOwnerRate, DataQualityTicket } from "@/types/crm";
+import type {
+  CrmOwnerRate,
+  DataQualityTicket,
+  NeedsEffortDismissReason,
+} from "@/types/crm";
 import { DEFAULT_WORKSTREAM, WORKSTREAM_DEFAULTS } from "@/lib/crm/workstreams";
 import { useAuth } from "@/context/AuthContext";
 import MiniModal from "@/components/ui/MiniModal";
@@ -56,6 +60,11 @@ const STATUS_OPTIONS = [
 const OWNER_DEFAULTS = ["Stephane Rabarinala", "Lucas Vialatte"];
 const TYPE_DEFAULTS = ["DATA", "LIFECYCLE", "CAMPAIGNS", "GLOBAL", "OPS"];
 const NEEDS_EFFORT_STATUSES = new Set(["Validation", "Done"]);
+const NEEDS_EFFORT_DISMISS_REASONS: { id: NeedsEffortDismissReason; label: string }[] = [
+  { id: "no_effort_needed", label: "No effort needed" },
+  { id: "duplicate", label: "Duplicate" },
+  { id: "out_of_scope", label: "Out of scope" },
+];
 // Workstreams are configured per client catalog; defaults live in lib/crm/workstreams.
 
 const unique = (values: (string | null)[]) =>
@@ -759,10 +768,10 @@ export default function CrmDataQualityView() {
   const [editRow, setEditRow] = useState<DataQualityTicket | null>(null);
   const [openMenuId, setOpenMenuId] = useState<string | null>(null);
   const [syncingJira, setSyncingJira] = useState(false);
-  const [lastSyncChangedIds, setLastSyncChangedIds] = useState<Set<string>>(
-    new Set(),
-  );
+  const [lastSyncDetectedCount, setLastSyncDetectedCount] = useState(0);
   const [showNeedsEffortNudge, setShowNeedsEffortNudge] = useState(false);
+  const [needsEffortBusyId, setNeedsEffortBusyId] = useState<string | null>(null);
+  const [dismissDialogTicket, setDismissDialogTicket] = useState<DataQualityTicket | null>(null);
   const rowsRef = useRef<DataQualityTicket[]>([]);
   const [compact, setCompact] = useState(() =>
     readBool(COMPACT_VIEW_STORAGE_KEY, true),
@@ -1092,12 +1101,11 @@ export default function CrmDataQualityView() {
 
   const isNeedsEffortTicket = useCallback(
     (ticket: DataQualityTicket) => {
-      if (!lastSyncChangedIds.has(ticket.id)) return false;
+      if (ticket.needsEffort?.state !== "open") return false;
       if (!NEEDS_EFFORT_STATUSES.has(ticket.status)) return false;
-      const totalHours = getTicketTotalHours(ticket);
-      return isZeroValue(totalHours);
+      return true;
     },
-    [lastSyncChangedIds],
+    [],
   );
 
   const rowMatches = useCallback((t: DataQualityTicket, exclude?: keyof Filters) => {
@@ -1236,6 +1244,11 @@ export default function CrmDataQualityView() {
       }).length,
     [rows, filterContributionsByWorkstream],
   );
+  const needsEffortNudgeCount =
+    lastSyncDetectedCount > 0 ? lastSyncDetectedCount : needsEffortCount;
+  const dismissDialogBusy = dismissDialogTicket
+    ? needsEffortBusyId === dismissDialogTicket.id
+    : false;
 
   const activeChips = useMemo(() => {
     const chips: { label: string; onClear: () => void }[] = [];
@@ -1338,6 +1351,42 @@ export default function CrmDataQualityView() {
   useEffect(() => {
     void fetchTickets();
   }, [fetchTickets]);
+
+  const updateNeedsEffortFlag = useCallback(
+    async (
+      ticket: DataQualityTicket,
+      action: "clear" | "dismiss",
+      reason?: NeedsEffortDismissReason,
+    ) => {
+      if (!isAdmin) return;
+      setNeedsEffortBusyId(ticket.id);
+      try {
+        const res = await fetch("/api/crm/needs-effort", {
+          method: "PATCH",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            client: clientSlug,
+            ticketId: ticket.id,
+            action,
+            reason,
+          }),
+        });
+        const body = await res.json().catch(() => null);
+        if (!res.ok) {
+          throw new Error(body?.error || `Needs effort update failed (${res.status})`);
+        }
+        showSuccess(action === "clear" ? "Needs effort cleared" : "Needs effort dismissed");
+        setDismissDialogTicket(null);
+        await fetchTickets();
+      } catch (err) {
+        const message = err instanceof Error ? err.message : "Unable to update needs effort";
+        showError(message);
+      } finally {
+        setNeedsEffortBusyId(null);
+      }
+    },
+    [clientSlug, fetchTickets, isAdmin],
+  );
 
   useEffect(() => {
     const handler = (evt: Event) => {
@@ -2260,10 +2309,6 @@ export default function CrmDataQualityView() {
                     type="button"
                     title="Sync tickets from JIRA"
                     onClick={async () => {
-                      const previousRows = rowsRef.current;
-                      const previousStatusMap = new Map(
-                        previousRows.map((row) => [row.id, row.status]),
-                      );
                       setSyncingJira(true);
                       try {
                         const res = await fetch(
@@ -2275,6 +2320,12 @@ export default function CrmDataQualityView() {
                           throw new Error(
                             body?.error || `JIRA sync failed (${res.status})`,
                           );
+                        const detectedRaw = Number(body?.needsEffortDetected ?? 0);
+                        const detectedCount = Number.isFinite(detectedRaw)
+                          ? detectedRaw
+                          : 0;
+                        setLastSyncDetectedCount(detectedCount);
+                        setShowNeedsEffortNudge(detectedCount > 0);
                         showSuccess(
                           `JIRA synced: ${body?.imported ?? 0} tickets`,
                         );
@@ -2286,17 +2337,6 @@ export default function CrmDataQualityView() {
                         if (reload.ok && Array.isArray(reloadBody?.tickets)) {
                           const nextRows = reloadBody.tickets as DataQualityTicket[];
                           setRows(nextRows);
-                          const changedIds = new Set<string>();
-                          nextRows.forEach((ticket) => {
-                            const prevStatus = previousStatusMap.get(ticket.id);
-                            if (!prevStatus || prevStatus === ticket.status) return;
-                            if (!NEEDS_EFFORT_STATUSES.has(ticket.status)) return;
-                            const totalHours = getTicketTotalHours(ticket);
-                            if (!isZeroValue(totalHours)) return;
-                            changedIds.add(ticket.id);
-                          });
-                          setLastSyncChangedIds(changedIds);
-                          setShowNeedsEffortNudge(changedIds.size > 0);
                         }
                         setLoading(false);
                       } catch (err) {
@@ -2513,11 +2553,11 @@ export default function CrmDataQualityView() {
             </button>
           </div>
         ) : null}
-        {showNeedsEffortNudge && needsEffortCount > 0 ? (
+        {showNeedsEffortNudge && needsEffortNudgeCount > 0 ? (
           <div className="mt-3 flex flex-wrap items-center justify-between gap-3 rounded-xl border border-amber-200/70 bg-amber-50/70 px-3 py-2 text-sm text-amber-900">
             <span>
-              {needsEffortCount} ticket
-              {needsEffortCount === 1 ? "" : "s"} moved to Done/Validation
+              {needsEffortNudgeCount} ticket
+              {needsEffortNudgeCount === 1 ? "" : "s"} moved to Done/Validation
               without effort.
             </span>
             <div className="flex items-center gap-2">
@@ -2527,6 +2567,7 @@ export default function CrmDataQualityView() {
                 onClick={() => {
                   handleChange("needsEffort", true);
                   setShowNeedsEffortNudge(false);
+                  setLastSyncDetectedCount(0);
                 }}
               >
                 Review
@@ -2534,7 +2575,10 @@ export default function CrmDataQualityView() {
               <button
                 className="btn-ghost h-8 px-3 text-xs"
                 type="button"
-                onClick={() => setShowNeedsEffortNudge(false)}
+                onClick={() => {
+                  setShowNeedsEffortNudge(false);
+                  setLastSyncDetectedCount(0);
+                }}
               >
                 Dismiss
               </button>
@@ -2814,10 +2858,9 @@ export default function CrmDataQualityView() {
                       const typeLabel = typeRaw ? stripTypePrefix(typeRaw) : "";
                       const daysRemaining = daysToDue(t.dueDate);
                       const isDone = t.status === "Done";
-                      const needsEffort =
-                        lastSyncChangedIds.has(t.id) &&
-                        NEEDS_EFFORT_STATUSES.has(t.status) &&
-                        isZeroValue(getTicketTotalHours(t));
+                      const needsEffort = isNeedsEffortTicket(t);
+                      const needsEffortBusy = needsEffortBusyId === t.id;
+                      const canManageNeedsEffort = isAdmin && needsEffort;
                       const assigneeRaw = t.jiraAssignee || "";
                       const assigneeKey = resolvePersonKey(assigneeRaw, null);
                       const assigneeLabel = assigneeKey
@@ -3135,7 +3178,7 @@ export default function CrmDataQualityView() {
                                 {openMenuId === t.ticketId ? (
                                   <div
                                     id={`actions-menu-${t.ticketId}`}
-                                    className="absolute right-2 top-10 z-50 w-36 rounded-lg border border-[color:var(--color-border)] bg-[color:var(--color-surface)] shadow-lg"
+                                    className="absolute right-2 top-10 z-50 w-44 rounded-lg border border-[color:var(--color-border)] bg-[color:var(--color-surface)] shadow-lg"
                                   >
                                     <button
                                       className="block w-full px-3 py-2 text-left text-sm hover:bg-[color:var(--color-surface-2)]"
@@ -3155,6 +3198,34 @@ export default function CrmDataQualityView() {
                                     >
                                       Edit
                                     </button>
+                                    {canManageNeedsEffort ? (
+                                      <>
+                                        <div
+                                          className="my-1 h-px bg-[color:var(--color-border)]/70"
+                                          aria-hidden="true"
+                                        />
+                                        <button
+                                          className="block w-full px-3 py-2 text-left text-sm font-semibold text-amber-900 hover:bg-amber-50 disabled:opacity-60"
+                                          onClick={() => {
+                                            setOpenMenuId(null);
+                                            void updateNeedsEffortFlag(t, "clear");
+                                          }}
+                                          disabled={needsEffortBusy}
+                                        >
+                                          Clear
+                                        </button>
+                                        <button
+                                          className="block w-full px-3 py-2 text-left text-sm text-amber-900 hover:bg-amber-50 disabled:opacity-60"
+                                          onClick={() => {
+                                            setOpenMenuId(null);
+                                            setDismissDialogTicket(t);
+                                          }}
+                                          disabled={needsEffortBusy}
+                                        >
+                                          Dismiss…
+                                        </button>
+                                      </>
+                                    ) : null}
                                     <button
                                       className="block w-full px-3 py-2 text-left text-sm text-[color:var(--color-accent)] hover:bg-[color:var(--color-surface-2)]"
                                       onClick={async () => {
@@ -3227,6 +3298,45 @@ export default function CrmDataQualityView() {
           </div>
         </div>
       </div>
+      {dismissDialogTicket && isAdmin ? (
+        <MiniModal
+          onClose={() => {
+            if (dismissDialogBusy) return;
+            setDismissDialogTicket(null);
+          }}
+          title={`Dismiss needs effort · ${dismissDialogTicket.ticketId}`}
+          widthClass="max-w-md"
+          footer={
+            <button
+              className="btn-ghost"
+              type="button"
+              onClick={() => setDismissDialogTicket(null)}
+              disabled={dismissDialogBusy}
+            >
+              Cancel
+            </button>
+          }
+        >
+          <div className="space-y-3 text-sm text-[color:var(--color-text)]/85">
+            <p>Select a reason. This will remove the ticket from the needs effort queue.</p>
+            <div className="grid gap-2">
+              {NEEDS_EFFORT_DISMISS_REASONS.map((reason) => (
+                <button
+                  key={reason.id}
+                  type="button"
+                  className="rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-left font-semibold text-amber-900 hover:bg-amber-100 disabled:opacity-60"
+                  onClick={() =>
+                    void updateNeedsEffortFlag(dismissDialogTicket, "dismiss", reason.id)
+                  }
+                  disabled={dismissDialogBusy}
+                >
+                  {reason.label}
+                </button>
+              ))}
+            </div>
+          </div>
+        </MiniModal>
+      ) : null}
       {openAdd ? (
         <MiniModal
           onClose={() => {

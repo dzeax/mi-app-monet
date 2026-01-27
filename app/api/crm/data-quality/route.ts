@@ -258,6 +258,45 @@ export async function GET(request: Request) {
       }
     }
 
+    // Attach persistent "needs effort" flags when the table is available.
+    try {
+      if (ids.length > 0) {
+        const { data: flagsData, error: flagsError } = await admin
+          .from("crm_needs_effort_flags")
+          .select(
+            "ticket_id, state, dismiss_reason, dismissed_at, dismissed_by, cleared_at, cleared_by, last_detected_at, last_detected_status",
+          )
+          .eq("client_slug", client)
+          .in("ticket_id", ids);
+
+        if (!flagsError && Array.isArray(flagsData) && flagsData.length > 0) {
+          const flagsByTicketId = new Map<string, (typeof flagsData)[number]>();
+          flagsData.forEach((flag) => {
+            if (!flag?.ticket_id) return;
+            flagsByTicketId.set(String(flag.ticket_id), flag);
+          });
+
+          tickets.forEach((ticket) => {
+            const flag = flagsByTicketId.get(ticket.id);
+            if (!flag) return;
+            ticket.needsEffort = {
+              state: flag.state,
+              dismissReason: flag.dismiss_reason ?? null,
+              dismissedAt: flag.dismissed_at ?? null,
+              dismissedBy: flag.dismissed_by ?? null,
+              clearedAt: flag.cleared_at ?? null,
+              clearedBy: flag.cleared_by ?? null,
+              lastDetectedAt: flag.last_detected_at ?? null,
+              lastDetectedStatus: flag.last_detected_status ?? null,
+            };
+          });
+        }
+      }
+    } catch (err) {
+      // If the table has not been created yet, do not break the page.
+      console.warn("[crm-data-quality] needs effort flags unavailable", err);
+    }
+
     return NextResponse.json({ tickets });
   } catch (err) {
     const message = err instanceof Error ? err.message : "Unexpected error";

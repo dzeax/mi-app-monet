@@ -1,3 +1,20 @@
+export type NeedsEffortState = "open" | "dismissed" | "cleared";
+export type NeedsEffortDismissReason =
+  | "no_effort_needed"
+  | "duplicate"
+  | "out_of_scope";
+
+export type NeedsEffortFlag = {
+  state: NeedsEffortState;
+  dismissReason: NeedsEffortDismissReason | null;
+  dismissedAt?: string | null;
+  dismissedBy?: string | null;
+  clearedAt?: string | null;
+  clearedBy?: string | null;
+  lastDetectedAt?: string | null;
+  lastDetectedStatus?: string | null;
+};
+
 export type DataQualityTicket = {
   id: string;
   clientSlug: string;
@@ -26,6 +43,7 @@ export type DataQualityTicket = {
     workstream?: string | null;
     notes?: string | null;
   }[];
+  needsEffort?: NeedsEffortFlag | null;
   createdAt?: string;
   updatedAt?: string;
 };

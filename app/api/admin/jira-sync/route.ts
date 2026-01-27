@@ -1,6 +1,7 @@
 import { NextResponse } from 'next/server';
 import { cookies } from 'next/headers';
 import { createRouteHandlerClient } from '@supabase/auth-helpers-nextjs';
+import { supabaseAdmin } from '@/lib/supabase/admin';
 
 const DEFAULT_CLIENT = 'emg';
 const JQL_DEFAULT = 'project = CRM ORDER BY updated DESC';
@@ -50,6 +51,18 @@ const TEAM_OWNERS = [
   'pierre gasnier',
   'stephane rabarinala',
 ];
+
+const NEEDS_EFFORT_STATUSES = new Set(['Validation', 'Done']);
+
+const isZeroValue = (value: number) => Math.abs(value) < 0.0001;
+
+const computeContributionTotalHours = (work: number | null, prep: number | null) => {
+  const safeWork = Number.isFinite(work ?? null) ? Number(work ?? 0) : 0;
+  const safePrep = Number.isFinite(prep ?? null)
+    ? Number(prep ?? 0)
+    : safeWork * 0.35;
+  return safeWork + safePrep;
+};
 
 function mapStatus(input?: string | null) {
   if (!input) return 'Backlog';
@@ -152,6 +165,7 @@ export const runtime = 'nodejs';
 export async function POST(request: Request) {
   const cookieStore = await cookies();
   const supabase = createRouteHandlerClient({ cookies: () => cookieStore });
+  const admin = supabaseAdmin();
 
   try {
     const { searchParams } = new URL(request.url);
@@ -237,7 +251,7 @@ export async function POST(request: Request) {
     // so that contributions (FK with ON DELETE CASCADE) are not lost.
     const { data: existing, error: existingError } = await supabase
       .from('crm_data_quality_tickets')
-      .select('id, ticket_id, work_hours, prep_hours, comments')
+      .select('id, ticket_id, status, work_hours, prep_hours, comments')
       .eq('client_slug', client)
       .in('ticket_id', ticketIds);
 
@@ -247,29 +261,67 @@ export async function POST(request: Request) {
 
     const existingMap = new Map<
       string,
-      { id: string; work_hours: number | null; prep_hours: number | null; comments: string | null }
+      {
+        id: string;
+        status: string;
+        work_hours: number | null;
+        prep_hours: number | null;
+        comments: string | null;
+      }
     >();
     (existing ?? []).forEach((row) => {
       existingMap.set(row.ticket_id as string, {
         id: row.id as string,
+        status: String(row.status ?? 'Backlog'),
         work_hours: row.work_hours != null ? Number(row.work_hours) : null,
         prep_hours: row.prep_hours != null ? Number(row.prep_hours) : null,
         comments: (row.comments as string | null) ?? null,
       });
     });
 
-    // Check which tickets already have contributions, to avoid overwriting the app-owned owner.
     const existingIds = Array.from(existingMap.values())
       .map((v) => v.id)
       .filter(Boolean);
-    const contribMap = new Set<string>();
+
+    // Build a per-ticket total-hours map based on contributions when available,
+    // falling back to ticket-level work/prep hours when no contributions exist.
+    const totalHoursByTicketId = new Map<string, number>();
+    existingMap.forEach((prev) => {
+      totalHoursByTicketId.set(
+        prev.id,
+        computeContributionTotalHours(prev.work_hours, prev.prep_hours),
+      );
+    });
+
     if (existingIds.length > 0) {
-      const { data: contribs } = await supabase
+      const { data: contribs, error: contribError } = await admin
         .from('crm_data_quality_contributions')
-        .select('ticket_id')
+        .select('ticket_id, work_hours, prep_hours')
         .in('ticket_id', existingIds);
-      contribs?.forEach((c) => contribMap.add(c.ticket_id as string));
+
+      if (contribError) {
+        return NextResponse.json({ error: contribError.message }, { status: 500 });
+      }
+
+      const contribTotals = new Map<string, { work: number; prep: number }>();
+      (contribs ?? []).forEach((row: { ticket_id?: string | null; work_hours?: unknown; prep_hours?: unknown }) => {
+        const ticketId = row.ticket_id;
+        if (!ticketId) return;
+        const work = Number(row.work_hours ?? 0);
+        const prepRaw = row.prep_hours == null ? null : Number(row.prep_hours);
+        const current = contribTotals.get(ticketId) ?? { work: 0, prep: 0 };
+        current.work += Number.isFinite(work) ? work : 0;
+        current.prep += Number.isFinite(prepRaw ?? null) ? Number(prepRaw ?? 0) : (Number.isFinite(work) ? work * 0.35 : 0);
+        contribTotals.set(ticketId, current);
+      });
+
+      contribTotals.forEach((totals, ticketId) => {
+        totalHoursByTicketId.set(ticketId, totals.work + totals.prep);
+      });
     }
+
+    const detectedNeedsEffortIds = new Set<string>();
+    const detectedStatusByTicketId = new Map<string, string>();
 
     const toInsert: JiraRow[] = [];
     const toUpdate: { id: string; data: Record<string, unknown> }[] = [];
@@ -281,6 +333,19 @@ export async function POST(request: Request) {
         toInsert.push(row);
         return;
       }
+
+      const prevStatus = String(prev.status ?? '');
+      const nextStatus = String(row.status ?? '');
+      const prevInNeedsEffort = NEEDS_EFFORT_STATUSES.has(prevStatus);
+      const nextInNeedsEffort = NEEDS_EFFORT_STATUSES.has(nextStatus);
+      const totalHours = totalHoursByTicketId.get(prev.id) ?? 0;
+
+      // Detect transitions into Done/Validation without effort and persist them.
+      if (!prevInNeedsEffort && nextInNeedsEffort && isZeroValue(totalHours)) {
+        detectedNeedsEffortIds.add(prev.id);
+        detectedStatusByTicketId.set(prev.id, nextStatus);
+      }
+
       // Preserve app-owned effort/comments, update only JIRA-owned fields.
       const updateData: Record<string, unknown> = {
         status: row.status,
@@ -317,7 +382,35 @@ export async function POST(request: Request) {
       }
     }
 
-    return NextResponse.json({ imported: payload.length, pages: pageCount });
+    let needsEffortDetected = detectedNeedsEffortIds.size;
+    if (needsEffortDetected > 0) {
+      const detectedAt = new Date().toISOString();
+      const flagsPayload = Array.from(detectedNeedsEffortIds).map((ticketId) => ({
+        client_slug: client,
+        ticket_id: ticketId,
+        state: 'open',
+        dismiss_reason: null,
+        dismissed_at: null,
+        dismissed_by: null,
+        cleared_at: null,
+        cleared_by: null,
+        detected_by: userId,
+        last_detected_at: detectedAt,
+        last_detected_status: detectedStatusByTicketId.get(ticketId) ?? null,
+      }));
+
+      const { error: flagsError } = await admin
+        .from('crm_needs_effort_flags')
+        .upsert(flagsPayload, { onConflict: 'client_slug,ticket_id' });
+
+      if (flagsError) {
+        // Do not break the sync if the queue table is missing or misconfigured.
+        console.warn('[jira-sync] needs effort upsert failed', flagsError.message);
+        needsEffortDetected = 0;
+      }
+    }
+
+    return NextResponse.json({ imported: payload.length, pages: pageCount, needsEffortDetected });
   } catch (err) {
     const message = err instanceof Error ? err.message : 'Unexpected error';
     return NextResponse.json({ error: message }, { status: 500 });
