@@ -40,9 +40,33 @@ export default async function proxy(req: NextRequest) {
   }
 
   const supabase = createMiddlewareClient({ req, res });
-  const {
-    data: { session },
-  } = await supabase.auth.getSession();
+  const { data, error: sessionError } = await supabase.auth.getSession();
+  const session = data.session;
+
+  const isRefreshTokenNotFound = (error: unknown) => {
+    const code = (error as any)?.code;
+    if (code === "refresh_token_not_found") return true;
+    const message = String((error as any)?.message ?? "");
+    return /refresh token not found/i.test(message);
+  };
+
+  const clearSupabaseCookies = () => {
+    const supabaseCookies = req.cookies.getAll().filter((c) => c.name.startsWith("sb-"));
+    for (const cookie of supabaseCookies) {
+      res.cookies.set(cookie.name, "", { maxAge: 0, path: "/" });
+    }
+  };
+
+  if (sessionError) {
+    if (isRefreshTokenNotFound(sessionError)) {
+      clearSupabaseCookies();
+    } else {
+      console.warn("[proxy] getSession error", {
+        code: (sessionError as any)?.code ?? null,
+        message: sessionError.message,
+      });
+    }
+  }
 
   const isPublic =
     pathname.startsWith("/login") ||

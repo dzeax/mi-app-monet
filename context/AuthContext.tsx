@@ -6,6 +6,7 @@ import {
   useContext,
   useEffect,
   useMemo,
+  useRef,
   useState,
 } from 'react';
 import { createClientComponentClient } from '@supabase/auth-helpers-nextjs';
@@ -72,6 +73,14 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
 
   // Cliente único y estable para todo el provider
   const supabase = useMemo(() => createClientComponentClient<any, 'public'>(), []);
+  const lastEnsureRef = useRef(0);
+  const lastSyncedKeyRef = useRef<string | null>(null);
+  const lastSyncedAtRef = useRef(0);
+  const syncInFlightRef = useRef<Promise<void> | null>(null);
+  const signInInFlightRef = useRef<
+    Promise<{ ok: true } | { ok: false; message: string }> | null
+  >(null);
+  const localCleanupRef = useRef(false);
 
   // Carga inicial de sesión + perfil y suscripción a cambios
   useEffect(() => {
@@ -94,8 +103,89 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     let mounted = true;
     let inFlight: Promise<void> | null = null;
 
+    const isRefreshTokenNotFound = (error: unknown) => {
+      const code = (error as any)?.code;
+      if (code === 'refresh_token_not_found') return true;
+      const message = String((error as any)?.message ?? '');
+      return /refresh token not found/i.test(message);
+    };
+
+    const syncAuthSession = (event: string, session: unknown) => {
+      const sessionObj = (session ?? null) as
+        | { access_token?: string; refresh_token?: string; user?: { id?: string } }
+        | null;
+      const accessToken = sessionObj?.access_token ?? '';
+      const refreshToken = sessionObj?.refresh_token ?? '';
+      const userId = sessionObj?.user?.id ?? '';
+      const key = `${event}:${userId}:${accessToken.slice(-12)}:${refreshToken.slice(-12)}`;
+      const now = Date.now();
+      const minIntervalMs = event === 'TOKEN_REFRESHED' ? 3000 : 750;
+
+      if (key === lastSyncedKeyRef.current && now - lastSyncedAtRef.current < minIntervalMs) {
+        return;
+      }
+
+      const started = Date.now();
+      const controller = new AbortController();
+      const timeout = window.setTimeout(() => controller.abort(), 3000);
+
+      lastSyncedKeyRef.current = key;
+      lastSyncedAtRef.current = now;
+
+      const run = async () => {
+        try {
+          await fetch('/api/auth/callback', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            credentials: 'same-origin',
+            body: JSON.stringify({ event, session }),
+            signal: controller.signal,
+          });
+        } catch (error) {
+          console.warn('[auth] Failed to sync auth session', {
+            event,
+            message: error instanceof Error ? error.message : String(error),
+            ms: Date.now() - started,
+          });
+        } finally {
+          window.clearTimeout(timeout);
+        }
+      };
+
+      const previous = syncInFlightRef.current;
+      const next = (previous ? previous.catch(() => {}) : Promise.resolve()).then(run);
+      syncInFlightRef.current = next.finally(() => {
+        if (syncInFlightRef.current === next) syncInFlightRef.current = null;
+      });
+    };
+
+    const clearLocalSession = async (reason: string, error?: unknown) => {
+      if (localCleanupRef.current) return;
+      localCleanupRef.current = true;
+      try {
+        await supabase.auth.signOut({ scope: 'local' });
+      } catch {}
+
+      syncAuthSession('SIGNED_OUT', null);
+
+      if (mounted) {
+        setUser(null);
+        setRole(null);
+        setLoading(false);
+      }
+
+      console.warn('[auth] Cleared local session', {
+        reason,
+        code: (error as any)?.code ?? null,
+        message: error instanceof Error ? error.message : String(error ?? ''),
+      });
+
+      localCleanupRef.current = false;
+    };
+
     const applyAuthenticatedUser = async () => {
       if (!mounted) return;
+      if (localCleanupRef.current) return;
       if (inFlight) {
         await inFlight;
         return;
@@ -105,6 +195,18 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         try {
           const { data, error } = await supabase.auth.getSession();
           if (!mounted) return;
+
+          if (error) {
+            if (isRefreshTokenNotFound(error)) {
+              await clearLocalSession('refresh_token_not_found', error);
+              return;
+            }
+            console.warn('[auth] getSession returned error', {
+              code: (error as any)?.code ?? null,
+              message: error.message,
+            });
+          }
+
           const session = error ? null : data?.session ?? null;
           const authUser = session?.user ?? null;
 
@@ -125,6 +227,10 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
           }
         } catch (error) {
           if (!mounted) return;
+          if (isRefreshTokenNotFound(error)) {
+            await clearLocalSession('refresh_token_not_found_throw', error);
+            return;
+          }
           console.warn('[auth] Failed to resolve authenticated user', error);
           setUser(null);
           setRole(null);
@@ -141,35 +247,9 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
 
     (async () => {
       await applyAuthenticatedUser();
+      lastEnsureRef.current = Date.now();
       setLoading(false);
     })();
-
-    const syncAuthSession = (event: string, session: unknown) => {
-      const started = Date.now();
-      const controller = new AbortController();
-      const timeout = window.setTimeout(() => controller.abort(), 3000);
-
-      fetch('/api/auth/callback', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        credentials: 'same-origin',
-        body: JSON.stringify({ event, session }),
-        signal: controller.signal,
-      })
-        .then((res) => {
-          return res;
-        })
-        .catch((error) => {
-          console.warn('[auth] Failed to sync auth session', {
-            event,
-            message: error instanceof Error ? error.message : String(error),
-            ms: Date.now() - started,
-          });
-        })
-        .finally(() => {
-          window.clearTimeout(timeout);
-        });
-    };
 
     const { data: sub } = supabase.auth.onAuthStateChange((event, session) => {
       syncAuthSession(event, session);
@@ -178,6 +258,9 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     });
 
     const ensureSession = async () => {
+      const now = Date.now();
+      if (now - lastEnsureRef.current < 4000) return;
+      lastEnsureRef.current = now;
       await applyAuthenticatedUser();
       setLoading(false);
     };
@@ -204,29 +287,52 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
 
   const signIn = useCallback(
     async (email: string, password: string) => {
-      try {
-        const response = await Promise.race([
-          supabase.auth.signInWithPassword({ email, password }),
-          new Promise<never>((_, reject) =>
-            setTimeout(() => reject(new Error('Sign in timed out. Please try again.')), 12000)
-          ),
-        ]);
-
-        const { error } = response;
-        if (error) {
-          return { ok: false as const, message: error.message || 'Unable to sign in' };
-        }
-        return { ok: true as const };
-      } catch (error) {
-        const message = error instanceof Error ? error.message : 'Unable to sign in';
-        return { ok: false as const, message };
+      if (signInInFlightRef.current) {
+        return signInInFlightRef.current;
       }
+
+      const task = (async () => {
+        try {
+          const response = await Promise.race([
+            supabase.auth.signInWithPassword({ email, password }),
+            new Promise<never>((_, reject) =>
+              setTimeout(() => reject(new Error('Sign in timed out. Please try again.')), 12000)
+            ),
+          ]);
+
+          const { error } = response;
+          if (error) {
+            return { ok: false as const, message: error.message || 'Unable to sign in' };
+          }
+          return { ok: true as const };
+        } catch (error) {
+          const message = error instanceof Error ? error.message : 'Unable to sign in';
+          return { ok: false as const, message };
+        }
+      })();
+
+      signInInFlightRef.current = task.finally(() => {
+        if (signInInFlightRef.current === task) signInInFlightRef.current = null;
+      });
+
+      return signInInFlightRef.current;
     },
     [supabase]
   );
 
   const signOut = useCallback(async () => {
-    await supabase.auth.signOut();
+    try {
+      await supabase.auth.signOut();
+    } catch (error) {
+      console.warn('[auth] signOut failed, forcing local cleanup', error);
+    } finally {
+      try {
+        await supabase.auth.signOut({ scope: 'local' });
+      } catch {}
+      setUser(null);
+      setRole(null);
+      setLoading(false);
+    }
   }, [supabase]);
 
   const value = useMemo<AuthCtx>(

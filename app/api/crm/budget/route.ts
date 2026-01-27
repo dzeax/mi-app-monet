@@ -36,10 +36,9 @@ export async function GET(request: Request) {
   const cookieStore = await cookies();
   const supabase = createRouteHandlerClient({ cookies: () => cookieStore });
 
-  const {
-    data: { session },
-  } = await supabase.auth.getSession();
-  if (!session) {
+  const { data: userData, error: userError } = await supabase.auth.getUser();
+  const user = userData.user;
+  if (userError || !user) {
     return NextResponse.json({ error: "Not authenticated" }, { status: 401 });
   }
 

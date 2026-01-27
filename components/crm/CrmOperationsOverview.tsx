@@ -271,6 +271,11 @@ export default function CrmOperationsOverview() {
           const metrics = metricsByClient[client.slug];
           const currency = metrics?.currency || "EUR";
           const placeholder = loading ? "..." : "--";
+          const computedStatus: "active" | "onboarding" | null = metrics
+            ? metrics.spentTotal > 0
+              ? "active"
+              : "onboarding"
+            : client.status ?? null;
           const share =
             metrics && totals.budgetTotal > 0 && metrics.budgetTotal > 0
               ? metrics.budgetTotal / totals.budgetTotal
@@ -318,15 +323,15 @@ export default function CrmOperationsOverview() {
                   </div>
                 </div>
                 <div className="flex items-center gap-2">
-                  {client.status ? (
+                  {computedStatus ? (
                     <span
                       className={`rounded-full px-3 py-1 text-xs font-semibold ${
-                        client.status === "active"
+                        computedStatus === "active"
                           ? "bg-emerald-100 text-emerald-800"
                           : "bg-amber-100 text-amber-800"
                       }`}
                     >
-                      {client.status === "active" ? "Active" : "Onboarding"}
+                      {computedStatus === "active" ? "Active" : "Onboarding"}
                     </span>
                   ) : null}
                   {share ? (
