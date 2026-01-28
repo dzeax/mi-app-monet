@@ -10,7 +10,6 @@ import CreateCampaignModal from "./create-campaign/CreateCampaignModal";
 import ManageCatalogsModal from "./catalogs/ManageCatalogsModal";
 import ImportCsvModal from "./import/ImportCsvModal";
 import RoutingSettingsModal from "@/components/admin/RoutingSettingsModal";
-import ManageUsersModal from "@/components/admin/ManageUsersModal";
 import ManageRatesModal from "@/components/rates/ManageRatesModal";
 import CrmImportModal from "@/components/crm/CrmImportModal";
 import CrmCatalogsModal from "@/components/crm/CrmCatalogsModal";
@@ -45,7 +44,6 @@ export default function Sidebar({
   const [openCreate, setOpenCreate] = useState(false);
   const [openManage, setOpenManage] = useState(false);
   const [openImport, setOpenImport] = useState(false);
-  const [openUsers, setOpenUsers] = useState(false);
   const [openRouting, setOpenRouting] = useState(false);
   const [openRates, setOpenRates] = useState(false);
   const [openCrmImport, setOpenCrmImport] = useState(false);
@@ -145,19 +143,6 @@ export default function Sidebar({
     </button>
   );
 
-  const BtnUsers = (
-    <button
-      onClick={() => isAdmin && setOpenUsers(true)}
-      disabled={!isAdmin}
-      aria-disabled={!isAdmin}
-      className={btnBase("disabled:opacity-50 disabled:pointer-events-none")}
-      title={isAdmin ? "Manage Users" : "Admins only"}
-      aria-label="Manage users"
-    >
-      <Image src="/icons/sidebar/manage-users.svg" alt="" aria-hidden width={24} height={24} className="sidebar-icon" />
-      {!collapsed && <span>Manage Users{!isAdmin ? " (admin)" : ""}</span>}
-    </button>
-  );
 
   const BtnRouting = (
     <button
@@ -277,12 +262,6 @@ export default function Sidebar({
       title: "Analytics",
       description: "Insights & reports",
       items: [BtnCampaignReporting, BtnReports, BtnDbsPerformance],
-    },
-    {
-      key: "admin",
-      title: "Admin",
-      description: "Access & settings",
-      items: [isAdmin ? BtnUsers : null],
     },
   ];
 
@@ -502,14 +481,6 @@ export default function Sidebar({
         <ManageCatalogsModal
           onClose={() => {
             setOpenManage(false);
-            onActionDone?.();
-          }}
-        />
-      )}
-      {unit === "monetization" && isAdmin && openUsers && (
-        <ManageUsersModal
-          onClose={() => {
-            setOpenUsers(false);
             onActionDone?.();
           }}
         />

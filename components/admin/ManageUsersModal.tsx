@@ -13,6 +13,7 @@ type UserRow = {
   email: string;
   role: Role;
   is_active: boolean;
+  in_team_capacity: boolean;
   display_name?: string | null;
   avatar_url?: string | null;
   created_at: string | null;
@@ -138,12 +139,16 @@ const [profileAvatar, setProfileAvatar] = useState('');
     setLoading(true);
     const { data, error } = await supabase
       .from('app_users')
-      .select('user_id,email,role,is_active,display_name,avatar_url,created_at,updated_at')
+      .select('user_id,email,role,is_active,in_team_capacity,display_name,avatar_url,created_at,updated_at')
       .order('email', { ascending: true });
     if (error) {
       showBanner(error.message, 'err');
     } else {
-      setRows((data ?? []) as UserRow[]);
+      const mapped = (data ?? []).map((row) => ({
+        ...(row as UserRow),
+        in_team_capacity: row.in_team_capacity ?? true,
+      }));
+      setRows(mapped as UserRow[]);
     }
     setLoading(false);
   };
@@ -184,6 +189,17 @@ const [profileAvatar, setProfileAvatar] = useState('');
     }
     showBanner(nextActive ? 'User activated' : 'User deactivated', 'ok');
     setRows((prev) => prev.map((row) => (row.email === email ? { ...row, is_active: nextActive } : row)));
+  };
+
+  const updateTeamCapacityFlag = async (email: string, nextValue: boolean) => {
+    if (!isAdmin) return;
+    const { error } = await supabase.from('app_users').update({ in_team_capacity: nextValue }).eq('email', email);
+    if (error) {
+      showBanner(friendlyDbError(error.message), 'err');
+      return;
+    }
+    showBanner(nextValue ? 'Added to Team Capacity' : 'Removed from Team Capacity', 'ok');
+    setRows((prev) => prev.map((row) => (row.email === email ? { ...row, in_team_capacity: nextValue } : row)));
   };
 
   const invite = async () => {
@@ -424,6 +440,7 @@ const [profileAvatar, setProfileAvatar] = useState('');
                     <th className="text-left font-medium px-3 py-2">Email</th>
                     <th className="text-left font-medium px-3 py-2">Role</th>
                     <th className="text-left font-medium px-3 py-2">Active</th>
+                    <th className="text-left font-medium px-3 py-2">Team capacity</th>
                     <th className="text-left font-medium px-3 py-2">Profile</th>
                     <th className="text-left font-medium px-3 py-2">Updated</th>
                     <th className="text-left font-medium px-3 py-2" />
@@ -439,7 +456,7 @@ const [profileAvatar, setProfileAvatar] = useState('');
                   rows.map((row) => (
                     <div
                       key={row.email}
-                      className="grid grid-cols-[1.6fr_0.8fr_0.7fr_1.3fr_1fr_auto] gap-3 px-3 py-2 items-center"
+                      className="grid grid-cols-[1.6fr_0.8fr_0.7fr_0.8fr_1.3fr_1fr_auto] gap-3 px-3 py-2 items-center"
                     >
                       <div className="truncate">
                         <div className="font-medium">{row.display_name || row.email}</div>
@@ -464,6 +481,16 @@ const [profileAvatar, setProfileAvatar] = useState('');
                           className="accent-[--color-primary]"
                           checked={row.is_active}
                           onChange={(event) => updateActive(row.email, event.target.checked)}
+                          disabled={!isAdmin}
+                        />
+                      </div>
+
+                      <div className="flex items-center gap-2">
+                        <input
+                          type="checkbox"
+                          className="accent-[--color-primary]"
+                          checked={row.in_team_capacity}
+                          onChange={(event) => updateTeamCapacityFlag(row.email, event.target.checked)}
                           disabled={!isAdmin}
                         />
                       </div>
