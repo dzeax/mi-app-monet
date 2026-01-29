@@ -27,18 +27,21 @@ const deleteSchema = z.object({
 
 const requireAdmin = async () => {
   const supabase = await createServerSupabase();
-  const {
-    data: { session },
-  } = await supabase.auth.getSession();
+  const { data: userData, error: userError } = await supabase.auth.getUser();
+  const user = userData?.user ?? null;
 
-  if (!session) {
+  if (userError || !user) {
+    const code = (userError as any)?.code;
+    if (code === 'refresh_token_not_found') {
+      await supabase.auth.signOut({ scope: 'local' });
+    }
     return { error: NextResponse.json({ error: 'Unauthorized' }, { status: 401 }) };
   }
 
   const { data: currentUser, error: currentUserError } = await supabase
     .from('app_users')
     .select('role,is_active')
-    .eq('user_id', session.user.id)
+    .eq('user_id', user.id)
     .maybeSingle();
 
   if (currentUserError) {
@@ -49,7 +52,7 @@ const requireAdmin = async () => {
     return { error: NextResponse.json({ error: 'Forbidden' }, { status: 403 }) };
   }
 
-  return { session };
+  return { user };
 };
 
 export async function GET(req: Request) {
@@ -99,7 +102,7 @@ export async function GET(req: Request) {
 export async function POST(req: Request) {
   const auth = await requireAdmin();
   if (auth.error) return auth.error;
-  const session = auth.session;
+  const user = auth.user;
 
   let parsed;
   try {
@@ -114,7 +117,7 @@ export async function POST(req: Request) {
       country_code: parsed.countryCode,
       holiday_date: parsed.date,
       label: parsed.label ?? null,
-      created_by: session.user.id,
+      created_by: user.id,
     },
     {
       onConflict: 'country_code,holiday_date',

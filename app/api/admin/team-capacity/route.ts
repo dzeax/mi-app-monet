@@ -152,18 +152,21 @@ async function fetchAll<T>(
 
 export async function GET(req: Request) {
   const supabase = await createServerSupabase();
-  const {
-    data: { session },
-  } = await supabase.auth.getSession();
+  const { data: userData, error: userError } = await supabase.auth.getUser();
+  const user = userData?.user ?? null;
 
-  if (!session) {
+  if (userError || !user) {
+    const code = (userError as any)?.code;
+    if (code === 'refresh_token_not_found') {
+      await supabase.auth.signOut({ scope: 'local' });
+    }
     return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
   }
 
   const { data: currentUser, error: currentUserError } = await supabase
     .from('app_users')
     .select('role,is_active')
-    .eq('user_id', session.user.id)
+    .eq('user_id', user.id)
     .maybeSingle();
 
   if (currentUserError) {

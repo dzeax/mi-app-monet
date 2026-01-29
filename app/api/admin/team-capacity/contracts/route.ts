@@ -16,18 +16,21 @@ const payloadSchema = z.object({
 
 export async function POST(req: Request) {
   const supabase = await createServerSupabase();
-  const {
-    data: { session },
-  } = await supabase.auth.getSession();
+  const { data: userData, error: userError } = await supabase.auth.getUser();
+  const user = userData?.user ?? null;
 
-  if (!session) {
+  if (userError || !user) {
+    const code = (userError as any)?.code;
+    if (code === 'refresh_token_not_found') {
+      await supabase.auth.signOut({ scope: 'local' });
+    }
     return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
   }
 
   const { data: currentUser, error: currentUserError } = await supabase
     .from('app_users')
     .select('role,is_active')
-    .eq('user_id', session.user.id)
+    .eq('user_id', user.id)
     .maybeSingle();
 
   if (currentUserError) {
@@ -57,7 +60,7 @@ export async function POST(req: Request) {
       annual_vacation_days: parsed.annualVacationDays,
       start_date: parsed.startDate,
       end_date: parsed.endDate ?? null,
-      created_by: session.user.id,
+      created_by: user.id,
     },
     {
       onConflict: 'user_id,start_date',

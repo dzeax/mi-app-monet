@@ -29,14 +29,19 @@ export async function POST(request: Request) {
   const userId = session?.user?.id ?? null;
 
   if (session && ['SIGNED_IN', 'TOKEN_REFRESHED', 'USER_UPDATED'].includes(event)) {
-    const { error } = await supabase.auth.setSession(session);
-    if (error) {
-      console.warn('[auth-callback] setSession failed', { event, userId, message: error.message });
+    if (session.access_token && session.refresh_token) {
+      const { error } = await supabase.auth.setSession(session);
+      if (error) {
+        console.warn('[auth-callback] setSession failed', { event, userId, message: error.message });
+      }
+    } else {
+      console.warn('[auth-callback] Skipping setSession (missing tokens)', { event, userId });
     }
   }
 
   if (['SIGNED_OUT', 'USER_DELETED'].includes(event)) {
-    const { error } = await supabase.auth.signOut();
+    // Local-only cleanup avoids refresh token errors when cookies are already cleared.
+    const { error } = await supabase.auth.signOut({ scope: 'local' });
     if (error) {
       console.warn('[auth-callback] signOut failed', { event, userId, message: error.message });
     }
