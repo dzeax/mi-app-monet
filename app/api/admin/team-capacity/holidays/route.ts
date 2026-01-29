@@ -17,6 +17,17 @@ const createSchema = z.object({
   label: z.string().trim().optional().nullable(),
 });
 
+const bulkSchema = z.object({
+  countryCode: z.enum(['ES', 'FR']),
+  items: z.array(
+    z.object({
+      date: z.string().regex(DATE_RE),
+      label: z.string().trim().optional().nullable(),
+    }),
+  ),
+  skipDuplicates: z.boolean().optional(),
+});
+
 const updateSchema = createSchema.extend({
   id: z.string().uuid(),
 });
@@ -104,19 +115,51 @@ export async function POST(req: Request) {
   if (auth.error) return auth.error;
   const user = auth.user;
 
-  let parsed;
+  let body: unknown;
   try {
-    parsed = createSchema.parse(await req.json());
+    body = await req.json();
   } catch {
+    return NextResponse.json({ error: 'Invalid payload.' }, { status: 400 });
+  }
+
+  const bulkParsed = bulkSchema.safeParse(body);
+  if (bulkParsed.success) {
+    const items = bulkParsed.data.items;
+    if (!items.length) {
+      return NextResponse.json({ error: 'No holidays to import.' }, { status: 400 });
+    }
+
+    const admin = supabaseAdmin();
+    const rows = items.map((item) => ({
+      country_code: bulkParsed.data.countryCode,
+      holiday_date: item.date,
+      label: item.label?.trim() ? item.label.trim() : null,
+      created_by: user.id,
+    }));
+
+    const { error } = await admin.from('team_holidays').upsert(rows, {
+      onConflict: 'country_code,holiday_date',
+      ignoreDuplicates: bulkParsed.data.skipDuplicates !== false,
+    });
+
+    if (error) {
+      return NextResponse.json({ error: error.message }, { status: 500 });
+    }
+
+    return NextResponse.json({ ok: true });
+  }
+
+  const singleParsed = createSchema.safeParse(body);
+  if (!singleParsed.success) {
     return NextResponse.json({ error: 'Invalid payload.' }, { status: 400 });
   }
 
   const admin = supabaseAdmin();
   const { error } = await admin.from('team_holidays').upsert(
     {
-      country_code: parsed.countryCode,
-      holiday_date: parsed.date,
-      label: parsed.label ?? null,
+      country_code: singleParsed.data.countryCode,
+      holiday_date: singleParsed.data.date,
+      label: singleParsed.data.label ?? null,
       created_by: user.id,
     },
     {

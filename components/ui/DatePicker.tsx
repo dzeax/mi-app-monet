@@ -6,11 +6,11 @@ import { format, parseISO } from 'date-fns';
 
 const isIsoDate = (value: string) => /^\d{4}-\d{2}-\d{2}$/.test(value);
 
-const formatPickerDate = (value?: string | null) => {
+const formatPickerDate = (value?: string | null, displayFormat = 'dd/MM/yyyy') => {
   if (!value || !isIsoDate(value)) return null;
   const parsed = parseISO(value);
   if (Number.isNaN(parsed.getTime())) return null;
-  return format(parsed, 'dd/MM/yyyy');
+  return format(parsed, displayFormat);
 };
 
 export interface DatePickerProps {
@@ -22,6 +22,8 @@ export interface DatePickerProps {
   invalid?: boolean;
   buttonRef?: React.Ref<HTMLButtonElement>;
   disabled?: boolean;
+  displayFormat?: string;
+  buttonClassName?: string;
 }
 
 export default function DatePicker({
@@ -33,11 +35,13 @@ export default function DatePicker({
   invalid = false,
   buttonRef,
   disabled = false,
+  displayFormat = 'dd/MM/yyyy',
+  buttonClassName,
 }: DatePickerProps) {
   const [open, setOpen] = useState(false);
   const wrapRef = useRef<HTMLDivElement | null>(null);
   const selectedDate = value && isIsoDate(value) ? parseISO(value) : undefined;
-  const display = formatPickerDate(value) ?? placeholder;
+  const display = formatPickerDate(value, displayFormat) ?? placeholder;
   const hasValue = Boolean(selectedDate);
   const toIso = (date: Date) => format(date, 'yyyy-MM-dd');
 
@@ -63,7 +67,9 @@ export default function DatePicker({
           // Nota: Usamos la clase 'input' para heredar los estilos globales (Solid Depth)
           className={`input w-full min-w-0 text-left text-sm flex items-center ${
             hasValue ? 'text-[color:var(--color-text)]' : 'text-[color:var(--color-text)]/50'
-          } ${invalid ? 'input-error' : ''} ${disabled ? 'opacity-50 cursor-not-allowed' : ''}`}
+          } ${invalid ? 'input-error' : ''} ${disabled ? 'opacity-50 cursor-not-allowed' : ''} ${
+            buttonClassName ?? ''
+          }`}
           onClick={() => !disabled && setOpen((prev) => !prev)}
           aria-label={ariaLabel}
           aria-describedby={ariaDescribedby}
