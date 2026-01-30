@@ -126,6 +126,8 @@ const dayFormatter = new Intl.NumberFormat('es-ES', {
   maximumFractionDigits: 1,
 });
 
+const WORKDAYS_PER_WEEK = 5;
+
 const formatHours = (value: number | null) => {
   if (value == null || Number.isNaN(value)) return '--';
   return `${numberFormatter.format(value)} h`;
@@ -134,6 +136,22 @@ const formatHours = (value: number | null) => {
 const formatDays = (value: number | null) => {
   if (value == null || Number.isNaN(value)) return '--';
   return `${dayFormatter.format(value)} d`;
+};
+
+const formatDaysValue = (value: number | null) => {
+  if (value == null || Number.isNaN(value)) return null;
+  return `${dayFormatter.format(value)} d`;
+};
+
+const getHoursPerDay = (weeklyHours: number | null) => {
+  if (weeklyHours == null || Number.isNaN(weeklyHours) || weeklyHours <= 0) return null;
+  return weeklyHours / WORKDAYS_PER_WEEK;
+};
+
+const toDaysFromHours = (hours: number | null, hoursPerDay: number | null) => {
+  if (hours == null || Number.isNaN(hours)) return null;
+  if (hoursPerDay == null || Number.isNaN(hoursPerDay) || hoursPerDay <= 0) return null;
+  return hours / hoursPerDay;
 };
 
 const formatIsoDate = (value?: string | null) => {
@@ -319,11 +337,45 @@ export default function TeamCapacityPage() {
     return activeMembers.reduce((acc, member) => acc + (member.workloadHours || 0), 0);
   }, [activeMembers, data]);
 
+  const totalWorkloadDays = useMemo(() => {
+    if (!data) return null;
+    let hasValue = false;
+    const total = activeMembers.reduce((acc, member) => {
+      const hoursPerDay = getHoursPerDay(member.weeklyHours);
+      const days = toDaysFromHours(member.workloadHours, hoursPerDay);
+      if (days != null) {
+        hasValue = true;
+        return acc + days;
+      }
+      return acc;
+    }, 0);
+    return hasValue ? total : null;
+  }, [activeMembers, data]);
+
   const totalCapacity = useMemo(() => {
     if (!data) return 0;
     return activeMembers.reduce((acc, member) => acc + (member.capacityHours || 0), 0);
   }, [activeMembers, data]);
   const unmappedHours = data?.unmappedHours ?? 0;
+
+  const totalCapacityDays = useMemo(() => {
+    if (!data) return null;
+    let hasValue = false;
+    const total = activeMembers.reduce((acc, member) => {
+      const hoursPerDay = getHoursPerDay(member.weeklyHours);
+      const days = toDaysFromHours(member.capacityHours, hoursPerDay);
+      if (days != null) {
+        hasValue = true;
+        return acc + days;
+      }
+      return acc;
+    }, 0);
+    return hasValue ? total : null;
+  }, [activeMembers, data]);
+
+  const averageHoursPerDay =
+    totalCapacityDays != null && totalCapacityDays > 0 ? totalCapacity / totalCapacityDays : null;
+  const unmappedDays = toDaysFromHours(unmappedHours, averageHoursPerDay);
 
   const memberLookup = useMemo(() => {
     const map = new Map<string, CapacityMember>();
@@ -897,11 +949,25 @@ export default function TeamCapacityPage() {
         <div className="grid gap-3 md:grid-cols-3">
           <div className="kpi-frame">
             <p className="text-xs font-bold tracking-widest text-[--color-muted] uppercase">Total capacity</p>
-            <p className="mt-2 text-3xl font-bold tracking-tight">{formatHours(totalCapacity)}</p>
+            <p className="mt-2 text-3xl font-bold tracking-tight">
+              {formatHours(totalCapacity)}
+              {totalCapacityDays != null ? (
+                <span className="text-lg font-normal text-[var(--color-muted)] ml-2">
+                  ({formatDaysValue(totalCapacityDays)})
+                </span>
+              ) : null}
+            </p>
           </div>
           <div className="kpi-frame">
             <p className="text-xs font-bold tracking-widest text-[--color-muted] uppercase">Total workload</p>
-            <p className="mt-2 text-3xl font-bold tracking-tight">{formatHours(totalWorkload)}</p>
+            <p className="mt-2 text-3xl font-bold tracking-tight">
+              {formatHours(totalWorkload)}
+              {totalWorkloadDays != null ? (
+                <span className="text-lg font-normal text-[var(--color-muted)] ml-2">
+                  ({formatDaysValue(totalWorkloadDays)})
+                </span>
+              ) : null}
+            </p>
           </div>
           <div className="kpi-frame">
             <p className="text-xs font-bold tracking-widest text-[--color-muted] uppercase">Unmapped workload</p>
@@ -911,6 +977,11 @@ export default function TeamCapacityPage() {
               }`}
             >
               {formatHours(unmappedHours)}
+              {unmappedDays != null ? (
+                <span className="text-lg font-normal text-[var(--color-muted)] ml-2">
+                  ({formatDaysValue(unmappedDays)})
+                </span>
+              ) : null}
             </p>
           </div>
         </div>
@@ -945,8 +1016,12 @@ export default function TeamCapacityPage() {
             const vacationRemaining = formatDays(member.vacationRemainingDays);
             const utilizationValue = member.utilization ?? null;
             const utilizationStyles = getUtilizationStyles(utilizationValue);
+            const hoursPerDay = getHoursPerDay(member.weeklyHours);
             const capacity = member.capacityHours ?? 0;
             const remaining = capacity ? Math.max(capacity - member.workloadHours, 0) : null;
+            const capacityDays = toDaysFromHours(member.capacityHours, hoursPerDay);
+            const workloadDays = toDaysFromHours(member.workloadHours, hoursPerDay);
+            const remainingDays = toDaysFromHours(remaining, hoursPerDay);
             const progressValue =
               utilizationValue != null && Number.isFinite(utilizationValue)
                 ? Math.min(utilizationValue, 1) * 100
@@ -1025,15 +1100,36 @@ export default function TeamCapacityPage() {
                   <div className="grid grid-cols-3 gap-3 pt-1">
                     <div>
                       <div className="text-[10px] uppercase tracking-widest muted">Capacity</div>
-                      <div className="text-lg font-semibold">{formatHours(member.capacityHours)}</div>
+                      <div className="flex items-baseline text-lg font-semibold">
+                        <span>{formatHours(member.capacityHours)}</span>
+                        {capacityDays != null ? (
+                          <span className="text-xs font-normal text-[var(--color-muted)] ml-1.5">
+                            ({formatDaysValue(capacityDays)})
+                          </span>
+                        ) : null}
+                      </div>
                     </div>
                     <div>
                       <div className="text-[10px] uppercase tracking-widest muted">Workload</div>
-                      <div className="text-lg font-semibold">{formatHours(member.workloadHours)}</div>
+                      <div className="flex items-baseline text-lg font-semibold">
+                        <span>{formatHours(member.workloadHours)}</span>
+                        {workloadDays != null ? (
+                          <span className="text-xs font-normal text-[var(--color-muted)] ml-1.5">
+                            ({formatDaysValue(workloadDays)})
+                          </span>
+                        ) : null}
+                      </div>
                     </div>
                     <div>
                       <div className="text-[10px] uppercase tracking-widest muted">Remaining</div>
-                      <div className="text-lg font-semibold">{formatHours(remaining)}</div>
+                      <div className="flex items-baseline text-lg font-semibold">
+                        <span>{formatHours(remaining)}</span>
+                        {remainingDays != null ? (
+                          <span className="text-xs font-normal text-[var(--color-muted)] ml-1.5">
+                            ({formatDaysValue(remainingDays)})
+                          </span>
+                        ) : null}
+                      </div>
                     </div>
                   </div>
                 </div>
@@ -1047,19 +1143,40 @@ export default function TeamCapacityPage() {
                   ) : null}
                 </div>
 
-                <div className="mt-3 flex flex-wrap items-center gap-4 text-xs muted">
-                  <span className="inline-flex items-center gap-1.5">
-                    <Palmtree size={14} className="text-[--color-muted]" />
-                    {formatDays(member.holidayDays)}
-                  </span>
-                  <span className="inline-flex items-center gap-1.5">
-                    <Clock size={14} className="text-[--color-muted]" />
-                    {formatDays(member.timeOffByType.total)}
-                  </span>
-                  <span className="inline-flex items-center gap-1.5">
-                    <Briefcase size={14} className="text-[--color-muted]" />
-                    {vacationRemaining}
-                  </span>
+                {/* Footer Metadata with Tooltips */}
+                <div className="mt-4 flex flex-wrap items-center gap-4 text-xs text-[var(--color-muted)]">
+                  {/* Holiday Days */}
+                  <div className="group relative flex items-center gap-1.5 cursor-help">
+                    <Palmtree size={14} className="opacity-70 group-hover:opacity-100 transition-opacity" />
+                    <span>{formatDays(member.holidayDays)}</span>
+                    {/* Tooltip */}
+                    <div className="pointer-events-none absolute bottom-full left-1/2 -translate-x-1/2 mb-2 hidden w-max rounded bg-slate-800 px-2 py-1 text-[10px] text-white shadow-lg group-hover:block z-10">
+                      Public holidays
+                      <div className="absolute top-full left-1/2 -translate-x-1/2 border-4 border-transparent border-t-slate-800" />
+                    </div>
+                  </div>
+
+                  {/* Total Time Off */}
+                  <div className="group relative flex items-center gap-1.5 cursor-help">
+                    <Clock size={14} className="opacity-70 group-hover:opacity-100 transition-opacity" />
+                    <span>{formatDays(member.timeOffByType.total)}</span>
+                    {/* Tooltip */}
+                    <div className="pointer-events-none absolute bottom-full left-1/2 -translate-x-1/2 mb-2 hidden w-max rounded bg-slate-800 px-2 py-1 text-[10px] text-white shadow-lg group-hover:block z-10">
+                      Total time off taken
+                      <div className="absolute top-full left-1/2 -translate-x-1/2 border-4 border-transparent border-t-slate-800" />
+                    </div>
+                  </div>
+
+                  {/* Vacation Remaining */}
+                  <div className="group relative flex items-center gap-1.5 cursor-help">
+                    <Briefcase size={14} className="opacity-70 group-hover:opacity-100 transition-opacity" />
+                    <span>{vacationRemaining}</span>
+                    {/* Tooltip */}
+                    <div className="pointer-events-none absolute bottom-full left-1/2 -translate-x-1/2 mb-2 hidden w-max rounded bg-slate-800 px-2 py-1 text-[10px] text-white shadow-lg group-hover:block z-10">
+                      Vacation days left
+                      <div className="absolute top-full left-1/2 -translate-x-1/2 border-4 border-transparent border-t-slate-800" />
+                    </div>
+                  </div>
                 </div>
               </div>
             );
