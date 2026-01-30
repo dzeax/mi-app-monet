@@ -836,38 +836,46 @@ export default function TeamCapacityPage() {
               weekdays, holidays, and time off.
             </p>
           </div>
-          <div className="flex flex-wrap items-end gap-3">
-            <div className="flex flex-wrap items-center gap-3 rounded-xl bg-[color:var(--color-surface)] p-2 border border-[--color-border]">
+            {/* Container: Soft Toolbar Style (White island with subtle shadow) */}
+            <div className="flex flex-wrap items-center gap-4 rounded-2xl bg-[var(--color-surface)] border border-[var(--color-border)] shadow-sm px-4 py-2">
+              {/* Start Date */}
               <div className="flex flex-col gap-1">
-                <span className="text-[10px] uppercase tracking-[0.2em] muted">Start</span>
-                <div className="flex items-center gap-2 rounded-lg bg-[color:var(--color-surface-2)] px-3 py-2 min-h-[40px]">
-                  <Calendar className="h-4 w-4 text-[color:var(--color-text)]/60" />
-                  <div className="w-[140px]">
+                <div className="flex items-center gap-2 rounded-lg bg-[var(--color-surface-2)]/50 border border-[var(--color-border)]/60 px-3 py-1.5 min-h-[36px] transition-colors hover:bg-[var(--color-surface-2)]">
+                  <Calendar className="h-3.5 w-3.5 text-[var(--color-muted)]" />
+                  <div className="w-[120px]">
                     <DatePicker
                       value={startDate}
                       onChange={(value) => value && setStartDate(value)}
                       ariaLabel="Start date"
-                      buttonClassName="!bg-transparent !border-transparent !shadow-none !px-0 !py-0 !min-h-0"
+                      buttonClassName="!bg-transparent !border-transparent !shadow-none !px-0 !py-0 !min-h-0 !text-xs !font-medium"
                     />
                   </div>
                 </div>
               </div>
+
+              {/* Separator */}
+              <span className="text-[var(--color-muted)] opacity-50">&rarr;</span>
+
+              {/* End Date */}
               <div className="flex flex-col gap-1">
-                <span className="text-[10px] uppercase tracking-[0.2em] muted">End</span>
-                <div className="flex items-center gap-2 rounded-lg bg-[color:var(--color-surface-2)] px-3 py-2 min-h-[40px]">
-                  <Calendar className="h-4 w-4 text-[color:var(--color-text)]/60" />
-                  <div className="w-[140px]">
+                <div className="flex items-center gap-2 rounded-lg bg-[var(--color-surface-2)]/50 border border-[var(--color-border)]/60 px-3 py-1.5 min-h-[36px] transition-colors hover:bg-[var(--color-surface-2)]">
+                  <Calendar className="h-3.5 w-3.5 text-[var(--color-muted)]" />
+                  <div className="w-[120px]">
                     <DatePicker
                       value={endDate}
                       onChange={(value) => value && setEndDate(value)}
                       ariaLabel="End date"
-                      buttonClassName="!bg-transparent !border-transparent !shadow-none !px-0 !py-0 !min-h-0"
+                      buttonClassName="!bg-transparent !border-transparent !shadow-none !px-0 !py-0 !min-h-0 !text-xs !font-medium"
                     />
                   </div>
                 </div>
               </div>
+
+              <div className="h-6 w-px bg-[var(--color-border)] mx-1" />
+
+              {/* Actions */}
               <button
-                className="btn-ghost border border-[--color-border] px-4 h-10 text-sm"
+                className="btn-ghost text-xs px-3 py-1.5 h-[36px]"
                 onClick={() => {
                   setCalendarTab('holidays');
                   setCalendarModalOpen(true);
@@ -875,12 +883,16 @@ export default function TeamCapacityPage() {
               >
                 Manage calendars
               </button>
-              <button className="btn-primary h-10 px-4 gap-2" onClick={fetchData} disabled={loading}>
-                <RefreshCw className={`h-4 w-4 ${loading ? 'animate-spin' : ''}`} />
+
+              <button
+                className="btn-primary flex items-center gap-2 text-xs px-4 py-1.5 h-[36px] rounded-lg shadow-sm"
+                onClick={fetchData}
+                disabled={loading}
+              >
+                <RefreshCw className={`h-3.5 w-3.5 ${loading ? 'animate-spin' : ''}`} />
                 {loading ? 'Loading...' : 'Refresh'}
               </button>
             </div>
-          </div>
         </div>
         <div className="grid gap-3 md:grid-cols-3">
           <div className="kpi-frame">
@@ -911,11 +923,19 @@ export default function TeamCapacityPage() {
       ) : null}
 
       <div className="card overflow-hidden">
-        <div className="flex items-center justify-between border-b border-[--color-border] px-4 py-3">
-          <h2 className="text-base font-semibold">Capacity by member</h2>
-          <span className="text-xs muted">{activeMembers.length} members</span>
+        {/* Header: More visual weight */}
+        <div className="flex items-center gap-3 bg-[var(--color-surface-2)]/80 border-b border-[var(--color-border)]/60 px-6 py-4">
+          <h2 className="text-sm font-bold text-[var(--color-text)] uppercase tracking-wide">
+            Capacity by member
+          </h2>
+          {/* Counter Badge */}
+          <span className="inline-flex items-center justify-center bg-[var(--color-surface)] text-[var(--color-muted)] text-[10px] font-bold px-2.5 py-0.5 rounded-full shadow-sm ring-1 ring-inset ring-[var(--color-border)]/60">
+            {activeMembers.length} members
+          </span>
         </div>
-        <div className="grid gap-4 p-4 md:grid-cols-2 xl:grid-cols-3">
+
+        {/* Body: The Grid */}
+        <div className="grid gap-4 p-6 md:grid-cols-2 xl:grid-cols-3">
           {orderedMembers.map((member) => {
             const name = member.displayName || member.email || 'Unnamed';
             const contractCountry = member.contractCountryCode ?? '--';
