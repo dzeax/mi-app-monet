@@ -8,8 +8,11 @@ import {
   Briefcase,
   Calendar,
   CalendarDays,
+  ChevronDown,
+  ChevronUp,
   Clock,
   Download,
+  Info,
   MoreHorizontal,
   Palmtree,
   Plus,
@@ -154,6 +157,49 @@ const toDaysFromHours = (hours: number | null, hoursPerDay: number | null) => {
   return hours / hoursPerDay;
 };
 
+type DatePreset = 'custom' | 'this_month' | 'next_month' | 'this_quarter' | 'this_year';
+
+const getPresetRange = (preset: DatePreset) => {
+  const now = new Date();
+  const year = now.getUTCFullYear();
+  const month = now.getUTCMonth();
+
+  switch (preset) {
+    case 'this_month':
+      return {
+        start: new Date(Date.UTC(year, month, 1)).toISOString().slice(0, 10),
+        end: new Date(Date.UTC(year, month + 1, 0)).toISOString().slice(0, 10),
+      };
+    case 'next_month':
+      return {
+        start: new Date(Date.UTC(year, month + 1, 1)).toISOString().slice(0, 10),
+        end: new Date(Date.UTC(year, month + 2, 0)).toISOString().slice(0, 10),
+      };
+    case 'this_quarter': {
+      const qMonth = Math.floor(month / 3) * 3;
+      return {
+        start: new Date(Date.UTC(year, qMonth, 1)).toISOString().slice(0, 10),
+        end: new Date(Date.UTC(year, qMonth + 3, 0)).toISOString().slice(0, 10),
+      };
+    }
+    case 'this_year':
+      return {
+        start: `${year}-01-01`,
+        end: `${year}-12-31`,
+      };
+    default:
+      return null;
+  }
+};
+
+const presetLabels: Record<DatePreset, string> = {
+  custom: 'Custom',
+  this_month: 'This Month',
+  next_month: 'Next Month',
+  this_quarter: 'This Quarter',
+  this_year: 'This Year',
+};
+
 const formatIsoDate = (value?: string | null) => {
   if (!value) return '--';
   if (!CSV_DATE_RE.test(value)) return value;
@@ -272,6 +318,8 @@ export default function TeamCapacityPage() {
   const { isAdmin } = useAuth();
   const [startDate, setStartDate] = useState(toDateInput(defaultStart));
   const [endDate, setEndDate] = useState(toDateInput(defaultEnd));
+  const [activePreset, setActivePreset] = useState<DatePreset>('this_month');
+  const [presetMenuOpen, setPresetMenuOpen] = useState(false);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [data, setData] = useState<CapacityResponse | null>(null);
@@ -321,7 +369,7 @@ export default function TeamCapacityPage() {
   }, [selectedYear, startDate, endDate]);
 
   const monthLabels = useMemo(() => {
-    const formatter = new Intl.DateTimeFormat('es-ES', { month: 'short' });
+    const formatter = new Intl.DateTimeFormat('en-US', { month: 'short' });
     return Array.from({ length: 12 }, (_, idx) =>
       formatter.format(new Date(Date.UTC(selectedYear, idx, 1))),
     );
@@ -883,13 +931,59 @@ export default function TeamCapacityPage() {
           <div className="max-w-2xl">
             <p className="text-xs uppercase tracking-[0.3em] muted">Command Center</p>
             <h1 className="text-2xl font-semibold">Team Capacity</h1>
-            <p className="text-sm muted">
-              Workload from CRM only (DQ, manual, strategy, and campaign production units). Capacity uses hours/week,
-              weekdays, holidays, and time off.
+            <p className="text-sm text-[var(--color-muted)] max-w-3xl">
+              Includes workload from <strong>Monetization</strong> and <strong>CRM</strong> (all active clients & PRM).
+              Capacity is calculated based on contract hours, workdays, holidays, and time off.
             </p>
           </div>
             {/* Container: Soft Toolbar Style (White island with subtle shadow) */}
             <div className="flex flex-wrap items-center gap-4 rounded-2xl bg-[var(--color-surface)] border border-[var(--color-border)] shadow-sm px-4 py-2">
+              {/* Preset Selector */}
+              <div className="relative">
+                <button
+                  onClick={() => setPresetMenuOpen(!presetMenuOpen)}
+                  className="flex items-center gap-2 text-xs font-semibold text-[var(--color-text)] px-2 py-1.5 rounded hover:bg-[var(--color-surface-2)] transition-colors min-w-[90px]"
+                >
+                  <span>{presetLabels[activePreset]}</span>
+                  <ChevronDown size={14} className="text-[var(--color-muted)]" />
+                </button>
+
+                {/* Dropdown Menu */}
+                {presetMenuOpen ? (
+                  <>
+                    <div className="fixed inset-0 z-30" onClick={() => setPresetMenuOpen(false)} />
+                    <div className="absolute top-full left-0 mt-2 w-32 bg-[var(--color-surface)] border border-[var(--color-border)] rounded-xl shadow-lg py-1 z-40 animate-in fade-in zoom-in-95 duration-100 flex flex-col">
+                      {(Object.keys(presetLabels) as DatePreset[])
+                        .filter((key) => key !== 'custom')
+                        .map((key) => (
+                          <button
+                            key={key}
+                            className={`text-left px-4 py-2 text-xs hover:bg-[var(--color-surface-2)] transition-colors ${
+                              activePreset === key
+                                ? 'text-[var(--color-primary)] font-semibold'
+                                : 'text-[var(--color-text)]'
+                            }`}
+                            onClick={() => {
+                              const range = getPresetRange(key);
+                              if (range) {
+                                setStartDate(range.start);
+                                setEndDate(range.end);
+                              }
+                              setActivePreset(key);
+                              setPresetMenuOpen(false);
+                            }}
+                          >
+                            {presetLabels[key]}
+                          </button>
+                        ))}
+                    </div>
+                  </>
+                ) : null}
+              </div>
+
+              {/* Divider */}
+              <div className="h-6 w-px bg-[var(--color-border)]/60" />
+
               {/* Start Date */}
               <div className="flex flex-col gap-1">
                 <div className="flex items-center gap-2 rounded-lg bg-[var(--color-surface-2)]/50 border border-[var(--color-border)]/60 px-3 py-1.5 min-h-[36px] transition-colors hover:bg-[var(--color-surface-2)]">
@@ -897,7 +991,11 @@ export default function TeamCapacityPage() {
                   <div className="w-[120px]">
                     <DatePicker
                       value={startDate}
-                      onChange={(value) => value && setStartDate(value)}
+                      onChange={(value) => {
+                        if (!value) return;
+                        setStartDate(value);
+                        setActivePreset('custom');
+                      }}
                       ariaLabel="Start date"
                       buttonClassName="!bg-transparent !border-transparent !shadow-none !px-0 !py-0 !min-h-0 !text-xs !font-medium"
                     />
@@ -915,7 +1013,11 @@ export default function TeamCapacityPage() {
                   <div className="w-[120px]">
                     <DatePicker
                       value={endDate}
-                      onChange={(value) => value && setEndDate(value)}
+                      onChange={(value) => {
+                        if (!value) return;
+                        setEndDate(value);
+                        setActivePreset('custom');
+                      }}
                       ariaLabel="End date"
                       buttonClassName="!bg-transparent !border-transparent !shadow-none !px-0 !py-0 !min-h-0 !text-xs !font-medium"
                     />
@@ -1192,7 +1294,7 @@ export default function TeamCapacityPage() {
       <div className="card overflow-hidden">
         <button
           type="button"
-          className="flex w-full items-center justify-between border-b border-[--color-border] px-4 py-3 text-left"
+          className="flex w-full items-center justify-between bg-[var(--color-surface-2)]/80 border-b border-[var(--color-border)]/60 px-6 py-4 text-left"
           onClick={() => setVacationOpen((prev) => !prev)}
           aria-expanded={vacationOpen}
         >
@@ -1200,9 +1302,11 @@ export default function TeamCapacityPage() {
             <h2 className="text-base font-semibold">Vacation calendar {selectedYear}</h2>
             <p className="text-xs muted">Days per month</p>
           </div>
-          <span className="text-xs font-semibold text-[color:var(--color-text)]/70">
-            {vacationOpen ? 'Hide' : 'Show'}
-          </span>
+          {vacationOpen ? (
+            <ChevronUp className="h-5 w-5 text-[var(--color-muted)]" />
+          ) : (
+            <ChevronDown className="h-5 w-5 text-[var(--color-muted)]" />
+          )}
         </button>
         {vacationOpen ? (
           <div className="max-h-[420px] overflow-auto">
@@ -1895,15 +1999,26 @@ export default function TeamCapacityPage() {
         </div>
       ) : null}
 
-      <div className="rounded-lg border border-[--color-border] bg-[--color-surface-2] p-4 text-sm text-[color:var(--color-text)]/80">
-        <p className="font-semibold text-[color:var(--color-text)]">Notes</p>
-        <ul className="mt-2 list-disc pl-5 space-y-1 text-sm">
-          <li>Capacity uses Monday-Friday only.</li>
+      {/* Notes Section: Soft Info Callout Style */}
+      <div className="mt-8 rounded-r-xl border-l-4 border-blue-400/30 bg-blue-50/30 p-5 text-sm dark:border-blue-500/30 dark:bg-blue-900/10">
+        <div className="mb-3 flex items-center gap-2 text-[var(--color-text)] opacity-80">
+          <Info className="h-4 w-4" />
+          <p className="font-semibold">Reference notes</p>
+        </div>
+        <ul className="list-disc space-y-1.5 pl-7 text-[var(--color-muted)]">
+          <li>
+            Capacity uses <strong>Monday-Friday</strong> only.
+          </li>
           <li>Workload includes CRM DQ, manual efforts, strategy efforts, and campaign production units.</li>
-          <li>Vacation entitlement defaults to ES=22 days, FR=30 days unless overridden.</li>
+          <li>
+            Vacation entitlement defaults to <strong>ES=22 days</strong>, <strong>FR=30 days</strong> unless
+            overridden.
+          </li>
           <li>Public holidays are applied per calendar (ES = Catalonia, FR = adjusted company).</li>
-          <li>Time off is applied per member (vacation/sick/other, half days supported).</li>
-          <li>Use "Manage calendars" to update holidays and time off.</li>
+          <li>
+            Time off is applied per member (vacation/sick/other, <strong>half days</strong> supported).
+          </li>
+          <li>Use "Manage calendars" in the toolbar to update holidays and time off.</li>
         </ul>
       </div>
 
