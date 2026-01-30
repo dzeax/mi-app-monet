@@ -107,6 +107,17 @@ type TimeOffFormState = {
   reason: string;
 };
 
+type WorkloadDetailSource = 'crm_dq' | 'manual' | 'strategy' | 'campaign';
+
+type WorkloadDetailItem = {
+  id: string;
+  clientSlug: string | null;
+  clientName: string | null;
+  source: WorkloadDetailSource;
+  label: string | null;
+  hours: number;
+};
+
 const today = new Date();
 const defaultStart = new Date(Date.UTC(today.getUTCFullYear(), today.getUTCMonth(), 1));
 const defaultEnd = new Date(Date.UTC(today.getUTCFullYear(), today.getUTCMonth() + 1, 0));
@@ -217,6 +228,166 @@ const timeOffTypeLabels: Record<TimeOffEntry['type'], string> = {
   vacation: 'Vacation',
   sick: 'Sick',
   other: 'Other',
+};
+
+const workloadSourceLabels: Record<WorkloadDetailSource, string> = {
+  crm_dq: 'CRM DQ',
+  manual: 'Manual Effort',
+  strategy: 'Strategy',
+  campaign: 'Campaign Production',
+};
+
+const workloadSourceBadge: Record<WorkloadDetailSource, string> = {
+  crm_dq: 'bg-sky-50 text-sky-600 dark:bg-sky-900/30 dark:text-sky-300',
+  manual: 'bg-amber-50 text-amber-600 dark:bg-amber-900/30 dark:text-amber-300',
+  strategy: 'bg-purple-50 text-purple-600 dark:bg-purple-900/30 dark:text-purple-300',
+  campaign: 'bg-emerald-50 text-emerald-600 dark:bg-emerald-900/30 dark:text-emerald-300',
+};
+
+type WorkloadClientColor = {
+  bar: string;
+  dot: string;
+  chip: string;
+  border: string;
+};
+
+type ClientLogo = {
+  src: string;
+  alt: string;
+};
+
+type WorkloadChartColor = {
+  bar: string;
+  dot: string;
+};
+
+const workloadClientPalette: WorkloadClientColor[] = [
+  {
+    bar: 'bg-sky-500/80 dark:bg-sky-400/70',
+    dot: 'bg-sky-500 dark:bg-sky-300',
+    chip: 'bg-sky-100 text-sky-700 dark:bg-sky-900/40 dark:text-sky-200',
+    border: 'border-sky-200/70 dark:border-sky-800/60',
+  },
+  {
+    bar: 'bg-emerald-500/80 dark:bg-emerald-400/70',
+    dot: 'bg-emerald-500 dark:bg-emerald-300',
+    chip: 'bg-emerald-100 text-emerald-700 dark:bg-emerald-900/40 dark:text-emerald-200',
+    border: 'border-emerald-200/70 dark:border-emerald-800/60',
+  },
+  {
+    bar: 'bg-amber-500/80 dark:bg-amber-400/70',
+    dot: 'bg-amber-500 dark:bg-amber-300',
+    chip: 'bg-amber-100 text-amber-700 dark:bg-amber-900/40 dark:text-amber-200',
+    border: 'border-amber-200/70 dark:border-amber-800/60',
+  },
+  {
+    bar: 'bg-purple-500/80 dark:bg-purple-400/70',
+    dot: 'bg-purple-500 dark:bg-purple-300',
+    chip: 'bg-purple-100 text-purple-700 dark:bg-purple-900/40 dark:text-purple-200',
+    border: 'border-purple-200/70 dark:border-purple-800/60',
+  },
+  {
+    bar: 'bg-indigo-500/80 dark:bg-indigo-400/70',
+    dot: 'bg-indigo-500 dark:bg-indigo-300',
+    chip: 'bg-indigo-100 text-indigo-700 dark:bg-indigo-900/40 dark:text-indigo-200',
+    border: 'border-indigo-200/70 dark:border-indigo-800/60',
+  },
+  {
+    bar: 'bg-rose-500/80 dark:bg-rose-400/70',
+    dot: 'bg-rose-500 dark:bg-rose-300',
+    chip: 'bg-rose-100 text-rose-700 dark:bg-rose-900/40 dark:text-rose-200',
+    border: 'border-rose-200/70 dark:border-rose-800/60',
+  },
+  {
+    bar: 'bg-teal-500/80 dark:bg-teal-400/70',
+    dot: 'bg-teal-500 dark:bg-teal-300',
+    chip: 'bg-teal-100 text-teal-700 dark:bg-teal-900/40 dark:text-teal-200',
+    border: 'border-teal-200/70 dark:border-teal-800/60',
+  },
+];
+
+const workloadChartPalette: WorkloadChartColor[] = [
+  { bar: 'bg-blue-500', dot: 'bg-blue-500' },
+  { bar: 'bg-emerald-500', dot: 'bg-emerald-500' },
+  { bar: 'bg-amber-500', dot: 'bg-amber-500' },
+  { bar: 'bg-purple-500', dot: 'bg-purple-500' },
+  { bar: 'bg-indigo-500', dot: 'bg-indigo-500' },
+];
+
+const workloadChartOtherColor: WorkloadChartColor = {
+  bar: 'bg-slate-300 dark:bg-slate-600',
+  dot: 'bg-slate-400 dark:bg-slate-500',
+};
+
+const CLIENT_LOGOS: Record<string, ClientLogo> = {
+  emg: { src: '/logos/emg-logo.png', alt: 'EMG' },
+  bouygues: { src: '/logos/bouygues-logo.png', alt: 'Bouygues Telecom' },
+  taittinger: { src: '/logos/taittinger-logo.png', alt: 'Taittinger' },
+  ponant: { src: '/logos/ponant-logo.png', alt: 'Ponant' },
+  'petit-forestier': { src: '/logos/petit-forestier.png', alt: 'Petit Forestier' },
+  'saveurs-et-vie': { src: '/logos/logo-saveurs-et-vie.svg', alt: 'Saveurs et Vie' },
+  sfr: { src: '/logos/prm.png', alt: 'Global PRM' },
+  europcar: { src: '/logos/ec_logo.png', alt: 'Europcar' },
+  goldcar: { src: '/logos/gc_logo.png', alt: 'Goldcar' },
+};
+
+const CLIENT_LOGO_ALIASES: Record<string, string> = {
+  'emg': 'emg',
+  'europcar mobility group': 'emg',
+  'europcar mobility': 'emg',
+  'emg europcar mobility group': 'emg',
+  'europcar': 'europcar',
+  'petit forestier': 'petit-forestier',
+  'saveurs et vie': 'saveurs-et-vie',
+  'global prm': 'sfr',
+  'prm': 'sfr',
+  'bouygues telecom': 'bouygues',
+};
+
+const getClientColor = (name: string) => {
+  if (!name) return workloadClientPalette[0];
+  let hash = 0;
+  for (let i = 0; i < name.length; i += 1) {
+    hash = (hash * 31 + name.charCodeAt(i)) % 2147483647;
+  }
+  const index = Math.abs(hash) % workloadClientPalette.length;
+  return workloadClientPalette[index];
+};
+
+const normalizeClientName = (value?: string | null) =>
+  value
+    ? value
+        .normalize('NFD')
+        .replace(/[\u0300-\u036f]/g, '')
+        .replace(/&/g, 'and')
+        .replace(/[^a-z0-9]+/gi, ' ')
+        .trim()
+        .toLowerCase()
+    : '';
+
+const getClientLogo = (clientSlug?: string | null, clientName?: string | null) => {
+  const slugKey = (clientSlug || '').trim().toLowerCase();
+  if (slugKey && CLIENT_LOGOS[slugKey]) {
+    return CLIENT_LOGOS[slugKey];
+  }
+  const nameKey = normalizeClientName(clientName);
+  const aliasKey = nameKey ? CLIENT_LOGO_ALIASES[nameKey] ?? nameKey : '';
+  if (aliasKey && CLIENT_LOGOS[aliasKey]) {
+    return CLIENT_LOGOS[aliasKey];
+  }
+  return null;
+};
+
+const getClientInitials = (name: string) => {
+  const words = name.trim().split(/\s+/).filter(Boolean);
+  if (!words.length) return '?';
+  if (words.length === 1) return words[0].slice(0, 2).toUpperCase();
+  return `${words[0][0]}${words[1][0]}`.toUpperCase();
+};
+
+const formatAsDays = (hours: number | null, hoursPerDay: number | null) => {
+  const days = toDaysFromHours(hours, hoursPerDay);
+  return days != null ? formatDaysValue(days) : '-- d';
 };
 
 const formatFraction = (value: number) => dayFormatter.format(value);
@@ -355,6 +526,10 @@ export default function TeamCapacityPage() {
   const [calendarModalOpen, setCalendarModalOpen] = useState(false);
   const [calendarTab, setCalendarTab] = useState<'holidays' | 'timeoff'>('holidays');
   const [vacationOpen, setVacationOpen] = useState(false);
+  const [workloadDrawerMember, setWorkloadDrawerMember] = useState<CapacityMember | null>(null);
+  const [workloadDetailItems, setWorkloadDetailItems] = useState<WorkloadDetailItem[]>([]);
+  const [workloadDetailLoading, setWorkloadDetailLoading] = useState(false);
+  const [workloadDetailError, setWorkloadDetailError] = useState<string | null>(null);
 
   const selectedYear = useMemo(() => {
     const year = Number(startDate.slice(0, 4));
@@ -433,7 +608,105 @@ export default function TeamCapacityPage() {
     return map;
   }, [data]);
 
+  useEffect(() => {
+    if (!workloadDrawerMember) return;
+    const updatedMember = memberLookup.get(workloadDrawerMember.userId);
+    if (!updatedMember) {
+      setWorkloadDrawerMember(null);
+      return;
+    }
+    if (updatedMember !== workloadDrawerMember) {
+      setWorkloadDrawerMember(updatedMember);
+    }
+  }, [memberLookup, workloadDrawerMember]);
+
   const orderedMembers = useMemo(() => activeMembers, [activeMembers]);
+
+  const sortedWorkloadDetails = useMemo(
+    () => [...workloadDetailItems].sort((a, b) => b.hours - a.hours),
+    [workloadDetailItems],
+  );
+
+  const drawerHoursPerDay = useMemo(
+    () => (workloadDrawerMember ? getHoursPerDay(workloadDrawerMember.weeklyHours) : null),
+    [workloadDrawerMember],
+  );
+
+  const groupedWorkload = useMemo(() => {
+    const grouped = new Map<
+      string,
+      {
+        name: string;
+        slug: string | null;
+        totalHours: number;
+        entries: WorkloadDetailItem[];
+        color: WorkloadClientColor;
+      }
+    >();
+
+    sortedWorkloadDetails.forEach((entry) => {
+      const clientKey = entry.clientSlug || entry.clientName || 'Other';
+      const clientName = entry.clientName || entry.clientSlug || 'Other';
+      if (!grouped.has(clientKey)) {
+        grouped.set(clientKey, {
+          name: clientName,
+          slug: entry.clientSlug ?? null,
+          totalHours: 0,
+          entries: [],
+          color: getClientColor(clientName),
+        });
+      }
+      const target = grouped.get(clientKey);
+      if (!target) return;
+      if (!target.slug && entry.clientSlug) {
+        target.slug = entry.clientSlug;
+      }
+      target.totalHours += entry.hours;
+      target.entries.push(entry);
+    });
+
+    return Array.from(grouped.values())
+      .map((group) => ({
+        ...group,
+        entries: [...group.entries].sort((a, b) => b.hours - a.hours),
+      }))
+      .sort((a, b) => b.totalHours - a.totalHours);
+  }, [sortedWorkloadDetails]);
+
+  const groupedWorkloadTotal = useMemo(
+    () => groupedWorkload.reduce((sum, group) => sum + group.totalHours, 0),
+    [groupedWorkload],
+  );
+
+  const workloadChartSegments = useMemo(() => {
+    if (!groupedWorkload.length) return [];
+    const segments = groupedWorkload.slice(0, 5).map((group, index) => ({
+      name: group.name,
+      totalHours: group.totalHours,
+      color: workloadChartPalette[index] ?? workloadChartPalette[0],
+    }));
+    const remainingHours = groupedWorkload
+      .slice(5)
+      .reduce((sum, group) => sum + group.totalHours, 0);
+    if (remainingHours > 0) {
+      segments.push({
+        name: 'Other',
+        totalHours: remainingHours,
+        color: workloadChartOtherColor,
+      });
+    }
+    return segments;
+  }, [groupedWorkload]);
+
+  const workloadLegend = useMemo(
+    () =>
+      groupedWorkload.slice(0, 3).map((group, index) => ({
+        name: group.name,
+        totalHours: group.totalHours,
+        color: workloadChartPalette[index] ?? workloadChartPalette[0],
+      })),
+    [groupedWorkload],
+  );
 
   const activeMemberIds = useMemo(() => new Set(activeMembers.map((member) => member.userId)), [activeMembers]);
 
@@ -580,6 +853,58 @@ export default function TeamCapacityPage() {
     document.addEventListener('mousedown', handler);
     return () => document.removeEventListener('mousedown', handler);
   }, [holidayActionsOpen]);
+
+  useEffect(() => {
+    if (!workloadDrawerMember) {
+      setWorkloadDetailItems([]);
+      setWorkloadDetailError(null);
+      setWorkloadDetailLoading(false);
+      return;
+    }
+
+    const controller = new AbortController();
+    const loadDetails = async () => {
+      setWorkloadDetailLoading(true);
+      setWorkloadDetailError(null);
+      setWorkloadDetailItems([]);
+      try {
+        const params = new URLSearchParams({
+          userId: workloadDrawerMember.userId,
+          start: startDate,
+          end: endDate,
+        });
+        const response = await fetch(
+          `/api/admin/team-capacity/workload-detail?${params.toString()}`,
+          { signal: controller.signal },
+        );
+        const payload = await response.json().catch(() => null);
+        if (!response.ok) {
+          const message =
+            payload && typeof payload.error === 'string'
+              ? payload.error
+              : 'Failed to load workload details';
+          throw new Error(message);
+        }
+        const items = Array.isArray(payload?.items)
+          ? (payload.items as WorkloadDetailItem[])
+          : [];
+        setWorkloadDetailItems(items);
+      } catch (err: unknown) {
+        if ((err as Error).name === 'AbortError') return;
+        setWorkloadDetailError(
+          err instanceof Error ? err.message : 'Failed to load workload details',
+        );
+      } finally {
+        if (!controller.signal.aborted) {
+          setWorkloadDetailLoading(false);
+        }
+      }
+    };
+
+    loadDetails();
+
+    return () => controller.abort();
+  }, [workloadDrawerMember, startDate, endDate]);
 
   const openEditor = (member: CapacityMember) => {
     const fallbackContract = member.contractCountryCode ?? 'FR';
@@ -1211,17 +1536,22 @@ export default function TeamCapacityPage() {
                         ) : null}
                       </div>
                     </div>
-                    <div>
-                      <div className="text-[10px] uppercase tracking-widest muted">Workload</div>
-                      <div className="flex items-baseline text-lg font-semibold">
-                        <span>{formatHours(member.workloadHours)}</span>
-                        {workloadDays != null ? (
-                          <span className="text-xs font-normal text-[var(--color-muted)] ml-1.5">
-                            ({formatDaysValue(workloadDays)})
+                      <div
+                        className="cursor-pointer group hover:bg-[var(--color-surface-2)]/50 transition-colors rounded px-2 -mx-2"
+                        onClick={() => setWorkloadDrawerMember(member)}
+                      >
+                        <div className="text-[10px] uppercase tracking-widest muted">Workload</div>
+                        <div className="flex items-baseline text-lg font-semibold">
+                          <span className="group-hover:text-[var(--color-primary)]">
+                            {formatHours(member.workloadHours)}
                           </span>
-                        ) : null}
+                          {workloadDays != null ? (
+                            <span className="text-xs font-normal text-[var(--color-muted)] ml-1.5">
+                              ({formatDaysValue(workloadDays)})
+                            </span>
+                          ) : null}
+                        </div>
                       </div>
-                    </div>
                     <div>
                       <div className="text-[10px] uppercase tracking-widest muted">Remaining</div>
                       <div className="flex items-baseline text-lg font-semibold">
@@ -2021,6 +2351,261 @@ export default function TeamCapacityPage() {
           <li>Use "Manage calendars" in the toolbar to update holidays and time off.</li>
         </ul>
       </div>
+
+      {/* Workload Detail Drawer */}
+      {workloadDrawerMember ? (
+        <div className="fixed inset-0 z-[150] flex justify-end" role="dialog">
+          {/* Backdrop */}
+          <div
+            className="absolute inset-0 bg-black/20 backdrop-blur-[2px] animate-in fade-in duration-200"
+            onClick={() => setWorkloadDrawerMember(null)}
+          />
+
+          {/* Drawer Panel */}
+          <div className="relative flex h-full w-full max-w-2xl flex-col border-l border-[var(--color-border)] bg-[var(--color-surface)] shadow-2xl animate-in slide-in-from-right duration-300">
+            {/* Drawer Header */}
+            <div className="flex items-center justify-between border-b border-[var(--color-border)] bg-[var(--color-surface-2)]/30 px-6 py-5">
+              <div className="flex items-center gap-3">
+                {/* Avatar (Reused logic) */}
+                <div className="h-10 w-10 shrink-0 overflow-hidden rounded-full border border-[var(--color-border)]">
+                  {workloadDrawerMember.avatarUrl ? (
+                    <img
+                      src={workloadDrawerMember.avatarUrl}
+                      className="h-full w-full object-cover"
+                      alt={workloadDrawerMember.displayName ?? 'Member'}
+                      referrerPolicy="no-referrer"
+                    />
+                  ) : (
+                    <div className="flex h-full w-full items-center justify-center bg-[var(--color-surface-2)] text-xs font-bold">
+                      {workloadDrawerMember.displayName?.[0] ?? '?'}
+                    </div>
+                  )}
+                </div>
+                <div>
+                  <h3 className="text-base font-bold text-[var(--color-text)]">Workload Breakdown</h3>
+                  <p className="text-xs text-[var(--color-muted)]">
+                    {workloadDrawerMember.displayName}
+                  </p>
+                </div>
+              </div>
+              <button
+                onClick={() => setWorkloadDrawerMember(null)}
+                className="btn-ghost rounded-full p-2 hover:bg-[var(--color-border)]"
+              >
+                <XCircle className="h-5 w-5 text-[var(--color-muted)]" />
+              </button>
+            </div>
+
+            {/* Drawer Body - Scrollable */}
+            <div className="flex-1 space-y-6 overflow-y-auto p-6">
+              {/* Summary + Distribution */}
+              <div className="rounded-2xl border border-[var(--color-border)] bg-[var(--color-surface)] p-5 shadow-sm">
+                <div className="flex flex-wrap items-end justify-between gap-4">
+                  <div>
+                    <p className="text-xs font-semibold uppercase tracking-widest text-[var(--color-muted)]">
+                      Total Workload
+                    </p>
+                    <div className="mt-2 flex items-baseline gap-2">
+                      <span className="text-3xl font-bold text-[var(--color-primary)]">
+                        {formatHours(workloadDrawerMember.workloadHours)}
+                      </span>
+                      <span className="text-sm text-[var(--color-muted)]">
+                        ({formatAsDays(workloadDrawerMember.workloadHours, drawerHoursPerDay)})
+                      </span>
+                    </div>
+                  </div>
+                  <div className="text-xs text-[var(--color-muted)]">
+                    {groupedWorkload.length} clients
+                  </div>
+                </div>
+
+                <div className="mt-4 space-y-3">
+                  <div className="flex h-4 w-full overflow-hidden rounded-full bg-slate-100 dark:bg-slate-800">
+                    {workloadChartSegments.map((segment) => {
+                      const percent =
+                        groupedWorkloadTotal > 0
+                          ? segment.totalHours / groupedWorkloadTotal
+                          : 0;
+                      return (
+                        <div
+                          key={segment.name}
+                          className={segment.color.bar}
+                          style={{ width: `${percent * 100}%` }}
+                          title={`${segment.name}: ${percentFormatter.format(percent)}`}
+                        />
+                      );
+                    })}
+                  </div>
+
+                  {groupedWorkloadTotal > 0 ? (
+                    <div className="flex flex-wrap gap-3 text-xs">
+                      {workloadLegend.map((group) => {
+                        const percent = groupedWorkloadTotal > 0 ? group.totalHours / groupedWorkloadTotal : 0;
+                        return (
+                          <div key={group.name} className="flex items-center gap-2">
+                            <span className={`h-2 w-2 rounded-full ${group.color.dot}`} />
+                            <span className="font-semibold text-[var(--color-text)]">
+                              {group.name}
+                            </span>
+                            <span className="text-[var(--color-muted)]">
+                              {percentFormatter.format(percent)}
+                            </span>
+                          </div>
+                        );
+                      })}
+                      {groupedWorkload.length > 3 ? (
+                        <span className="text-[var(--color-muted)]">
+                          +{groupedWorkload.length - 3} more
+                        </span>
+                      ) : null}
+                    </div>
+                  ) : (
+                    <p className="text-xs text-[var(--color-muted)]">
+                      No workload distribution available.
+                    </p>
+                  )}
+                </div>
+              </div>
+
+              {workloadDetailLoading ? (
+                <div className="flex items-center justify-center gap-2 py-10 text-sm text-[var(--color-muted)]">
+                  <RefreshCw className="h-4 w-4 animate-spin" />
+                  Loading workload details...
+                </div>
+              ) : workloadDetailError ? (
+                <div className="rounded-lg border border-rose-200 bg-rose-50/70 p-4 text-xs text-rose-700">
+                  {workloadDetailError}
+                </div>
+              ) : (
+                <div className="space-y-4">
+                  <div className="flex items-center justify-between">
+                    <h4 className="text-xs font-semibold uppercase tracking-wide text-[var(--color-muted)]">
+                      Details by Client
+                    </h4>
+                    <span className="text-xs text-[var(--color-muted)]">
+                      {formatHours(groupedWorkloadTotal)}{' '}
+                      <span className="text-[var(--color-muted)]">
+                        ({formatAsDays(groupedWorkloadTotal, drawerHoursPerDay)})
+                      </span>
+                    </span>
+                  </div>
+
+                  {groupedWorkload.map((group, index) => {
+                    const percent =
+                      groupedWorkloadTotal > 0
+                        ? group.totalHours / groupedWorkloadTotal
+                        : 0;
+                    const logo = getClientLogo(group.slug, group.name);
+                    return (
+                      <details
+                        key={group.name}
+                        className="group rounded-2xl border border-[var(--color-border)] bg-[var(--color-surface)] shadow-sm"
+                        open={index === 0}
+                      >
+                        <summary className="flex cursor-pointer list-none items-center justify-between gap-4 px-4 py-3 [&::-webkit-details-marker]:hidden">
+                          <div className="flex items-center gap-3">
+                            {logo ? (
+                              <div
+                                className="flex h-8 w-8 items-center justify-center overflow-hidden rounded-full border border-[var(--color-border)] bg-white p-0.5"
+                              >
+                                <img
+                                  src={logo.src}
+                                  alt={logo.alt}
+                                  className="h-full w-full object-contain"
+                                />
+                              </div>
+                            ) : (
+                              <div
+                                className={`flex h-9 w-9 items-center justify-center rounded-xl border text-xs font-bold ${group.color.chip} ${group.color.border}`}
+                              >
+                                {getClientInitials(group.name)}
+                              </div>
+                            )}
+                            <div>
+                              <p className="text-sm font-semibold text-[var(--color-text)]">
+                                {group.name}
+                              </p>
+                              <div className="mt-1 h-1.5 w-40 max-w-[220px] overflow-hidden rounded-full bg-[var(--color-border)]/60">
+                                <div
+                                  className={`h-full ${group.color.bar}`}
+                                  style={{ width: `${percent * 100}%` }}
+                                />
+                              </div>
+                            </div>
+                          </div>
+                          <div className="text-right">
+                            <p className="text-sm font-bold text-[var(--color-text)]">
+                              {formatHours(group.totalHours)}{' '}
+                              <span className="text-xs text-[var(--color-muted)]">
+                                ({formatAsDays(group.totalHours, drawerHoursPerDay)})
+                              </span>
+                            </p>
+                            <p className="text-[10px] text-[var(--color-muted)]">
+                              {percentFormatter.format(percent)}
+                            </p>
+                          </div>
+                        </summary>
+
+                        <div className="space-y-2 border-t border-[var(--color-border)]/60 bg-[var(--color-surface-2)]/40 px-4 py-3">
+                          {group.entries.map((entry) => {
+                            const sourceLabel = workloadSourceLabels[entry.source];
+                            const detailLabel = entry.label
+                              ? `${sourceLabel} · ${entry.label}`
+                              : sourceLabel;
+                            return (
+                              <div
+                                key={entry.id}
+                                className="flex items-center justify-between rounded-lg bg-[var(--color-surface-2)]/70 px-3 py-2 text-xs"
+                              >
+                                <div className="flex items-center gap-3">
+                                  <div
+                                    className={`flex h-7 w-7 items-center justify-center rounded-lg ${workloadSourceBadge[entry.source]}`}
+                                  >
+                                    <Briefcase size={14} />
+                                  </div>
+                                  <div>
+                                    <p className="text-xs font-semibold text-[var(--color-text)]">
+                                      {detailLabel}
+                                    </p>
+                                    <p className="text-[10px] text-[var(--color-muted)]">
+                                      {entry.clientName || entry.clientSlug || 'Other'}
+                                    </p>
+                                  </div>
+                                </div>
+                                <div className="text-right">
+                                  <p className="text-xs font-semibold text-[var(--color-text)]">
+                                    {formatHours(entry.hours)}{' '}
+                                    <span className="text-[10px] text-[var(--color-muted)]">
+                                      ({formatAsDays(entry.hours, drawerHoursPerDay)})
+                                    </span>
+                                  </p>
+                                </div>
+                              </div>
+                            );
+                          })}
+                        </div>
+                      </details>
+                    );
+                  })}
+
+                  {!groupedWorkload.length ? (
+                    <div className="py-10 text-center text-sm text-[var(--color-muted)]">
+                      No workload recorded for this period.
+                    </div>
+                  ) : null}
+                </div>
+              )}
+            </div>
+
+            {/* Drawer Footer (Optional) */}
+            <div className="border-t border-[var(--color-border)] bg-[var(--color-surface-2)]/30 p-4 text-center">
+              <p className="text-[10px] text-[var(--color-muted)]">
+                Data sourced from CRM &amp; Monetization
+              </p>
+            </div>
+          </div>
+        </div>
+      ) : null}
 
       {editing ? (
         <div
