@@ -78,6 +78,8 @@ export default async function proxy(req: NextRequest) {
     pathname.startsWith("/_next") ||
     pathname.startsWith("/favicon") ||
     pathname.startsWith("/api/auth") ||
+    // Cron endpoints are protected via CRON_SECRET, not user session cookies.
+    pathname.startsWith("/api/cron") ||
     pathname.startsWith("/api/share") ||
     pathname.startsWith("/api/public") ||
     pathname.startsWith("/assets");

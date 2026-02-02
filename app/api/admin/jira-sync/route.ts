@@ -223,8 +223,8 @@ export async function POST(request: Request) {
           status: mapStatus(statusName),
           priority: mapPriority(priorityName),
           assigned_date: fields.created ? fields.created.slice(0, 10) : null,
+          jira_created_at: fields.created || null,
           due_date: fields.duedate || null,
-          eta_date: fields.duedate || null,
         // Owner stays app-owned (primary contributor). Do not set it from JIRA to avoid clobbering contributions.
         owner: 'Unassigned',
           reporter: reporterName || null,
@@ -244,7 +244,8 @@ export async function POST(request: Request) {
     }
 
     // Preserve effort and comments entered in the app when syncing with JIRA.
-    // JIRA remains the source of truth for status, title, owner, dates, etc.
+    // JIRA remains the source of truth for status, title, assignee, and due date.
+    // ETA is app-owned and should not be overwritten by sync.
     const ticketIds = Array.from(new Set(payload.map((row) => row.ticket_id as string)));
     const CHUNK_SIZE = 200;
 
@@ -377,7 +378,6 @@ export async function POST(request: Request) {
         status: row.status,
         assigned_date: row.assigned_date,
         due_date: row.due_date,
-        eta_date: row.eta_date,
         ticket_id: row.ticket_id,
         title: row.title,
         priority: row.priority,

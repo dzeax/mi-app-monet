@@ -33,6 +33,13 @@ export type DataQualityTicket = {
   prepHours: number | null;
   etaDate: string | null;
   comments: string | null;
+  appStatus?: string | null;
+  appStatusUpdatedAt?: string | null;
+  appStatusUpdatedBy?: string | null;
+  jiraCreatedAt?: string | null;
+  jiraReadyAt?: string | null;
+  jiraAckAt?: string | null;
+  jiraAckSource?: string | null;
   hasContributions?: boolean;
   contributions?: {
     owner: string;

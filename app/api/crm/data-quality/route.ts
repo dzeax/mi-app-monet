@@ -56,6 +56,7 @@ const TicketPayloadZ = z.object({
   prepHours: z.number().nonnegative().nullable().optional(),
   etaDate: z.string().nullable().optional(),
   comments: z.string().nullable().optional(),
+  appStatus: z.string().nullable().optional(),
   contributions: z.array(ContributionZ).optional(),
   id: z.string().uuid().optional(),
 });
@@ -192,6 +193,9 @@ export async function GET(request: Request) {
       prepHours: row.prep_hours != null ? Number(row.prep_hours) : null,
       etaDate: row.eta_date,
       comments: row.comments,
+      appStatus: row.app_status ?? null,
+      appStatusUpdatedAt: row.app_status_updated_at ?? null,
+      appStatusUpdatedBy: row.app_status_updated_by ?? null,
       jiraAssignee: row.jira_assignee ?? null,
       createdAt: row.created_at,
       updatedAt: row.updated_at,
@@ -592,7 +596,16 @@ export async function PATCH(request: Request) {
     }
     const totals = aggregateTotals(contributions);
 
-    const updatePayload = {
+    const hasAppStatus =
+      parsed.appStatus != null && String(parsed.appStatus).trim().length > 0;
+    if (hasAppStatus && !parsed.comments?.trim()) {
+      return NextResponse.json(
+        { error: "Comments are required when a blocker status is set." },
+        { status: 400 },
+      );
+    }
+
+    const updatePayload: Record<string, unknown> = {
       status: parsed.status,
       assigned_date: parsed.assignedDate,
       due_date: parsed.dueDate || null,
@@ -611,6 +624,12 @@ export async function PATCH(request: Request) {
       client_slug: clientSlug,
       created_by: userId,
     };
+
+    if (parsed.appStatus !== undefined) {
+      updatePayload.app_status = parsed.appStatus || null;
+      updatePayload.app_status_updated_at = new Date().toISOString();
+      updatePayload.app_status_updated_by = userId;
+    }
 
     const { data, error } = await supabase
       .from("crm_data_quality_tickets")
@@ -679,6 +698,9 @@ export async function PATCH(request: Request) {
       prepHours: data.prep_hours != null ? Number(data.prep_hours) : null,
       etaDate: data.eta_date,
       comments: data.comments,
+      appStatus: data.app_status ?? null,
+      appStatusUpdatedAt: data.app_status_updated_at ?? null,
+      appStatusUpdatedBy: data.app_status_updated_by ?? null,
       createdAt: data.created_at,
       updatedAt: data.updated_at,
       contributions: contribRows?.map((c) => ({

@@ -30,6 +30,9 @@ create table if not exists public.crm_data_quality_tickets (
   prep_hours numeric,
   eta_date date,
   comments text,
+  app_status text,
+  app_status_updated_at timestamptz,
+  app_status_updated_by uuid references auth.users(id),
   created_by uuid references auth.users(id),
   created_at timestamptz not null default timezone('utc', now()),
   updated_at timestamptz not null default timezone('utc', now())
@@ -88,6 +91,39 @@ alter table public.crm_data_quality_contributions
 
 alter table public.crm_data_quality_contributions
   alter column effort_date set not null;
+
+-- App-only blocker status (do not sync from JIRA)
+alter table public.crm_data_quality_tickets
+  add column if not exists app_status text;
+
+alter table public.crm_data_quality_tickets
+  add column if not exists app_status_updated_at timestamptz;
+
+alter table public.crm_data_quality_tickets
+  add column if not exists app_status_updated_by uuid references auth.users(id);
+
+create index if not exists crm_data_quality_tickets_app_status_idx
+  on public.crm_data_quality_tickets (client_slug, app_status);
+
+-- JIRA-derived acknowledgment timestamps (source of truth: JIRA)
+-- Note: SLA clock starts when the ticket enters "Ready" (JIRA status).
+alter table public.crm_data_quality_tickets
+  add column if not exists jira_created_at timestamptz;
+
+alter table public.crm_data_quality_tickets
+  add column if not exists jira_ready_at timestamptz;
+
+alter table public.crm_data_quality_tickets
+  add column if not exists jira_ack_at timestamptz;
+
+alter table public.crm_data_quality_tickets
+  add column if not exists jira_ack_source text;
+
+create index if not exists crm_data_quality_tickets_jira_ready_idx
+  on public.crm_data_quality_tickets (client_slug, jira_ready_at);
+
+create index if not exists crm_data_quality_tickets_jira_ack_idx
+  on public.crm_data_quality_tickets (client_slug, jira_ack_at);
 
 do $$
 begin

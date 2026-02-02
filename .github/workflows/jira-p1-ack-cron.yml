@@ -1,0 +1,31 @@
+name: JIRA P1 Ack Sync (Cron)
+
+on:
+  workflow_dispatch:
+  schedule:
+    # Every 15 minutes.
+    - cron: "*/15 * * * *"
+
+jobs:
+  run:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Call cron endpoint
+        env:
+          CRON_URL: ${{ secrets.CRON_URL }}
+          CRON_SECRET: ${{ secrets.CRON_SECRET }}
+        run: |
+          if [ -z "$CRON_URL" ]; then
+            echo "Missing CRON_URL (set it as a GitHub Actions secret)"
+            exit 1
+          fi
+          if [ -z "$CRON_SECRET" ]; then
+            echo "Missing CRON_SECRET (set it as a GitHub Actions secret)"
+            exit 1
+          fi
+
+          echo "Calling: $CRON_URL"
+          curl -fsS \
+            -H "Authorization: Bearer ${CRON_SECRET}" \
+            "$CRON_URL"

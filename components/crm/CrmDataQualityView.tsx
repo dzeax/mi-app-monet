@@ -3544,16 +3544,19 @@ export default function CrmDataQualityView() {
                 />
               </label>
               <label className="flex flex-col gap-1 text-sm">
-                <span className="text-[color:var(--color-text)]/70">
+                <span className="inline-flex items-center gap-2 text-[color:var(--color-text)]/70">
                   Due date
+                  <span className="inline-flex items-center rounded-full border border-[color:var(--color-border)] bg-[color:var(--color-surface-2)] px-2 py-0.5 text-[10px] font-semibold tracking-wide text-[color:var(--color-text)]/60">
+                    JIRA
+                  </span>
                 </span>
                 <input
                   type="date"
                   className="input input-date h-10"
                   value={form.dueDate}
-                  onChange={(e) => handleChangeForm("dueDate", e.target.value)}
-                  onFocus={openDatePicker}
-                  onMouseDown={openDatePicker}
+                  readOnly
+                  aria-readonly="true"
+                  title="Synced from JIRA (read-only)"
                 />
               </label>
               <label className="flex flex-col gap-1 text-sm">

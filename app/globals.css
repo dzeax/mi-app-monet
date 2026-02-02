@@ -855,6 +855,7 @@ input[type="date"]::-moz-focus-inner {
 /* Aclarar el icono del calendario (WebKit) */
 input[type="date"]:hover::-webkit-calendar-picker-indicator { opacity: 1; }
 
+
 /* Flash suave cuando se actualiza una fila */
 .row-flash {
   animation: rowFlash 1200ms ease-out;

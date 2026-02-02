@@ -83,7 +83,7 @@ export async function GET(request: Request) {
     const { data: ticketRows, error: ticketError } = await admin
       .from("crm_data_quality_tickets")
       .select(
-        "id, client_slug, status, assigned_date, due_date, ticket_id, title, priority, owner, reporter, type, jira_url, jira_assignee, work_hours, prep_hours, eta_date, comments, created_at, updated_at",
+        "id, client_slug, status, assigned_date, due_date, ticket_id, title, priority, owner, reporter, type, jira_url, jira_assignee, work_hours, prep_hours, eta_date, comments, app_status, app_status_updated_at, app_status_updated_by, jira_created_at, jira_ready_at, jira_ack_at, jira_ack_source, created_at, updated_at",
       )
       .eq("client_slug", client)
       .order("assigned_date", { ascending: false })
@@ -129,6 +129,13 @@ export async function GET(request: Request) {
             prepHours: row.prep_hours != null ? Number(row.prep_hours) : null,
             etaDate: row.eta_date ?? null,
             comments: row.comments ?? null,
+            appStatus: row.app_status ?? null,
+            appStatusUpdatedAt: row.app_status_updated_at ?? null,
+            appStatusUpdatedBy: row.app_status_updated_by ?? null,
+            jiraCreatedAt: row.jira_created_at ?? null,
+            jiraReadyAt: row.jira_ready_at ?? null,
+            jiraAckAt: row.jira_ack_at ?? null,
+            jiraAckSource: row.jira_ack_source ?? null,
             createdAt: row.created_at ?? null,
             updatedAt: row.updated_at ?? null,
             assigneeLabel,
