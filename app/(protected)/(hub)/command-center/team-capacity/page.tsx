@@ -168,7 +168,7 @@ const toDaysFromHours = (hours: number | null, hoursPerDay: number | null) => {
   return hours / hoursPerDay;
 };
 
-type DatePreset = 'custom' | 'this_month' | 'next_month' | 'this_quarter' | 'this_year';
+type DatePreset = 'custom' | 'this_month' | 'last_month' | 'next_month' | 'this_quarter' | 'this_year';
 
 const getPresetRange = (preset: DatePreset) => {
   const now = new Date();
@@ -180,6 +180,11 @@ const getPresetRange = (preset: DatePreset) => {
       return {
         start: new Date(Date.UTC(year, month, 1)).toISOString().slice(0, 10),
         end: new Date(Date.UTC(year, month + 1, 0)).toISOString().slice(0, 10),
+      };
+    case 'last_month':
+      return {
+        start: new Date(Date.UTC(year, month - 1, 1)).toISOString().slice(0, 10),
+        end: new Date(Date.UTC(year, month, 0)).toISOString().slice(0, 10),
       };
     case 'next_month':
       return {
@@ -206,6 +211,7 @@ const getPresetRange = (preset: DatePreset) => {
 const presetLabels: Record<DatePreset, string> = {
   custom: 'Custom',
   this_month: 'This Month',
+  last_month: 'Last Month',
   next_month: 'Next Month',
   this_quarter: 'This Quarter',
   this_year: 'This Year',
