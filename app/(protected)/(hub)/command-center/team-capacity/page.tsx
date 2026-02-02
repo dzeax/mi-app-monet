@@ -118,6 +118,20 @@ type WorkloadDetailItem = {
   hours: number;
 };
 
+type UnmappedDetailItem = {
+  id: string;
+  ownerKey: string;
+  ownerName: string | null;
+  ownerEmail: string | null;
+  ownerPersonId: string | null;
+  inactiveMatch: boolean;
+  clientSlug: string | null;
+  clientName: string | null;
+  source: WorkloadDetailSource;
+  label: string | null;
+  hours: number;
+};
+
 const today = new Date();
 const defaultStart = new Date(Date.UTC(today.getUTCFullYear(), today.getUTCMonth(), 1));
 const defaultEnd = new Date(Date.UTC(today.getUTCFullYear(), today.getUTCMonth() + 1, 0));
@@ -536,6 +550,10 @@ export default function TeamCapacityPage() {
   const [workloadDetailItems, setWorkloadDetailItems] = useState<WorkloadDetailItem[]>([]);
   const [workloadDetailLoading, setWorkloadDetailLoading] = useState(false);
   const [workloadDetailError, setWorkloadDetailError] = useState<string | null>(null);
+  const [unmappedDrawerOpen, setUnmappedDrawerOpen] = useState(false);
+  const [unmappedDetailItems, setUnmappedDetailItems] = useState<UnmappedDetailItem[]>([]);
+  const [unmappedDetailLoading, setUnmappedDetailLoading] = useState(false);
+  const [unmappedDetailError, setUnmappedDetailError] = useState<string | null>(null);
 
   const selectedYear = useMemo(() => {
     const year = Number(startDate.slice(0, 4));
@@ -712,6 +730,101 @@ export default function TeamCapacityPage() {
         color: workloadChartPalette[index] ?? workloadChartPalette[0],
       })),
     [groupedWorkload],
+  );
+
+  const sortedUnmappedDetails = useMemo(
+    () => [...unmappedDetailItems].sort((a, b) => b.hours - a.hours),
+    [unmappedDetailItems],
+  );
+
+  const groupedUnmappedOwners = useMemo(() => {
+    const grouped = new Map<
+      string,
+      {
+        ownerKey: string;
+        ownerName: string | null;
+        ownerEmail: string | null;
+        ownerPersonId: string | null;
+        inactiveMatch: boolean;
+        totalHours: number;
+        entries: UnmappedDetailItem[];
+      }
+    >();
+
+    sortedUnmappedDetails.forEach((entry) => {
+      const key = entry.ownerKey || entry.ownerEmail || entry.ownerName || 'unknown';
+      if (!grouped.has(key)) {
+        grouped.set(key, {
+          ownerKey: entry.ownerKey || key,
+          ownerName: entry.ownerName ?? null,
+          ownerEmail: entry.ownerEmail ?? null,
+          ownerPersonId: entry.ownerPersonId ?? null,
+          inactiveMatch: entry.inactiveMatch ?? false,
+          totalHours: 0,
+          entries: [],
+        });
+      }
+      const target = grouped.get(key);
+      if (!target) return;
+      if (!target.ownerName && entry.ownerName) target.ownerName = entry.ownerName;
+      if (!target.ownerEmail && entry.ownerEmail) target.ownerEmail = entry.ownerEmail;
+      if (!target.ownerPersonId && entry.ownerPersonId) target.ownerPersonId = entry.ownerPersonId;
+      if (!target.inactiveMatch && entry.inactiveMatch) target.inactiveMatch = true;
+      target.totalHours += entry.hours;
+      target.entries.push(entry);
+    });
+
+    return Array.from(grouped.values())
+      .map((group) => ({
+        ...group,
+        displayLabel: group.ownerName || group.ownerEmail || 'Unknown owner',
+        secondaryLabel:
+          group.ownerName && group.ownerEmail && group.ownerName !== group.ownerEmail
+            ? group.ownerEmail
+            : null,
+        entries: [...group.entries].sort((a, b) => b.hours - a.hours),
+      }))
+      .sort((a, b) => b.totalHours - a.totalHours);
+  }, [sortedUnmappedDetails]);
+
+  const groupedUnmappedTotal = useMemo(
+    () => groupedUnmappedOwners.reduce((sum, group) => sum + group.totalHours, 0),
+    [groupedUnmappedOwners],
+  );
+
+  const unmappedDrawerTotal = useMemo(
+    () => (groupedUnmappedTotal > 0 ? groupedUnmappedTotal : unmappedHours),
+    [groupedUnmappedTotal, unmappedHours],
+  );
+
+  const unmappedChartSegments = useMemo(() => {
+    if (!groupedUnmappedOwners.length) return [];
+    const segments = groupedUnmappedOwners.slice(0, 5).map((group, index) => ({
+      name: group.displayLabel,
+      totalHours: group.totalHours,
+      color: workloadChartPalette[index] ?? workloadChartPalette[0],
+    }));
+    const remainingHours = groupedUnmappedOwners
+      .slice(5)
+      .reduce((sum, group) => sum + group.totalHours, 0);
+    if (remainingHours > 0) {
+      segments.push({
+        name: 'Other',
+        totalHours: remainingHours,
+        color: workloadChartOtherColor,
+      });
+    }
+    return segments;
+  }, [groupedUnmappedOwners]);
+
+  const unmappedLegend = useMemo(
+    () =>
+      groupedUnmappedOwners.slice(0, 3).map((group, index) => ({
+        name: group.displayLabel,
+        totalHours: group.totalHours,
+        color: workloadChartPalette[index] ?? workloadChartPalette[0],
+      })),
+    [groupedUnmappedOwners],
   );
 
   const activeMemberIds = useMemo(() => new Set(activeMembers.map((member) => member.userId)), [activeMembers]);
@@ -911,6 +1024,54 @@ export default function TeamCapacityPage() {
 
     return () => controller.abort();
   }, [workloadDrawerMember, startDate, endDate]);
+
+  useEffect(() => {
+    if (!unmappedDrawerOpen) {
+      setUnmappedDetailItems([]);
+      setUnmappedDetailError(null);
+      setUnmappedDetailLoading(false);
+      return;
+    }
+
+    const controller = new AbortController();
+
+    const loadDetails = async () => {
+      setUnmappedDetailLoading(true);
+      setUnmappedDetailError(null);
+      try {
+        const params = new URLSearchParams({ start: startDate, end: endDate });
+        const response = await fetch(
+          `/api/admin/team-capacity/unmapped-workload-detail?${params.toString()}`,
+          { signal: controller.signal },
+        );
+        const payload = await response.json().catch(() => null);
+        if (!response.ok) {
+          const message =
+            payload && typeof payload.error === 'string'
+              ? payload.error
+              : 'Failed to load unmapped workload';
+          throw new Error(message);
+        }
+        const items = Array.isArray(payload?.items)
+          ? (payload.items as UnmappedDetailItem[])
+          : [];
+        setUnmappedDetailItems(items);
+      } catch (err: unknown) {
+        if ((err as Error).name === 'AbortError') return;
+        setUnmappedDetailError(
+          err instanceof Error ? err.message : 'Failed to load unmapped workload',
+        );
+      } finally {
+        if (!controller.signal.aborted) {
+          setUnmappedDetailLoading(false);
+        }
+      }
+    };
+
+    loadDetails();
+
+    return () => controller.abort();
+  }, [unmappedDrawerOpen, startDate, endDate]);
 
   const openEditor = (member: CapacityMember) => {
     const fallbackContract = member.contractCountryCode ?? 'FR';
@@ -1402,11 +1563,26 @@ export default function TeamCapacityPage() {
               ) : null}
             </p>
           </div>
-          <div className="kpi-frame">
-            <p className="text-xs font-bold tracking-widest text-[--color-muted] uppercase">Unmapped workload</p>
+          <div
+            className="kpi-frame group cursor-pointer transition-shadow hover:shadow-md"
+            role="button"
+            tabIndex={0}
+            onClick={() => {
+              setWorkloadDrawerMember(null);
+              setUnmappedDrawerOpen(true);
+            }}
+            onKeyDown={(event) => {
+              if (event.key === 'Enter' || event.key === ' ') {
+                event.preventDefault();
+                setWorkloadDrawerMember(null);
+                setUnmappedDrawerOpen(true);
+              }
+            }}
+          >
+            <p className="text-xs font-bold tracking-widest text-[--color-muted] uppercase">External workload</p>
             <p
               className={`mt-2 text-3xl font-bold tracking-tight ${
-                unmappedHours > 0 ? 'text-amber-600' : ''
+                unmappedHours > 0 ? 'text-amber-600 group-hover:text-amber-500' : ''
               }`}
             >
               {formatHours(unmappedHours)}
@@ -1544,7 +1720,10 @@ export default function TeamCapacityPage() {
                     </div>
                       <div
                         className="cursor-pointer group hover:bg-[var(--color-surface-2)]/50 transition-colors rounded px-2 -mx-2"
-                        onClick={() => setWorkloadDrawerMember(member)}
+                        onClick={() => {
+                          setUnmappedDrawerOpen(false);
+                          setWorkloadDrawerMember(member);
+                        }}
                       >
                         <div className="text-[10px] uppercase tracking-widest muted">Workload</div>
                         <div className="flex items-baseline text-lg font-semibold">
@@ -2607,6 +2786,237 @@ export default function TeamCapacityPage() {
             <div className="border-t border-[var(--color-border)] bg-[var(--color-surface-2)]/30 p-4 text-center">
               <p className="text-[10px] text-[var(--color-muted)]">
                 Data sourced from CRM &amp; Monetization
+              </p>
+            </div>
+          </div>
+        </div>
+      ) : null}
+
+      {unmappedDrawerOpen ? (
+        <div className="fixed inset-0 z-[150] flex justify-end" role="dialog">
+          <div
+            className="absolute inset-0 bg-black/20 backdrop-blur-[2px] animate-in fade-in duration-200"
+            onClick={() => setUnmappedDrawerOpen(false)}
+          />
+
+          <div className="relative flex h-full w-full max-w-2xl flex-col border-l border-[var(--color-border)] bg-[var(--color-surface)] shadow-2xl animate-in slide-in-from-right duration-300">
+            <div className="flex items-center justify-between border-b border-[var(--color-border)] bg-[var(--color-surface-2)]/30 px-6 py-5">
+              <div>
+                <h3 className="text-base font-bold text-[var(--color-text)]">
+                  External Workload (Other Departments/Entities)
+                </h3>
+                <p className="text-xs text-[var(--color-muted)]">
+                  {formatIsoRange(startDate, endDate)}
+                </p>
+              </div>
+              <button
+                onClick={() => setUnmappedDrawerOpen(false)}
+                className="btn-ghost rounded-full p-2 hover:bg-[var(--color-border)]"
+              >
+                <XCircle className="h-5 w-5 text-[var(--color-muted)]" />
+              </button>
+            </div>
+
+            <div className="flex-1 space-y-6 overflow-y-auto p-6">
+              <div className="rounded-2xl border border-[var(--color-border)] bg-[var(--color-surface)] p-5 shadow-sm">
+                <div className="flex flex-wrap items-end justify-between gap-4">
+                  <div>
+                    <p className="text-xs font-semibold uppercase tracking-widest text-[var(--color-muted)]">
+                      Total External
+                    </p>
+                    <div className="mt-2 flex items-baseline gap-2">
+                      <span className="text-3xl font-bold text-amber-600">
+                        {formatHours(unmappedDrawerTotal)}
+                      </span>
+                      <span className="text-sm text-[var(--color-muted)]">
+                        ({formatAsDays(unmappedDrawerTotal, averageHoursPerDay)})
+                      </span>
+                    </div>
+                  </div>
+                  <div className="text-xs text-[var(--color-muted)]">
+                    {groupedUnmappedOwners.length} owners
+                  </div>
+                </div>
+
+                <div className="mt-4 space-y-3">
+                  <div className="flex h-4 w-full overflow-hidden rounded-full bg-slate-100 dark:bg-slate-800">
+                    {unmappedChartSegments.map((segment) => {
+                      const percent =
+                        unmappedDrawerTotal > 0
+                          ? segment.totalHours / unmappedDrawerTotal
+                          : 0;
+                      return (
+                        <div
+                          key={segment.name}
+                          className={segment.color.bar}
+                          style={{ width: `${percent * 100}%` }}
+                          title={`${segment.name}: ${percentFormatter.format(percent)}`}
+                        />
+                      );
+                    })}
+                  </div>
+
+                  {unmappedDrawerTotal > 0 ? (
+                    <div className="flex flex-wrap gap-3 text-xs">
+                      {unmappedLegend.map((group) => {
+                        const percent =
+                          unmappedDrawerTotal > 0 ? group.totalHours / unmappedDrawerTotal : 0;
+                        return (
+                          <div key={group.name} className="flex items-center gap-2">
+                            <span className={`h-2 w-2 rounded-full ${group.color.dot}`} />
+                            <span className="font-semibold text-[var(--color-text)]">
+                              {group.name}
+                            </span>
+                            <span className="text-[var(--color-muted)]">
+                              {percentFormatter.format(percent)}
+                            </span>
+                          </div>
+                        );
+                      })}
+                      {groupedUnmappedOwners.length > 3 ? (
+                        <span className="text-[var(--color-muted)]">
+                          +{groupedUnmappedOwners.length - 3} more
+                        </span>
+                      ) : null}
+                    </div>
+                  ) : (
+                    <p className="text-xs text-[var(--color-muted)]">
+                      No external distribution available.
+                    </p>
+                  )}
+                </div>
+              </div>
+
+              {unmappedDetailLoading ? (
+                <div className="flex items-center justify-center gap-2 py-10 text-sm text-[var(--color-muted)]">
+                  <RefreshCw className="h-4 w-4 animate-spin" />
+                  Loading unmapped details...
+                </div>
+              ) : unmappedDetailError ? (
+                <div className="rounded-lg border border-rose-200 bg-rose-50/70 p-4 text-xs text-rose-700">
+                  {unmappedDetailError}
+                </div>
+              ) : (
+                <div className="space-y-4">
+                  <div className="flex items-center justify-between">
+                    <h4 className="text-xs font-semibold uppercase tracking-wide text-[var(--color-muted)]">
+                      Details by Owner
+                    </h4>
+                    <span className="text-xs text-[var(--color-muted)]">
+                      {formatHours(unmappedDrawerTotal)}{' '}
+                      <span className="text-[var(--color-muted)]">
+                        ({formatAsDays(unmappedDrawerTotal, averageHoursPerDay)})
+                      </span>
+                    </span>
+                  </div>
+
+                  {groupedUnmappedOwners.map((group, index) => {
+                    const percent =
+                      unmappedDrawerTotal > 0
+                        ? group.totalHours / unmappedDrawerTotal
+                        : 0;
+                    return (
+                      <details
+                        key={group.ownerKey}
+                        className="group rounded-2xl border border-[var(--color-border)] bg-[var(--color-surface)] shadow-sm"
+                        open={index === 0}
+                      >
+                        <summary className="flex cursor-pointer list-none items-center justify-between gap-4 px-4 py-3 [&::-webkit-details-marker]:hidden">
+                          <div className="flex items-center gap-3">
+                            <div className="flex h-9 w-9 items-center justify-center rounded-full border border-[var(--color-border)] bg-white text-xs font-bold text-[var(--color-muted)]">
+                              {getClientInitials(group.displayLabel)}
+                            </div>
+                            <div>
+                              <div className="flex flex-wrap items-center gap-2">
+                                <p className="text-sm font-semibold text-[var(--color-text)]">
+                                  {group.displayLabel}
+                                </p>
+                                {group.inactiveMatch ? (
+                                  <span className="badge-field" data-variant="calc">
+                                    Inactive
+                                  </span>
+                                ) : null}
+                              </div>
+                              {group.secondaryLabel ? (
+                                <p className="text-[10px] text-[var(--color-muted)]">
+                                  {group.secondaryLabel}
+                                </p>
+                              ) : null}
+                              <div className="mt-1 h-1.5 w-40 max-w-[220px] overflow-hidden rounded-full bg-[var(--color-border)]/60">
+                                <div
+                                  className="h-full bg-amber-500"
+                                  style={{ width: `${percent * 100}%` }}
+                                />
+                              </div>
+                            </div>
+                          </div>
+                          <div className="text-right">
+                            <p className="text-sm font-bold text-[var(--color-text)]">
+                              {formatHours(group.totalHours)}{' '}
+                              <span className="text-xs text-[var(--color-muted)]">
+                                ({formatAsDays(group.totalHours, averageHoursPerDay)})
+                              </span>
+                            </p>
+                            <p className="text-[10px] text-[var(--color-muted)]">
+                              {percentFormatter.format(percent)}
+                            </p>
+                          </div>
+                        </summary>
+
+                        <div className="space-y-2 border-t border-[var(--color-border)]/60 bg-[var(--color-surface-2)]/40 px-4 py-3">
+                          {group.entries.map((entry) => {
+                            const sourceLabel = workloadSourceLabels[entry.source];
+                            const detailLabel = entry.label
+                              ? `${sourceLabel} · ${entry.label}`
+                              : sourceLabel;
+                            return (
+                              <div
+                                key={entry.id}
+                                className="flex items-center justify-between rounded-lg bg-[var(--color-surface-2)]/70 px-3 py-2 text-xs"
+                              >
+                                <div className="flex items-center gap-3">
+                                  <div
+                                    className={`flex h-7 w-7 items-center justify-center rounded-lg ${workloadSourceBadge[entry.source]}`}
+                                  >
+                                    <Briefcase size={14} />
+                                  </div>
+                                  <div>
+                                    <p className="text-xs font-semibold text-[var(--color-text)]">
+                                      {detailLabel}
+                                    </p>
+                                    <p className="text-[10px] text-[var(--color-muted)]">
+                                      {entry.clientName || entry.clientSlug || 'Other'}
+                                    </p>
+                                  </div>
+                                </div>
+                                <div className="text-right">
+                                  <p className="text-xs font-semibold text-[var(--color-text)]">
+                                    {formatHours(entry.hours)}{' '}
+                                    <span className="text-[10px] text-[var(--color-muted)]">
+                                      ({formatAsDays(entry.hours, averageHoursPerDay)})
+                                    </span>
+                                  </p>
+                                </div>
+                              </div>
+                            );
+                          })}
+                        </div>
+                      </details>
+                    );
+                  })}
+
+                  {!groupedUnmappedOwners.length ? (
+                    <div className="py-10 text-center text-sm text-[var(--color-muted)]">
+                      No external workload for this period.
+                    </div>
+                  ) : null}
+                </div>
+              )}
+            </div>
+
+            <div className="border-t border-[var(--color-border)] bg-[var(--color-surface-2)]/30 p-4 text-center">
+              <p className="text-[10px] text-[var(--color-muted)]">
+                External = owners outside the Team Capacity roster (other departments/entities).
               </p>
             </div>
           </div>
