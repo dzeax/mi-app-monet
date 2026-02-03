@@ -40,8 +40,8 @@ export const CRM_CLIENTS: CrmClient[] = [
       {
         slug: 'dq-tickets',
         type: 'dq_tickets',
-        label: 'DQ Tickets',
-        description: 'Data Quality tickets status and execution.',
+        label: 'DQ SLA Tracker',
+        description: 'Data Quality incident tracking, blockers, and SLA follow-up.',
         icon: 'insight',
       },
       {

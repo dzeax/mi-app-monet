@@ -1202,7 +1202,7 @@ export default function CrmDqTicketsAnalyticsView() {
           <div>
             <p className="text-xs uppercase tracking-[0.3em] text-[color:var(--color-text)]/65">CRM</p>
             <h1 className="mt-2 text-2xl font-semibold text-[color:var(--color-text)]">
-              DQ Tickets
+              DQ Incident &amp; SLA Tracker
             </h1>
             <p className="mt-2 text-sm text-[color:var(--color-text)]/70">
               Default focus on Stephane Rabarinala and Lucas Vialatte (Ready / In progress).
