@@ -336,9 +336,17 @@ const computeTypeName = (fields: JiraIssueFields) => {
     : ((fields.issuetype?.name as string | undefined) || "");
 };
 
+export type P1AckSyncError = {
+  ticketKey: string;
+  step: string;
+  message: string;
+};
+
 export type P1AckSyncResult = {
   processed: number;
   autoAcked: number;
+  failed?: number;
+  errors?: P1AckSyncError[];
   message?: string;
 };
 
@@ -394,7 +402,7 @@ export async function runP1AckSync({
     );
 
   if (candidates.length === 0) {
-    return { processed: 0, autoAcked: 0, message: "No P1 candidates found" };
+    return { processed: 0, autoAcked: 0, failed: 0, message: "No P1 candidates found" };
   }
 
   const ticketIds = Array.from(new Set(candidates.map((c) => c.key)));
@@ -415,12 +423,24 @@ export async function runP1AckSync({
     });
   });
 
-  const updates: any[] = [];
+  const errors: P1AckSyncError[] = [];
   let autoAcked = 0;
+  let processed = 0;
 
   for (const candidate of candidates) {
     const ticketKey = candidate.key;
-    const detail = await fetchIssueDetail(ticketKey);
+    let detail: JiraIssue;
+    try {
+      detail = await fetchIssueDetail(ticketKey);
+    } catch (err) {
+      errors.push({
+        ticketKey,
+        step: "fetch_issue",
+        message: err instanceof Error ? err.message : "Failed to fetch issue details",
+      });
+      continue;
+    }
+
     const fields = detail.fields ?? {};
 
     const statusName = fields.status?.name as string | undefined;
@@ -462,17 +482,32 @@ export async function runP1AckSync({
 
     // Auto-ack only when the ticket is Ready (clock starts on Ready) and we have no ack detected.
     if (!jiraAckAt && jiraReadyAt && normalizeStatus(statusName) === "ready") {
-      const commentRes = await postAckComment(ticketKey, assignee);
-      const created = commentRes?.created ?? null;
-      if (created) {
-        jiraAckAt = created;
-        jiraAckSource = "bot_comment";
-        autoAcked += 1;
+      try {
+        const commentRes = await postAckComment(ticketKey, assignee);
+        const created = commentRes?.created ?? null;
+        if (created) {
+          jiraAckAt = created;
+          jiraAckSource = "bot_comment";
+          autoAcked += 1;
+        }
+      } catch (err) {
+        errors.push({
+          ticketKey,
+          step: "post_ack_comment",
+          message: err instanceof Error ? err.message : "Failed to post acknowledgment comment",
+        });
       }
     }
 
     const existing = existingMap.get(ticketKey);
-    updates.push({
+    const existingOwner = existing?.owner?.trim() || "";
+    const assigneeName = (assignee.displayName as string | undefined)?.trim() || "";
+    const resolvedOwner =
+      existingOwner && existingOwner !== "Unassigned"
+        ? existingOwner
+        : assigneeName || existingOwner || "Unassigned";
+
+    const update = {
       ...(existing?.id ? { id: existing.id } : {}),
       client_slug: client,
       ticket_id: ticketKey,
@@ -481,30 +516,52 @@ export async function runP1AckSync({
       priority: mappedPriority,
       assigned_date: jiraCreatedDate,
       due_date: fields.duedate || null,
-      owner: existing?.owner ?? "Unassigned",
+      owner: resolvedOwner,
       reporter: fields.reporter?.displayName || null,
       type: typeName || null,
       jira_url: `${requireJiraEnv().base}/browse/${ticketKey}`,
-      jira_assignee: (assignee.displayName as string | undefined) || null,
+      jira_assignee: assigneeName || null,
       jira_created_at: jiraCreatedAt,
       jira_ready_at: jiraReadyAt,
       jira_ack_at: jiraAckAt,
       jira_ack_source: jiraAckSource,
-    });
+    };
+
+    try {
+      const { error: upsertError } = await sb
+        .from("crm_data_quality_tickets")
+        .upsert([update], { onConflict: "client_slug,ticket_id" });
+      if (upsertError) {
+        throw new Error(upsertError.message);
+      }
+      processed += 1;
+    } catch (err) {
+      errors.push({
+        ticketKey,
+        step: "upsert",
+        message: err instanceof Error ? err.message : "Failed to upsert ticket",
+      });
+    }
   }
 
-  if (updates.length === 0) {
-    return { processed: 0, autoAcked, message: "No rows updated" };
+  if (processed === 0) {
+    const failed = new Set(errors.map((entry) => entry.ticketKey)).size;
+    return {
+      processed: 0,
+      autoAcked,
+      failed,
+      errors: errors.length ? errors : undefined,
+      message: "No rows updated",
+    };
   }
 
-  const { error: upsertError } = await sb
-    .from("crm_data_quality_tickets")
-    .upsert(updates, { onConflict: "client_slug,ticket_id" });
-  if (upsertError) {
-    throw new Error(upsertError.message);
-  }
-
-  return { processed: updates.length, autoAcked };
+  const failed = new Set(errors.map((entry) => entry.ticketKey)).size;
+  return {
+    processed,
+    autoAcked,
+    failed,
+    errors: errors.length ? errors : undefined,
+  };
 }
 
 export const runtime = "nodejs";

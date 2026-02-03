@@ -26,6 +26,13 @@ jobs:
           fi
 
           echo "Calling: $CRON_URL"
-          curl -fsS \
+          RESPONSE=$(curl -sS -w "\n%{http_code}" \
             -H "Authorization: Bearer ${CRON_SECRET}" \
-            "$CRON_URL"
+            "$CRON_URL")
+          BODY=$(echo "$RESPONSE" | head -n 1)
+          STATUS=$(echo "$RESPONSE" | tail -n 1)
+          echo "$BODY"
+          if [ "$STATUS" -ge 400 ]; then
+            echo "Cron endpoint failed with HTTP $STATUS"
+            exit 1
+          fi
