@@ -3,7 +3,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import { usePathname } from "next/navigation";
-import { Activity, AlertTriangle, Calendar, Clock, Pencil, X } from "lucide-react";
+import { Activity, AlertTriangle, Calendar, Clock, Link2, Pencil, X } from "lucide-react";
 import {
   ResponsiveContainer,
   BarChart,
@@ -21,12 +21,20 @@ import type { DataQualityTicket } from "@/types/crm";
 import { chartTheme } from "@/components/charts/theme";
 import DatePicker from "@/components/ui/DatePicker";
 import MiniModal from "@/components/ui/MiniModal";
+import IfAdmin from "@/components/guards/IfAdmin";
+import CrmDqTicketsShareModal from "@/components/crm/CrmDqTicketsShareModal";
 
 type Option = { label: string; value: string };
 
 type DashboardTicket = DataQualityTicket & {
   assigneeLabel?: string | null;
   assigneeKey?: string | null;
+};
+
+type DqTicketsViewProps = {
+  clientOverride?: string;
+  shareToken?: string;
+  shareMode?: boolean;
 };
 
 type DashboardMeta = {
@@ -577,10 +585,24 @@ function MultiSelect({
   );
 }
 
-export default function CrmDqTicketsAnalyticsView() {
+export default function CrmDqTicketsAnalyticsView({
+  clientOverride,
+  shareToken,
+  shareMode = false,
+}: DqTicketsViewProps) {
   const pathname = usePathname();
   const segments = pathname?.split("/").filter(Boolean) ?? [];
-  const clientSlug = segments[1] || "emg";
+  const clientSlug = clientOverride || segments[1] || "emg";
+  const derivedShareToken = useMemo(() => {
+    if (!shareMode) return undefined;
+    if (segments.length >= 4 && segments[0] === "share") {
+      const idx = segments.indexOf("dq-tickets");
+      if (idx >= 0 && segments[idx + 1]) return segments[idx + 1];
+    }
+    return undefined;
+  }, [shareMode, segments]);
+  const effectiveShareToken = shareToken || derivedShareToken;
+  const canEdit = !shareMode;
 
   const [rows, setRows] = useState<DashboardTicket[]>([]);
   const [meta, setMeta] = useState<DashboardMeta | null>(null);
@@ -612,6 +634,7 @@ export default function CrmDqTicketsAnalyticsView() {
   const [etaSaving, setEtaSaving] = useState(false);
   const [etaError, setEtaError] = useState<string | null>(null);
   const [p1AckOpen, setP1AckOpen] = useState(false);
+  const [shareOpen, setShareOpen] = useState(false);
 
   useEffect(() => {
     if (!meta?.assignees?.length) return;
@@ -628,7 +651,17 @@ export default function CrmDqTicketsAnalyticsView() {
     setLoading(true);
     setError(null);
     try {
-      const ticketRes = await fetch(`/api/crm/dq-tickets-dashboard?client=${clientSlug}`);
+      if (shareMode && !effectiveShareToken) {
+        setError("Missing share token.");
+        setLoading(false);
+        return;
+      }
+      const endpoint = shareMode
+        ? `/api/share/dq-tickets?client=${clientSlug}&token=${encodeURIComponent(
+            effectiveShareToken ?? "",
+          )}`
+        : `/api/crm/dq-tickets-dashboard?client=${clientSlug}`;
+      const ticketRes = await fetch(endpoint);
       const ticketBody = await ticketRes.json().catch(() => null);
       if (!ticketRes.ok) {
         throw new Error(ticketBody?.error || `Failed to load tickets (${ticketRes.status})`);
@@ -641,18 +674,22 @@ export default function CrmDqTicketsAnalyticsView() {
     } finally {
       setLoading(false);
     }
-  }, [clientSlug]);
+  }, [clientSlug, shareMode, effectiveShareToken]);
 
   useEffect(() => {
     void loadTickets();
   }, [loadTickets]);
 
-  const openBlockerModal = useCallback((ticket: TicketView) => {
-    setBlockerTicket(ticket);
-    setBlockerStatus(ticket.appStatus ?? "");
-    setBlockerComment(ticket.comments ?? "");
-    setBlockerError(null);
-  }, []);
+  const openBlockerModal = useCallback(
+    (ticket: TicketView) => {
+      if (shareMode) return;
+      setBlockerTicket(ticket);
+      setBlockerStatus(ticket.appStatus ?? "");
+      setBlockerComment(ticket.comments ?? "");
+      setBlockerError(null);
+    },
+    [shareMode],
+  );
 
   const closeBlockerModal = useCallback(() => {
     setBlockerTicket(null);
@@ -663,6 +700,7 @@ export default function CrmDqTicketsAnalyticsView() {
 
   const saveBlockerStatus = useCallback(async () => {
     if (!blockerTicket) return;
+    if (shareMode) return;
     const nextStatus = blockerStatus.trim();
     const requiresComment = nextStatus.length > 0;
     const nextComment = blockerComment.trim() || blockerTicket.comments || "";
@@ -711,13 +749,16 @@ export default function CrmDqTicketsAnalyticsView() {
     } finally {
       setBlockerSaving(false);
     }
-  }, [blockerTicket, blockerStatus, blockerComment, clientSlug, closeBlockerModal]);
+  }, [blockerTicket, blockerStatus, blockerComment, clientSlug, closeBlockerModal, shareMode]);
 
   const updateTicketInline = useCallback(
     async (
       row: TicketView,
       payload: { appStatus?: string | null; comments?: string | null; etaDate?: string | null },
     ) => {
+      if (shareMode) {
+        throw new Error("Read-only share link.");
+      }
       const res = await fetch("/api/crm/dq-ticket-app-status", {
         method: "PATCH",
         headers: { "Content-Type": "application/json" },
@@ -757,14 +798,18 @@ export default function CrmDqTicketsAnalyticsView() {
       );
       return updated;
     },
-    [clientSlug],
+    [clientSlug, shareMode],
   );
 
-  const openCommentEditor = useCallback((row: TicketView, anchor: HTMLElement) => {
-    setCommentEditor({ row, anchor });
-    setCommentDraft(row.comments ?? "");
-    setCommentError(null);
-  }, []);
+  const openCommentEditor = useCallback(
+    (row: TicketView, anchor: HTMLElement) => {
+      if (shareMode) return;
+      setCommentEditor({ row, anchor });
+      setCommentDraft(row.comments ?? "");
+      setCommentError(null);
+    },
+    [shareMode],
+  );
 
   const closeCommentEditor = useCallback(() => {
     setCommentEditor(null);
@@ -772,11 +817,15 @@ export default function CrmDqTicketsAnalyticsView() {
     setCommentError(null);
   }, []);
 
-  const openEtaEditor = useCallback((row: TicketView, anchor: HTMLElement) => {
-    setEtaEditor({ row, anchor });
-    setEtaDraft(row.etaDate ?? "");
-    setEtaError(null);
-  }, []);
+  const openEtaEditor = useCallback(
+    (row: TicketView, anchor: HTMLElement) => {
+      if (shareMode) return;
+      setEtaEditor({ row, anchor });
+      setEtaDraft(row.etaDate ?? "");
+      setEtaError(null);
+    },
+    [shareMode],
+  );
 
   const closeEtaEditor = useCallback(() => {
     setEtaEditor(null);
@@ -786,6 +835,7 @@ export default function CrmDqTicketsAnalyticsView() {
 
   const clearBlockerInline = useCallback(
     async (row: TicketView) => {
+      if (shareMode) return;
       setQuickClearId(row.id);
       try {
         await updateTicketInline(row, { appStatus: null });
@@ -795,10 +845,11 @@ export default function CrmDqTicketsAnalyticsView() {
         setQuickClearId(null);
       }
     },
-    [updateTicketInline],
+    [updateTicketInline, shareMode],
   );
 
   const saveCommentInline = useCallback(async () => {
+    if (shareMode) return;
     if (!commentEditor) return;
     const row = commentEditor.row;
     const trimmed = commentDraft.trim();
@@ -816,9 +867,10 @@ export default function CrmDqTicketsAnalyticsView() {
     } finally {
       setCommentSaving(false);
     }
-  }, [commentEditor, commentDraft, updateTicketInline, closeCommentEditor]);
+  }, [commentEditor, commentDraft, updateTicketInline, closeCommentEditor, shareMode]);
 
   const clearCommentInline = useCallback(async () => {
+    if (shareMode) return;
     if (!commentEditor) return;
     if (commentEditor.row.appStatus) return;
     setCommentSaving(true);
@@ -831,9 +883,10 @@ export default function CrmDqTicketsAnalyticsView() {
     } finally {
       setCommentSaving(false);
     }
-  }, [commentEditor, updateTicketInline, closeCommentEditor]);
+  }, [commentEditor, updateTicketInline, closeCommentEditor, shareMode]);
 
   const saveEtaInline = useCallback(async () => {
+    if (shareMode) return;
     if (!etaEditor) return;
     setEtaSaving(true);
     setEtaError(null);
@@ -845,7 +898,7 @@ export default function CrmDqTicketsAnalyticsView() {
     } finally {
       setEtaSaving(false);
     }
-  }, [etaEditor, etaDraft, updateTicketInline, closeEtaEditor]);
+  }, [etaEditor, etaDraft, updateTicketInline, closeEtaEditor, shareMode]);
 
   const viewRows = useMemo<TicketView[]>(() => {
     const today = new Date();
@@ -1209,6 +1262,20 @@ export default function CrmDqTicketsAnalyticsView() {
             </p>
           </div>
           <div className="flex flex-wrap items-center gap-2">
+            {!shareMode ? (
+              <IfAdmin>
+                <button
+                  className="btn-ghost h-10 px-3"
+                  type="button"
+                  onClick={() => setShareOpen(true)}
+                >
+                  <span className="flex items-center gap-2 text-sm">
+                    <Link2 className="h-4 w-4" />
+                    Share
+                  </span>
+                </button>
+              </IfAdmin>
+            ) : null}
             <button className="btn-ghost h-10 px-4" type="button" onClick={loadTickets}>
               Refresh
             </button>
@@ -1585,34 +1652,48 @@ export default function CrmDqTicketsAnalyticsView() {
                           </span>
                           {row.appStatus ? (
                             <div className="flex items-center gap-1">
-                              <button
-                                type="button"
-                                className={[
-                                  "inline-flex items-center gap-1 rounded-full border px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wide transition",
-                                  appStatusClass,
-                                ].join(" ")}
-                                onClick={() => openBlockerModal(row)}
-                                title="Edit blocker status"
-                              >
-                                <AlertTriangle className="h-3 w-3" />
-                                {`Blocker: ${row.appStatus}`}
-                              </button>
-                              <button
-                                type="button"
-                                className="inline-flex h-5 w-5 items-center justify-center rounded-full border border-[color:var(--color-border)] text-[color:var(--color-text)]/60 transition hover:text-[color:var(--color-text)]"
-                                onClick={() => clearBlockerInline(row)}
-                                title="Clear blocker"
-                                aria-label="Clear blocker"
-                                disabled={quickClearId === row.id}
-                              >
-                                {quickClearId === row.id ? (
-                                  <Clock className="h-3 w-3 animate-spin" />
-                                ) : (
-                                  <X className="h-3 w-3" />
-                                )}
-                              </button>
+                              {canEdit ? (
+                                <button
+                                  type="button"
+                                  className={[
+                                    "inline-flex items-center gap-1 rounded-full border px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wide transition",
+                                    appStatusClass,
+                                  ].join(" ")}
+                                  onClick={() => openBlockerModal(row)}
+                                  title="Edit blocker status"
+                                >
+                                  <AlertTriangle className="h-3 w-3" />
+                                  {`Blocker: ${row.appStatus}`}
+                                </button>
+                              ) : (
+                                <span
+                                  className={[
+                                    "inline-flex items-center gap-1 rounded-full border px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wide",
+                                    appStatusClass,
+                                  ].join(" ")}
+                                >
+                                  <AlertTriangle className="h-3 w-3" />
+                                  {`Blocker: ${row.appStatus}`}
+                                </span>
+                              )}
+                              {canEdit ? (
+                                <button
+                                  type="button"
+                                  className="inline-flex h-5 w-5 items-center justify-center rounded-full border border-[color:var(--color-border)] text-[color:var(--color-text)]/60 transition hover:text-[color:var(--color-text)]"
+                                  onClick={() => clearBlockerInline(row)}
+                                  title="Clear blocker"
+                                  aria-label="Clear blocker"
+                                  disabled={quickClearId === row.id}
+                                >
+                                  {quickClearId === row.id ? (
+                                    <Clock className="h-3 w-3 animate-spin" />
+                                  ) : (
+                                    <X className="h-3 w-3" />
+                                  )}
+                                </button>
+                              ) : null}
                             </div>
-                          ) : (
+                          ) : canEdit ? (
                             <button
                               type="button"
                               className={[
@@ -1625,7 +1706,7 @@ export default function CrmDqTicketsAnalyticsView() {
                               <AlertTriangle className="h-3 w-3" />
                               Add blocker
                             </button>
-                          )}
+                          ) : null}
                         </div>
                       </td>
                       <td className="min-w-[240px]">
@@ -1679,15 +1760,17 @@ export default function CrmDqTicketsAnalyticsView() {
                               </span>
                             ) : null}
                           </div>
-                          <button
-                            type="button"
-                            className="mt-0.5 inline-flex h-6 w-6 items-center justify-center rounded-full border border-[color:var(--color-border)] text-[color:var(--color-text)]/60 transition hover:text-[color:var(--color-text)]"
-                            onClick={(event) => openEtaEditor(row, event.currentTarget)}
-                            title="Edit ETA"
-                            aria-label="Edit ETA"
-                          >
-                            <Calendar className="h-3.5 w-3.5" />
-                          </button>
+                          {canEdit ? (
+                            <button
+                              type="button"
+                              className="mt-0.5 inline-flex h-6 w-6 items-center justify-center rounded-full border border-[color:var(--color-border)] text-[color:var(--color-text)]/60 transition hover:text-[color:var(--color-text)]"
+                              onClick={(event) => openEtaEditor(row, event.currentTarget)}
+                              title="Edit ETA"
+                              aria-label="Edit ETA"
+                            >
+                              <Calendar className="h-3.5 w-3.5" />
+                            </button>
+                          ) : null}
                         </div>
                       </td>
                       <td className="max-w-[260px]">
@@ -1698,15 +1781,17 @@ export default function CrmDqTicketsAnalyticsView() {
                           >
                             {row.comments || "--"}
                           </span>
-                          <button
-                            type="button"
-                            className="mt-0.5 inline-flex h-6 w-6 items-center justify-center rounded-full border border-[color:var(--color-border)] text-[color:var(--color-text)]/60 transition hover:text-[color:var(--color-text)]"
-                            onClick={(event) => openCommentEditor(row, event.currentTarget)}
-                            title="Edit comment"
-                            aria-label="Edit comment"
-                          >
-                            <Pencil className="h-3.5 w-3.5" />
-                          </button>
+                          {canEdit ? (
+                            <button
+                              type="button"
+                              className="mt-0.5 inline-flex h-6 w-6 items-center justify-center rounded-full border border-[color:var(--color-border)] text-[color:var(--color-text)]/60 transition hover:text-[color:var(--color-text)]"
+                              onClick={(event) => openCommentEditor(row, event.currentTarget)}
+                              title="Edit comment"
+                              aria-label="Edit comment"
+                            >
+                              <Pencil className="h-3.5 w-3.5" />
+                            </button>
+                          ) : null}
                         </div>
                       </td>
                     </tr>
@@ -1718,7 +1803,15 @@ export default function CrmDqTicketsAnalyticsView() {
         </div>
       </section>
 
-      {commentEditor ? (
+      {!shareMode ? (
+        <CrmDqTicketsShareModal
+          open={shareOpen}
+          onClose={() => setShareOpen(false)}
+          clientSlug={clientSlug}
+        />
+      ) : null}
+
+      {canEdit && commentEditor ? (
         <AnchoredPopover
           open={!!commentEditor}
           anchorEl={commentEditor.anchor}
@@ -1797,7 +1890,7 @@ export default function CrmDqTicketsAnalyticsView() {
         </AnchoredPopover>
       ) : null}
 
-      {etaEditor ? (
+      {canEdit && etaEditor ? (
         <AnchoredPopover
           open={!!etaEditor}
           anchorEl={etaEditor.anchor}
@@ -2024,7 +2117,7 @@ export default function CrmDqTicketsAnalyticsView() {
         </MiniModal>
       ) : null}
 
-      {blockerTicket ? (
+      {canEdit && blockerTicket ? (
         <MiniModal
           title="Blocker status"
           onClose={closeBlockerModal}
