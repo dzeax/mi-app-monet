@@ -3,7 +3,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import { usePathname } from "next/navigation";
-import { Activity, AlertTriangle, Calendar, Clock, Pencil, Users, X } from "lucide-react";
+import { Activity, AlertTriangle, Calendar, Clock, Pencil, X } from "lucide-react";
 import {
   ResponsiveContainer,
   BarChart,
@@ -1221,7 +1221,7 @@ export default function CrmDqTicketsAnalyticsView() {
           </div>
         ) : null}
 
-        <div className="mt-6 grid gap-3 sm:grid-cols-2 lg:grid-cols-5">
+        <div className="mt-6 grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
           <div className="kpi-frame flex items-center gap-4">
             <div className="flex h-11 w-11 items-center justify-center rounded-full bg-[color:var(--color-surface-2)] text-[color:var(--color-primary)]">
               <Activity className="h-5 w-5" />
@@ -1291,22 +1291,6 @@ export default function CrmDqTicketsAnalyticsView() {
               </div>
             </div>
           </button>
-          <div className="kpi-frame flex items-center gap-4">
-            <div className="flex h-11 w-11 items-center justify-center rounded-full bg-[color:var(--color-surface-2)] text-[color:var(--color-primary)]">
-              <Users className="h-5 w-5" />
-            </div>
-            <div>
-              <div className="text-xs font-semibold uppercase tracking-[0.2em] text-[color:var(--color-text)]/55">
-                Avg age
-              </div>
-              <div className="mt-1 text-2xl font-semibold text-[color:var(--color-text)]">
-                {loading ? "--" : kpis.avgAge != null ? `${kpis.avgAge}d` : "--"}
-              </div>
-              <div className="mt-1 text-xs text-[color:var(--color-text)]/60">
-                Since assignment
-              </div>
-            </div>
-          </div>
         </div>
       </header>
 
