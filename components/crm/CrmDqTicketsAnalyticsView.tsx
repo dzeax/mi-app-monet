@@ -66,6 +66,7 @@ const SLA_START_HOUR = 9;
 const SLA_AFTER_HOUR = 18;
 const SLA_AFTER_CUTOFF_HOUR = 11;
 const SLA_TYPE_ALLOWLIST = new Set(["data", "lifecycle"]);
+const P1_ACK_CUTOFF_DATE = process.env.NEXT_PUBLIC_P1_ACK_CUTOFF_DATE ?? "";
 
 const STATUS_COLORS: Record<string, string> = {
   "In progress": "bg-amber-100 text-amber-800",
@@ -184,6 +185,20 @@ const parseIsoDateTime = (value?: string | null) => {
   if (Number.isNaN(parsed.getTime())) return null;
   return parsed;
 };
+
+const parseSlaCutoffDate = (value?: string | null) => {
+  if (!value) return null;
+  const parts = value.split("-").map((part) => Number(part));
+  if (parts.length !== 3 || parts.some((part) => Number.isNaN(part))) return null;
+  const [year, month, day] = parts;
+  return zonedTimeToUtc({ year, month, day, hour: 0, minute: 0 }, SLA_TIMEZONE);
+};
+
+const getReadyAt = (row: DashboardTicket) =>
+  parseIsoDateTime(row.jiraReadyAt) ||
+  (["Ready", "In progress", "Validation", "Done"].includes(row.status)
+    ? parseIsoDateTime(row.jiraCreatedAt)
+    : null);
 
 const getTimeZoneParts = (date: Date, timeZone: string) => {
   const formatter = new Intl.DateTimeFormat("en-CA", {
@@ -1010,12 +1025,30 @@ export default function CrmDqTicketsAnalyticsView({
     });
   }, [viewRows, statusFilters, assigneeFilters, priorityFilters, typeFilters, searchQuery]);
 
+  const p1AckCutoffAt = useMemo(
+    () => parseSlaCutoffDate(P1_ACK_CUTOFF_DATE),
+    [],
+  );
+  const p1AckCutoffLabel = P1_ACK_CUTOFF_DATE ? formatDate(P1_ACK_CUTOFF_DATE) : null;
+
   const p1AckMetrics = useMemo(() => {
+    const cutoffAt = p1AckCutoffAt;
     const inScope = filteredRows.filter((row) => {
       if (row.priority !== "P1") return false;
       const stripped = stripTypePrefix(row.type ?? "").toLowerCase();
-      if (SLA_TYPE_ALLOWLIST.has(stripped)) return true;
-      return stripped.includes("lifecycle");
+      if (!SLA_TYPE_ALLOWLIST.has(stripped) && !stripped.includes("lifecycle")) {
+        return false;
+      }
+      if (cutoffAt) {
+        const readyAt = getReadyAt(row);
+        if (readyAt) {
+          if (readyAt.getTime() < cutoffAt.getTime()) return false;
+        } else {
+          const createdAt = parseIsoDateTime(row.jiraCreatedAt);
+          if (!createdAt || createdAt.getTime() < cutoffAt.getTime()) return false;
+        }
+      }
+      return true;
     });
 
     let total = 0;
@@ -1024,11 +1057,7 @@ export default function CrmDqTicketsAnalyticsView({
     let pendingReady = 0;
 
     const details = inScope.map((row) => {
-      const readyAt =
-        parseIsoDateTime(row.jiraReadyAt) ||
-        (["Ready", "In progress", "Validation", "Done"].includes(row.status)
-          ? parseIsoDateTime(row.jiraCreatedAt)
-          : null);
+      const readyAt = getReadyAt(row);
       if (!readyAt) {
         pendingReady += 1;
         return { row, status: "pending" as const };
@@ -1060,17 +1089,13 @@ export default function CrmDqTicketsAnalyticsView({
       rate,
       details,
     };
-  }, [filteredRows]);
+  }, [filteredRows, p1AckCutoffAt]);
 
   const p1AckDrilldown = useMemo(() => {
     const order = { missing: 0, late: 1, on_time: 2, pending: 3 } as const;
     const items = p1AckMetrics.details.map((detail) => {
       const row = detail.row;
-      const readyAt =
-        parseIsoDateTime(row.jiraReadyAt) ||
-        (["Ready", "In progress", "Validation", "Done"].includes(row.status)
-          ? parseIsoDateTime(row.jiraCreatedAt)
-          : null);
+      const readyAt = getReadyAt(row);
       const ackAt = detail.ackAt ?? parseIsoDateTime(row.jiraAckAt);
       const window = detail.window ?? (readyAt ? computeSlaWindow(readyAt) : null);
       const deadlineAt = window?.deadlineAt ?? null;
@@ -2024,6 +2049,7 @@ export default function CrmDqTicketsAnalyticsView({
               </div>
             </div>
             <p className="mt-3 text-xs text-[color:var(--color-text)]/60">
+              {p1AckCutoffLabel ? `Effective from ${p1AckCutoffLabel}. ` : ""}
               Clock starts when the ticket enters Ready. Tickets created after 18:00 or during the
               weekend use the next business window.
             </p>
