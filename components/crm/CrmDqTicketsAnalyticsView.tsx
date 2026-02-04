@@ -3,7 +3,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import { usePathname } from "next/navigation";
-import { Activity, AlertTriangle, Calendar, Clock, Link2, Pencil, X } from "lucide-react";
+import { Activity, AlertTriangle, Calendar, Clock, FileText, Link2, Pencil, X } from "lucide-react";
 import {
   ResponsiveContainer,
   BarChart,
@@ -1287,6 +1287,17 @@ export default function CrmDqTicketsAnalyticsView({
             </p>
           </div>
           <div className="flex flex-wrap items-center gap-2">
+            <a
+              className="btn-ghost h-10 px-3"
+              href="/docs/tracker-dash.pdf"
+              target="_blank"
+              rel="noreferrer"
+            >
+              <span className="flex items-center gap-2 text-sm">
+                <FileText className="h-4 w-4" />
+                Help
+              </span>
+            </a>
             {!shareMode ? (
               <IfAdmin>
                 <button
