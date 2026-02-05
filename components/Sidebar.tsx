@@ -170,6 +170,18 @@ export default function Sidebar({
     </button>
   );
 
+  const BtnMonetizationWorklogs = (
+    <button
+      onClick={() => router.push("/command-center/worklogs?scope=monetization")}
+      className={btnBase(pathname?.startsWith("/command-center/worklogs") ? "sidebar-btn--active" : "")}
+      title="Worklogs"
+      aria-label="Worklogs"
+    >
+      <Image src="/icons/sidebar/reports.svg" alt="" aria-hidden width={24} height={24} className="sidebar-icon" />
+      {!collapsed && <span>Worklogs</span>}
+    </button>
+  );
+
   const BtnReports = (
     <button
       onClick={() => router.push("/analytics/reports")}
@@ -261,7 +273,7 @@ export default function Sidebar({
       key: "analytics",
       title: "Analytics",
       description: "Insights & reports",
-      items: [BtnCampaignReporting, BtnReports, BtnDbsPerformance],
+      items: [BtnCampaignReporting, BtnReports, BtnDbsPerformance, BtnMonetizationWorklogs],
     },
   ];
 

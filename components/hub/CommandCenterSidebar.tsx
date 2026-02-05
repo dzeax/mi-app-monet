@@ -77,6 +77,25 @@ export default function CommandCenterSidebar({
     </button>
   );
 
+  const BtnWorklogs = (
+    <button
+      onClick={() => router.push('/command-center/worklogs')}
+      className={btnBase(pathname?.startsWith('/command-center/worklogs') ? 'sidebar-btn--active' : '')}
+      title="Worklogs"
+      aria-label="Worklogs"
+    >
+      <Image
+        src="/icons/sidebar/reports.svg"
+        alt=""
+        aria-hidden
+        width={24}
+        height={24}
+        className="sidebar-icon"
+      />
+      {!collapsed && <span>Worklogs</span>}
+    </button>
+  );
+
   const BtnCrm = (
     <button
       onClick={() => {
@@ -153,7 +172,7 @@ export default function CommandCenterSidebar({
       key: 'team',
       title: 'Team',
       description: 'Capacity & workload',
-      items: [BtnCapacity],
+      items: [BtnCapacity, BtnWorklogs],
     },
     {
       key: 'admin',

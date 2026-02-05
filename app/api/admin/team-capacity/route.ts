@@ -76,6 +76,13 @@ type CampaignUnitRow = {
   hours_total: number | null;
 };
 
+type WorklogRow = {
+  user_id: string | null;
+  owner: string | null;
+  hours: number | null;
+  scope: string | null;
+};
+
 const querySchema = z.object({
   start: z.string().regex(DATE_RE),
   end: z.string().regex(DATE_RE),
@@ -217,6 +224,7 @@ export async function GET(req: Request) {
 
   const members = (users ?? []) as AppUserRow[];
   const userIds = members.map((user) => user.user_id);
+  const userIdSet = new Set(userIds);
 
   const { data: contracts, error: contractError } = await admin
     .from('team_capacity_contracts')
@@ -292,6 +300,12 @@ export async function GET(req: Request) {
     (query) => query.gte('send_date', startStr).lte('send_date', endStr),
   );
 
+  const worklogs = await fetchAll<WorklogRow>(
+    'work_manual_efforts',
+    'user_id,owner,hours,scope,effort_date',
+    (query) => query.gte('effort_date', startStr).lte('effort_date', endStr),
+  );
+
   const emailToUser = new Map<string, string>();
   const nameCounts = new Map<string, number>();
   members.forEach((user) => {
@@ -357,6 +371,11 @@ export async function GET(req: Request) {
     return null;
   };
 
+  const resolveWorklogUser = (userId?: string | null, owner?: string | null) => {
+    if (userId && userIdSet.has(userId)) return userId;
+    return resolveUser(null, owner);
+  };
+
   const addWorkload = (userId: string | null, hours: number) => {
     if (!Number.isFinite(hours) || hours <= 0) return;
     if (!userId) {
@@ -386,6 +405,12 @@ export async function GET(req: Request) {
   campaignUnits.forEach((row) => {
     const userId = resolveUser(row.person_id, row.owner);
     const hours = Number.isFinite(row.hours_total ?? null) ? Number(row.hours_total ?? 0) : 0;
+    addWorkload(userId, hours);
+  });
+
+  worklogs.forEach((row) => {
+    const userId = resolveWorklogUser(row.user_id, row.owner);
+    const hours = Number.isFinite(row.hours ?? null) ? Number(row.hours ?? 0) : 0;
     addWorkload(userId, hours);
   });
 

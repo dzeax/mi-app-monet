@@ -107,7 +107,13 @@ type TimeOffFormState = {
   reason: string;
 };
 
-type WorkloadDetailSource = 'crm_dq' | 'manual' | 'strategy' | 'campaign';
+type WorkloadDetailSource =
+  | 'crm_dq'
+  | 'manual'
+  | 'strategy'
+  | 'campaign'
+  | 'monetization'
+  | 'internal';
 
 type WorkloadDetailItem = {
   id: string;
@@ -255,6 +261,8 @@ const workloadSourceLabels: Record<WorkloadDetailSource, string> = {
   manual: 'Manual Effort',
   strategy: 'Strategy',
   campaign: 'Campaign Production',
+  monetization: 'Monetization',
+  internal: 'Internal',
 };
 
 const workloadSourceBadge: Record<WorkloadDetailSource, string> = {
@@ -262,6 +270,8 @@ const workloadSourceBadge: Record<WorkloadDetailSource, string> = {
   manual: 'bg-amber-50 text-amber-600 dark:bg-amber-900/30 dark:text-amber-300',
   strategy: 'bg-purple-50 text-purple-600 dark:bg-purple-900/30 dark:text-purple-300',
   campaign: 'bg-emerald-50 text-emerald-600 dark:bg-emerald-900/30 dark:text-emerald-300',
+  monetization: 'bg-blue-50 text-blue-600 dark:bg-blue-900/30 dark:text-blue-300',
+  internal: 'bg-slate-100 text-slate-700 dark:bg-slate-800/40 dark:text-slate-200',
 };
 
 type WorkloadClientColor = {
@@ -697,19 +707,46 @@ export default function TeamCapacityPage() {
       .sort((a, b) => b.totalHours - a.totalHours);
   }, [sortedWorkloadDetails]);
 
+  const groupedWorkloadDisplay = useMemo(() => {
+    if (!groupedWorkload.length) return [];
+    const usedIndexes = new Set<number>();
+    return groupedWorkload.map((group) => {
+      let selectedColor = group.color;
+      let selectedIndex = workloadClientPalette.indexOf(selectedColor);
+      if (selectedIndex < 0) {
+        selectedIndex = 0;
+        selectedColor = workloadClientPalette[0];
+      }
+      if (usedIndexes.has(selectedIndex)) {
+        for (let i = 0; i < workloadClientPalette.length; i += 1) {
+          if (!usedIndexes.has(i)) {
+            selectedIndex = i;
+            selectedColor = workloadClientPalette[i];
+            break;
+          }
+        }
+      }
+      usedIndexes.add(selectedIndex);
+      return {
+        ...group,
+        color: selectedColor,
+      };
+    });
+  }, [groupedWorkload]);
+
   const groupedWorkloadTotal = useMemo(
-    () => groupedWorkload.reduce((sum, group) => sum + group.totalHours, 0),
-    [groupedWorkload],
+    () => groupedWorkloadDisplay.reduce((sum, group) => sum + group.totalHours, 0),
+    [groupedWorkloadDisplay],
   );
 
   const workloadChartSegments = useMemo(() => {
-    if (!groupedWorkload.length) return [];
-    const segments = groupedWorkload.slice(0, 5).map((group, index) => ({
+    if (!groupedWorkloadDisplay.length) return [];
+    const segments = groupedWorkloadDisplay.slice(0, 5).map((group) => ({
       name: group.name,
       totalHours: group.totalHours,
-      color: workloadChartPalette[index] ?? workloadChartPalette[0],
+      color: group.color,
     }));
-    const remainingHours = groupedWorkload
+    const remainingHours = groupedWorkloadDisplay
       .slice(5)
       .reduce((sum, group) => sum + group.totalHours, 0);
     if (remainingHours > 0) {
@@ -720,16 +757,16 @@ export default function TeamCapacityPage() {
       });
     }
     return segments;
-  }, [groupedWorkload]);
+  }, [groupedWorkloadDisplay]);
 
   const workloadLegend = useMemo(
     () =>
-      groupedWorkload.slice(0, 3).map((group, index) => ({
+      groupedWorkloadDisplay.slice(0, 3).map((group) => ({
         name: group.name,
         totalHours: group.totalHours,
-        color: workloadChartPalette[index] ?? workloadChartPalette[0],
+        color: group.color,
       })),
-    [groupedWorkload],
+    [groupedWorkloadDisplay],
   );
 
   const sortedUnmappedDetails = useMemo(
@@ -2600,7 +2637,7 @@ export default function TeamCapacityPage() {
                     </div>
                   </div>
                   <div className="text-xs text-[var(--color-muted)]">
-                    {groupedWorkload.length} clients
+                    {groupedWorkloadDisplay.length} clients
                   </div>
                 </div>
 
@@ -2638,9 +2675,9 @@ export default function TeamCapacityPage() {
                           </div>
                         );
                       })}
-                      {groupedWorkload.length > 3 ? (
+                      {groupedWorkloadDisplay.length > 3 ? (
                         <span className="text-[var(--color-muted)]">
-                          +{groupedWorkload.length - 3} more
+                          +{groupedWorkloadDisplay.length - 3} more
                         </span>
                       ) : null}
                     </div>
@@ -2675,12 +2712,17 @@ export default function TeamCapacityPage() {
                     </span>
                   </div>
 
-                  {groupedWorkload.map((group, index) => {
+                  {groupedWorkloadDisplay.map((group, index) => {
                     const percent =
                       groupedWorkloadTotal > 0
                         ? group.totalHours / groupedWorkloadTotal
                         : 0;
-                    const logo = getClientLogo(group.slug, group.name);
+                    const groupKey = (group.slug || group.name || '').trim().toLowerCase();
+                    const dvLogo =
+                      groupKey === 'internal' || groupKey === 'monetization'
+                        ? { src: '/dvlogomini.png', alt: 'Dataventure' }
+                        : null;
+                    const logo = dvLogo ?? getClientLogo(group.slug, group.name);
                     return (
                       <details
                         key={group.name}
@@ -2785,7 +2827,7 @@ export default function TeamCapacityPage() {
             {/* Drawer Footer (Optional) */}
             <div className="border-t border-[var(--color-border)] bg-[var(--color-surface-2)]/30 p-4 text-center">
               <p className="text-[10px] text-[var(--color-muted)]">
-                Data sourced from CRM &amp; Monetization
+                Data sourced from CRM, Monetization &amp; Internal
               </p>
             </div>
           </div>

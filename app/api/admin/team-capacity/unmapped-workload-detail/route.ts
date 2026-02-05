@@ -79,7 +79,15 @@ type CampaignRow = {
   touchpoint: string | null;
 };
 
-type WorkloadDetailSource = 'crm_dq' | 'manual' | 'strategy' | 'campaign';
+type WorklogRow = {
+  scope: 'monetization' | 'internal' | null;
+  user_id: string | null;
+  owner: string | null;
+  hours: number | string | null;
+  workstream: string | null;
+};
+
+type WorkloadDetailSource = 'crm_dq' | 'manual' | 'strategy' | 'campaign' | 'monetization' | 'internal';
 
 type UnmappedDetail = {
   ownerKey: string;
@@ -290,6 +298,8 @@ export async function GET(req: Request) {
   const users = (userRows ?? []) as AppUserRow[];
   const activeUsers = users.filter((user) => user.is_active);
   const inactiveUsers = users.filter((user) => !user.is_active);
+  const activeUserIds = new Set(activeUsers.map((user) => user.user_id));
+  const inactiveUserIds = new Set(inactiveUsers.map((user) => user.user_id));
 
   const { data: peopleRows, error: peopleError } = await admin
     .from('crm_people')
@@ -335,6 +345,8 @@ export async function GET(req: Request) {
   (clientRows ?? []).forEach((row: ClientRow) => {
     if (row.slug) clientNames.set(row.slug, row.name);
   });
+  clientNames.set('monetization', 'Monetization');
+  clientNames.set('internal', 'Internal');
 
   let strategyTickets = new Map<string, StrategyTicketRow>();
 
@@ -380,6 +392,12 @@ export async function GET(req: Request) {
       'campaign_email_units',
       'client_slug,person_id,owner,hours_total,campaign_name,brand,market,scope,segment,touchpoint,send_date',
       (query) => query.gte('send_date', start).lte('send_date', end),
+    );
+
+    const worklogs = await fetchAll<WorklogRow>(
+      'work_manual_efforts',
+      'scope,user_id,owner,hours,workstream,effort_date',
+      (query) => query.gte('effort_date', start).lte('effort_date', end),
     );
 
     const detailMap = new Map<string, UnmappedDetail>();
@@ -540,6 +558,40 @@ export async function GET(req: Request) {
         inactiveMatch: Boolean(resolvedInactiveUser),
         clientSlug: row.client_slug ?? null,
         source: 'campaign',
+        label,
+        hours,
+      });
+    });
+
+    worklogs.forEach((row) => {
+      const scope = row.scope === 'internal' ? 'internal' : 'monetization';
+      const resolvedActiveUser = row.user_id && activeUserIds.has(row.user_id)
+        ? row.user_id
+        : resolveUserId(null, row.owner, {
+            personToUser: personToActiveUser,
+            aliasToPerson,
+            emailToUser: activeMaps.emailToUser,
+            nameToUser: activeMaps.nameToUser,
+          });
+      const resolvedInactiveUser = row.user_id && inactiveUserIds.has(row.user_id)
+        ? row.user_id
+        : resolveUserId(null, row.owner, {
+            personToUser: personToInactiveUser,
+            aliasToPerson,
+            emailToUser: inactiveMaps.emailToUser,
+            nameToUser: inactiveMaps.nameToUser,
+          });
+      const identity = resolveOwnerIdentity(null, row.owner);
+      const hours = toNumber(row.hours);
+      const label = normalizeLabel(
+        row.workstream,
+        scope === 'internal' ? 'Internal work' : 'Monetization work',
+      );
+      addDetail(resolvedActiveUser, Boolean(resolvedInactiveUser), {
+        ...identity,
+        inactiveMatch: Boolean(resolvedInactiveUser),
+        clientSlug: scope,
+        source: scope,
         label,
         hours,
       });
