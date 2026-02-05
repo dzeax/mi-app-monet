@@ -15,7 +15,7 @@ import {
   startOfWeek,
 } from 'date-fns';
 import { es } from 'date-fns/locale';
-import type { PlanningItem } from '@/components/campaign-planning/types';
+import type { CampaignStatus, PlanningItem } from '@/components/campaign-planning/types';
 import { CAMPAIGN_STATUSES } from '@/components/campaign-planning/types';
 import DatabaseFlag from '@/components/campaign-planning/DatabaseFlag';
 
@@ -52,16 +52,50 @@ const priceFormatter = new Intl.NumberFormat('es-ES', {
   maximumFractionDigits: 2,
 });
 
-const statusColors: Record<string, string> = {
-  Backlog: 'bg-slate-200 text-slate-700',
-  Refining: 'bg-indigo-100 text-indigo-700',
-  Ready: 'bg-sky-100 text-sky-700',
-  WIP: 'bg-purple-100 text-purple-700',
-  Validation: 'bg-amber-100 text-amber-700',
-  Programmed: 'bg-emerald-100 text-emerald-700',
-  Reporting: 'bg-orange-100 text-orange-700',
-  Completed: 'bg-slate-200 text-slate-600',
+const statusThemes: Record<
+  CampaignStatus,
+  { card: string; accent: string; pill: string; hover: string }
+> = {
+  Planning: {
+    card: 'bg-white border-slate-200/80',
+    accent: 'bg-slate-400/70',
+    pill: 'bg-slate-100 text-slate-700 border-slate-200/80',
+    hover: 'hover:border-slate-300 hover:bg-slate-50',
+  },
+  Refining: {
+    card: 'bg-[#ff00ff]/12 border-[#ff00ff]/60',
+    accent: 'bg-[#ff00ff]',
+    pill: 'bg-[#ff00ff] text-white border-[#ff00ff]',
+    hover: 'hover:border-[#ff00ff] hover:bg-[#ff00ff]/18',
+  },
+  Validation: {
+    card: 'bg-[#9900ff]/12 border-[#9900ff]/60',
+    accent: 'bg-[#9900ff]',
+    pill: 'bg-[#9900ff] text-white border-[#9900ff]',
+    hover: 'hover:border-[#9900ff] hover:bg-[#9900ff]/18',
+  },
+  Approved: {
+    card: 'bg-[#ff9900]/10 border-[#ff9900]/60',
+    accent: 'bg-[#ff9900]',
+    pill: 'bg-[#ff9900] text-white border-[#ff9900]',
+    hover: 'hover:border-[#ff9900] hover:bg-[#ff9900]/15',
+  },
+  Programmed: {
+    card: 'bg-[#69fc86]/25 border-[#69fc86]/70',
+    accent: 'bg-[#69fc86]',
+    pill: 'bg-[#69fc86] text-emerald-950 border-[#69fc86]',
+    hover: 'hover:border-[#69fc86] hover:bg-[#69fc86]/35',
+  },
+  Profit: {
+    card: 'bg-[#6aa84f]/20 border-[#6aa84f]/70',
+    accent: 'bg-[#6aa84f]',
+    pill: 'bg-[#6aa84f] text-white border-[#6aa84f]',
+    hover: 'hover:border-[#6aa84f] hover:bg-[#6aa84f]/28',
+  },
 };
+
+const resolveStatusTheme = (status: string) =>
+  statusThemes[status as CampaignStatus] ?? statusThemes.Planning;
 
 function chunk<T>(array: T[], size: number): T[][] {
   const chunks: T[][] = [];
@@ -394,79 +428,91 @@ function DayView({
         <div className="border-b border-[color:var(--color-border)] bg-[color:var(--color-surface-2)]/60 px-4 py-3 text-sm font-semibold uppercase tracking-[0.18em] text-[color:var(--color-text)]/65">
           Campaigns
         </div>
-        <div className="divide-y divide-[color:var(--color-border)]">
-          {sortedItems.length === 0 ? (
-            <div className="flex flex-col items-center gap-3 p-6 text-sm text-[color:var(--color-text)]/55">
-              <span>Sin campañas programadas para este día.</span>
-              <button
-                type="button"
-                className="btn-primary px-4 py-2 text-xs"
-                onClick={() => onCreateAtDate(date)}
-              >
-                Crear campaña
-              </button>
-            </div>
-          ) : (
-            sortedItems.map((item) => (
-              <div
-                key={item.id}
-                className="p-4 flex flex-col gap-2 hover:bg-[color:var(--color-surface-2)]/40 cursor-pointer"
-                onClick={() => onSelectItem(item)}
-              >
-                <div className="flex items-center justify-between gap-2">
-                  <h3 className="font-semibold text-[color:var(--color-text)]">{item.name}</h3>
-                  <div className="flex items-center gap-2">
-                    <button
-                      type="button"
-                      className="btn-ghost text-xs px-2 py-1"
-                      onClick={(event) => {
-                        event.stopPropagation();
-                        onDuplicate(item);
-                      }}
-                    >
-                      Duplicate
-                    </button>
-                    <button
-                      type="button"
-                      className="btn-ghost text-xs px-2 py-1 text-[color:var(--color-accent)] hover:text-[color:var(--color-accent)]/80"
-                      onClick={(event) => {
-                        event.stopPropagation();
-                        onDelete(item);
-                      }}
-                    >
-                      Delete
-                    </button>
+        {sortedItems.length === 0 ? (
+          <div className="flex flex-col items-center gap-3 p-6 text-sm text-[color:var(--color-text)]/55">
+            <span>Sin campañas programadas para este día.</span>
+            <button
+              type="button"
+              className="btn-primary px-4 py-2 text-xs"
+              onClick={() => onCreateAtDate(date)}
+            >
+              Crear campaña
+            </button>
+          </div>
+        ) : (
+          <div className="p-3 space-y-3">
+            {sortedItems.map((item) => {
+              const statusTheme = resolveStatusTheme(item.status);
+              return (
+                <div
+                  key={item.id}
+                  className={[
+                    'rounded-2xl border p-4 flex flex-col gap-2 cursor-pointer transition-colors shadow-[0_1px_2px_rgba(16,24,40,0.06)]',
+                    statusTheme.card,
+                    statusTheme.hover,
+                  ].join(' ')}
+                  onClick={() => onSelectItem(item)}
+                >
+                  <div className="flex items-center justify-between gap-2">
+                    <h3 className="font-semibold text-[color:var(--color-text)]">{item.name}</h3>
+                    <div className="flex items-center gap-2">
+                      <button
+                        type="button"
+                        className="btn-ghost text-xs px-2 py-1"
+                        onClick={(event) => {
+                          event.stopPropagation();
+                          onDuplicate(item);
+                        }}
+                      >
+                        Duplicate
+                      </button>
+                      <button
+                        type="button"
+                        className="btn-ghost text-xs px-2 py-1 text-[color:var(--color-accent)] hover:text-[color:var(--color-accent)]/80"
+                        onClick={(event) => {
+                          event.stopPropagation();
+                          onDelete(item);
+                        }}
+                      >
+                        Delete
+                      </button>
+                    </div>
                   </div>
+                  <div className="text-xs text-[color:var(--color-text)]/65 uppercase tracking-[0.16em]">
+                    {item.partner} | {item.database} | {item.type}
+                  </div>
+                  <div className="flex items-center justify-between text-sm text-[color:var(--color-text)]/75">
+                    <span>{priceFormatter.format(item.price)}</span>
+                    <span
+                      className={[
+                        'inline-flex items-center gap-1 px-2 py-0.5 text-xs rounded-full font-semibold border border-transparent',
+                        statusTheme.pill,
+                      ].join(' ')}
+                    >
+                      {item.status}
+                    </span>
+                  </div>
+                  <div className="mt-2 ml-auto flex items-center gap-2 text-xs text-[color:var(--color-text)]/65 uppercase tracking-[0.14em]">
+                    <DatabaseFlag name={item.database} className="h-4 w-4" />
+                    {item.database}
+                    {item.dsStatus?.toLowerCase() === 'preview_sent' ? (
+                      <span className="inline-flex items-center gap-1 rounded-full bg-emerald-100 px-2 py-0.5 text-[10px] font-semibold uppercase tracking-[0.14em] text-emerald-700">
+                        Preview sent
+                      </span>
+                    ) : item.dsStatus ? (
+                      <span className="inline-flex items-center gap-1 rounded-full bg-[color:var(--color-border)]/60 px-2 py-0.5 text-[10px] font-semibold uppercase tracking-[0.14em] text-[color:var(--color-text)]/70">
+                        {item.dsStatus}
+                      </span>
+                    ) : null}
+                  </div>
+                  {item.notes ? (
+                    <p className="text-xs text-[color:var(--color-text)]/55 leading-relaxed">{item.notes}</p>
+                  ) : null}
                 </div>
-                <div className="text-xs text-[color:var(--color-text)]/65 uppercase tracking-[0.16em]">
-                  {item.partner} | {item.database} | {item.type}
-                </div>
-                <div className="flex items-center justify-between text-sm text-[color:var(--color-text)]/75">
-                  <span>{priceFormatter.format(item.price)}</span>
-                  <span className={['inline-flex items-center gap-1 px-2 py-0.5 text-xs rounded-full font-semibold', statusColors[item.status]].join(' ')}>
-                    {item.status}
-                  </span>
-                </div>
-  <div className="mt-2 ml-auto flex items-center gap-2 text-xs text-[color:var(--color-text)]/65 uppercase tracking-[0.14em]">
-    <DatabaseFlag name={item.database} className="h-4 w-4" />
-    {item.database}
-    {item.dsStatus?.toLowerCase() === 'preview_sent' ? (
-      <span className="inline-flex items-center gap-1 rounded-full bg-emerald-100 px-2 py-0.5 text-[10px] font-semibold uppercase tracking-[0.14em] text-emerald-700">
-        Preview sent
-      </span>
-    ) : item.dsStatus ? (
-      <span className="inline-flex items-center gap-1 rounded-full bg-[color:var(--color-border)]/60 px-2 py-0.5 text-[10px] font-semibold uppercase tracking-[0.14em] text-[color:var(--color-text)]/70">
-        {item.dsStatus}
-      </span>
-    ) : null}
-  </div>
-                {item.notes ? (
-                  <p className="text-xs text-[color:var(--color-text)]/55 leading-relaxed">{item.notes}</p>
-                ) : null}
-              </div>
-            ))
-          )}
-        </div>
+              );
+            })}
+          </div>
+        )}
       </div>
     </div>
   );
@@ -489,7 +535,8 @@ function CampaignChip({
   onDragEnd: () => void;
   isDragging: boolean;
 }) {
-  const statusClass = statusColors[item.status] ?? 'bg-[color:var(--color-border)] text-[color:var(--color-text)]';
+  const statusTheme = resolveStatusTheme(item.status);
+  const statusClass = statusTheme.pill;
   const [menuOpen, setMenuOpen] = useState(false);
   const menuRef = useRef<HTMLDivElement | null>(null);
 
@@ -534,7 +581,9 @@ function CampaignChip({
   return (
     <div
       className={[
-        'group relative flex cursor-pointer flex-col rounded-2xl border border-[color:var(--color-border)] bg-[color:var(--color-surface)] px-3 pb-3 pt-3 text-xs shadow-[0_1px_2px_rgba(16,24,40,0.08)] transition-all focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[color:var(--color-primary)]/70',
+        'group relative flex cursor-pointer flex-col rounded-2xl border px-3 pb-3 pt-3 text-xs shadow-[0_1px_2px_rgba(16,24,40,0.08)] transition-all focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[color:var(--color-primary)]/70',
+        statusTheme.card,
+        statusTheme.hover,
         isDragging
           ? 'opacity-60 ring-1 ring-[color:var(--color-primary)]/60'
           : 'hover:-translate-y-[1px] hover:border-[color:var(--color-primary)]/30 hover:shadow-[0_8px_24px_rgba(16,24,40,0.12)]',
@@ -566,7 +615,10 @@ function CampaignChip({
       }}
     >
       <span
-        className="pointer-events-none absolute left-2 top-3 bottom-3 w-[3px] rounded-full bg-[color:var(--color-primary)]/75 transition-opacity group-hover:opacity-90"
+        className={[
+          'pointer-events-none absolute left-2 top-3 bottom-3 w-[3px] rounded-full transition-opacity group-hover:opacity-90',
+          statusTheme.accent,
+        ].join(' ')}
         aria-hidden="true"
       />
       <div className="flex items-start gap-3">

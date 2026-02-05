@@ -123,7 +123,7 @@ export function CampaignPlanningProvider({ children }: CampaignPlanningProviderP
       void (_ignoredId, _ignoredCreatedAt, _ignoredUpdatedAt);
       const draft: PlanningDraft = {
         ...rest,
-        status: 'Backlog',
+        status: 'Planning',
         date: dateOverride ?? original.date,
         previewRecipients: rest.previewRecipients ?? [],
         dsCampaignId: null,

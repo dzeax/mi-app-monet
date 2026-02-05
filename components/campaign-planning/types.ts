@@ -1,24 +1,20 @@
 import type { ReactNode } from 'react';
 
 export type CampaignStatus =
-  | 'Backlog'
+  | 'Planning'
   | 'Refining'
-  | 'Ready'
-  | 'WIP'
   | 'Validation'
+  | 'Approved'
   | 'Programmed'
-  | 'Reporting'
-  | 'Completed';
+  | 'Profit';
 
 export const CAMPAIGN_STATUSES: CampaignStatus[] = [
-  'Backlog',
+  'Planning',
   'Refining',
-  'Ready',
-  'WIP',
   'Validation',
+  'Approved',
   'Programmed',
-  'Reporting',
-  'Completed',
+  'Profit',
 ];
 
 export type CampaignType = 'CPL' | 'CPC' | 'CPM' | 'CPA' | 'CPI' | 'CPO';

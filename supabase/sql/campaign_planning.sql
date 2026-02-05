@@ -53,7 +53,7 @@ alter table public.campaign_planning
 comment on table public.campaign_planning is 'Planning board items for campaign scheduling.';
 comment on column public.campaign_planning.geo is 'ISO country code derived from database selection.';
 comment on column public.campaign_planning.type is 'Commercial model (e.g. CPL, CPM, CPC, CPA).';
-comment on column public.campaign_planning.status is 'Workflow state (Backlog, Refining, Ready, etc.).';
+comment on column public.campaign_planning.status is 'Workflow state (Planning, Refining, Validation, Approved, Programmed, Profit).';
 
 -- Updated_at helper
 create or replace function public.set_updated_at()

@@ -48,7 +48,7 @@ const defaultDraft: PlanningDraft = {
   geo: '',
   price: 0,
   type: 'CPL',
-  status: 'Backlog',
+  status: 'Planning',
   date: format(new Date(), 'yyyy-MM-dd'),
   notes: '',
   subject: '',
@@ -895,7 +895,7 @@ export default function CampaignPlanningDrawer({
                     <h3 className="text-lg font-semibold text-[color:var(--color-text)]">Create or refine the activation</h3>
                   </div>
                   <span className="inline-flex items-center gap-2 rounded-full border border-[color:var(--color-border)] px-3 py-1 text-[11px] font-semibold uppercase tracking-[0.16em] text-[color:var(--color-text)]/70">
-                    {draft.status || 'Backlog'}
+                    {draft.status || 'Planning'}
                   </span>
                 </div>
                 <div className="mt-6 space-y-5">

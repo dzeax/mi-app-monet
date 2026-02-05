@@ -230,8 +230,13 @@ function PlanningViewInner() {
         }
       }
       if (parsed?.filters) {
+        const statusValues = Array.isArray(parsed.filters.statuses)
+          ? parsed.filters.statuses.filter((status): status is CampaignStatus =>
+              CAMPAIGN_STATUSES.includes(status as CampaignStatus)
+            )
+          : [];
         setFilters({
-          statuses: Array.isArray(parsed.filters.statuses) ? parsed.filters.statuses : [],
+          statuses: statusValues,
           databases: Array.isArray(parsed.filters.databases) ? parsed.filters.databases : [],
         });
       }
