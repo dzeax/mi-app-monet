@@ -6,6 +6,7 @@ import { usePathname } from "next/navigation";
 import Link from "next/link";
 import ColumnPicker from "@/components/ui/ColumnPicker";
 import GeoFlag from "@/components/GeoFlag";
+import MiniModal from "@/components/ui/MiniModal";
 import CrmGenerateUnitsModal from "@/components/crm/CrmGenerateUnitsModal";
 import CrmBulkEditUnitsModal, {
   type CampaignUnitsBulkPatch,
@@ -279,8 +280,9 @@ export default function CrmCampaignReportingView() {
   const [pageSize, setPageSize] = useState(50);
   const [sortKey, setSortKey] = useState<SortKey>("sendDate");
   const [sortDir, setSortDir] = useState<SortDir>("desc");
-  const [compact, setCompact] = useState(false);
+  const [compact, setCompact] = useState(true);
   const [openGenerate, setOpenGenerate] = useState(false);
+  const [confirmDeleteOpen, setConfirmDeleteOpen] = useState(false);
   const peopleById = useMemo(() => {
     const map = new Map<string, string>();
     peopleDirectory.forEach((person) => {
@@ -736,7 +738,8 @@ export default function CrmCampaignReportingView() {
       if (showCol(c.id)) count += 1;
     });
     // +1 for the selection column
-    return Math.max(count, 1) + 1;
+    // +1 for actions column
+    return Math.max(count, 1) + 2;
   }, [columnOptions, showCol]);
 
   const applyDatePreset = useCallback((preset: typeof datePreset) => {
@@ -893,6 +896,12 @@ export default function CrmCampaignReportingView() {
     }
   }, [somePageSelected, allPageSelected]);
 
+  useEffect(() => {
+    if (selectedCount === 0) {
+      setConfirmDeleteOpen(false);
+    }
+  }, [selectedCount]);
+
   const toggleRowSelection = (id: string) => {
     setSelectedIds((prev) => {
       const next = new Set(prev);
@@ -1019,8 +1028,8 @@ export default function CrmCampaignReportingView() {
     }
   };
 
-  const deleteSelected = async () => {
-    if (!selectedIds.size) return;
+  const deleteSelected = async (): Promise<boolean> => {
+    if (!selectedIds.size) return false;
     try {
       setDeleting(true);
       const res = await fetch("/api/crm/campaign-email-units", {
@@ -1035,11 +1044,19 @@ export default function CrmCampaignReportingView() {
       setRows((prev) => prev.filter((r) => !selectedIds.has(r.id)));
       setSelectedIds(new Set());
       showSuccess("Email units deleted");
+      return true;
     } catch (err) {
       showError(err instanceof Error ? err.message : "Unable to delete email units");
+      return false;
     } finally {
       setDeleting(false);
     }
+  };
+
+  const handleConfirmDelete = async () => {
+    if (deleting || !selectedIds.size) return;
+    const ok = await deleteSelected();
+    if (ok) setConfirmDeleteOpen(false);
   };
 
   return (
@@ -1169,7 +1186,15 @@ export default function CrmCampaignReportingView() {
             </div>
             <div className="flex items-center gap-2 ml-auto">
               <button
-                className="btn-primary h-10"
+                className="btn-primary h-10 gap-2"
+                type="button"
+                onClick={() => setOpenGenerate(true)}
+              >
+                <span className="text-base leading-none">+</span>
+                Add units
+              </button>
+              <button
+                className="btn-ghost h-10"
                 type="button"
                 onClick={() => {
                   clearFilters();
@@ -1299,11 +1324,18 @@ export default function CrmCampaignReportingView() {
       ) : null}
 
       {selectedCount > 0 ? (
-        <div className="flex flex-wrap items-center justify-between gap-3 rounded-xl border border-[color:var(--color-border)] bg-[color:var(--color-surface-2)] px-3 py-2 text-sm text-[color:var(--color-text)]">
-          <span>{selectedCount.toLocaleString()} email unit(s) selected</span>
+        <div className="flex flex-wrap items-center justify-between gap-3 rounded-xl border border-[color:var(--color-border)] bg-[color:var(--color-surface)] px-3 py-2 text-sm text-[color:var(--color-text)] shadow-sm">
+          <div className="flex flex-wrap items-center gap-3">
+            <span className="inline-flex items-center rounded-full bg-[color:var(--color-primary)]/15 px-3 py-1 text-xs font-semibold text-[color:var(--color-primary)]">
+              {selectedCount.toLocaleString()} selected
+            </span>
+            <span className="text-xs text-[color:var(--color-text)]/65">
+              Applies to selected units (can include other pages).
+            </span>
+          </div>
           <div className="flex flex-wrap items-center gap-2">
             <button
-              className="btn-ghost h-9 px-3"
+              className="btn-ghost h-9 px-3 border-[color:var(--color-primary)]/30 text-[color:var(--color-primary)] hover:bg-[color:var(--color-primary)]/10"
               type="button"
               onClick={() => {
                 setBulkEditIds(Array.from(selectedIds));
@@ -1314,14 +1346,19 @@ export default function CrmCampaignReportingView() {
               Edit units
             </button>
             <button
-              className="btn-primary h-9 px-3"
+              className="btn-danger h-9 px-3"
               type="button"
-              onClick={deleteSelected}
+              onClick={() => setConfirmDeleteOpen(true)}
               disabled={deleting}
             >
               {deleting ? "Deleting..." : "Delete units"}
             </button>
-            <button className="btn-ghost h-9 px-3" type="button" onClick={clearSelection}>
+            <button
+              className="btn-ghost h-9 px-3 text-[color:var(--color-text)]/70"
+              type="button"
+              onClick={clearSelection}
+              disabled={deleting}
+            >
               Clear selection
             </button>
           </div>
@@ -1329,57 +1366,6 @@ export default function CrmCampaignReportingView() {
       ) : null}
 
       <div className="overflow-hidden rounded-2xl border border-[color:var(--color-border)] bg-[color:var(--color-surface)]">
-        <div className="flex flex-wrap items-center justify-between gap-3 border-b border-[color:var(--color-border)]/70 px-3 py-2">
-          <button
-            className="btn-primary h-9 px-3 text-xs sm:text-sm"
-            type="button"
-            onClick={() => setOpenGenerate(true)}
-          >
-            Generate units
-          </button>
-          <label className="flex items-center gap-2 text-xs text-[color:var(--color-text)]/80">
-            <input
-              type="checkbox"
-              checked={compact}
-              onChange={(e) => setCompact(e.target.checked)}
-              className="h-4 w-4"
-            />
-            Compact view
-          </label>
-          <div className="relative" ref={actionsRef}>
-            <button
-              className="btn-ghost h-9 w-9 text-lg"
-              type="button"
-              onClick={() => setActionsOpen((v) => !v)}
-              aria-label="Table actions"
-            >
-              ⋯
-            </button>
-            {actionsOpen ? (
-              <div className="absolute right-0 z-30 mt-2 w-44 rounded-lg border border-[color:var(--color-border)] bg-[color:var(--color-surface)] shadow-lg">
-                <button
-                  className="block w-full px-3 py-2 text-left text-sm hover:bg-[color:var(--color-surface-2)]"
-                  onClick={() => {
-                    setShowColumnPicker(true);
-                    setActionsOpen(false);
-                  }}
-                >
-                  Columns
-                </button>
-                <button
-                  className="block w-full px-3 py-2 text-left text-sm hover:bg-[color:var(--color-surface-2)] disabled:cursor-not-allowed disabled:opacity-50"
-                  onClick={() => {
-                    setActionsOpen(false);
-                    void exportCsv();
-                  }}
-                  disabled={exporting || sortedRows.length === 0}
-                >
-                  {exporting ? "Exporting..." : "Download CSV"}
-                </button>
-              </div>
-            ) : null}
-          </div>
-        </div>
         {error ? (
           <div className="px-4 py-3 text-sm text-[color:var(--color-text)]/75">{error}</div>
         ) : null}
@@ -1509,6 +1495,55 @@ export default function CrmCampaignReportingView() {
                 {showCol("jira") ? (
                   <th className="px-3 py-3 font-semibold">JIRA</th>
                 ) : null}
+                <th className="w-[1%] pr-2 text-right">
+                  <div className="relative inline-flex" ref={actionsRef}>
+                    <button
+                      className="btn-ghost h-8 w-8 text-lg border border-[color:var(--color-border)] bg-[color:var(--color-surface)]/90"
+                      type="button"
+                      onClick={() => setActionsOpen((v) => !v)}
+                      aria-label="Table actions"
+                    >
+                      ⋯
+                    </button>
+                    {actionsOpen ? (
+                      <div className="absolute right-0 z-30 mt-2 w-44 rounded-lg border border-[color:var(--color-border)] bg-[color:var(--color-surface)] shadow-lg">
+                        <button
+                          className="flex w-full items-center justify-between px-3 py-2 text-left text-sm hover:bg-[color:var(--color-surface-2)]"
+                          onClick={() => setCompact((prev) => !prev)}
+                          aria-pressed={compact}
+                        >
+                          <span>Compact view</span>
+                          <input
+                            type="checkbox"
+                            className="h-4 w-4 accent-[color:var(--color-primary)]"
+                            checked={compact}
+                            readOnly
+                            tabIndex={-1}
+                          />
+                        </button>
+                        <button
+                          className="block w-full px-3 py-2 text-left text-sm hover:bg-[color:var(--color-surface-2)]"
+                          onClick={() => {
+                            setShowColumnPicker(true);
+                            setActionsOpen(false);
+                          }}
+                        >
+                          Columns
+                        </button>
+                        <button
+                          className="block w-full px-3 py-2 text-left text-sm hover:bg-[color:var(--color-surface-2)] disabled:cursor-not-allowed disabled:opacity-50"
+                          onClick={() => {
+                            setActionsOpen(false);
+                            void exportCsv();
+                          }}
+                          disabled={exporting || sortedRows.length === 0}
+                        >
+                          {exporting ? "Exporting..." : "Download CSV"}
+                        </button>
+                      </div>
+                    ) : null}
+                  </div>
+                </th>
               </tr>
             </thead>
             <tbody className="divide-y divide-[color:var(--color-border)]/70 text-[color:var(--color-text)]">
@@ -1658,6 +1693,7 @@ export default function CrmCampaignReportingView() {
                         )}
                       </td>
                     ) : null}
+                    <td className="px-2 py-3" />
                     </tr>
                   );
                 })
@@ -1676,8 +1712,8 @@ export default function CrmCampaignReportingView() {
                 </tr>
               ) : null}
             </tbody>
-          </table>
-        </div>
+            </table>
+          </div>
         <div className="flex flex-wrap items-center justify-between gap-3 border-t border-[color:var(--color-border)]/70 px-3 py-3 text-xs text-[color:var(--color-text)]/75">
           <div>
             {filteredRows.length > 0 ? (
@@ -1765,6 +1801,35 @@ export default function CrmCampaignReportingView() {
             setBulkEditIds([]);
           }}
         />
+      ) : null}
+
+      {confirmDeleteOpen ? (
+        <MiniModal
+          title="Delete selected email units"
+          widthClass="max-w-md"
+          onClose={() => {
+            if (deleting) return;
+            setConfirmDeleteOpen(false);
+          }}
+          footer={
+            <>
+              <button className="btn-ghost" type="button" onClick={() => setConfirmDeleteOpen(false)} disabled={deleting}>
+                Cancel
+              </button>
+              <button className="btn-danger" type="button" onClick={handleConfirmDelete} disabled={deleting || selectedCount === 0}>
+                {deleting ? "Deleting..." : "Delete units"}
+              </button>
+            </>
+          }
+        >
+          <div className="space-y-3 text-sm text-[color:var(--color-text)]">
+            <p>
+              You’re about to permanently delete{" "}
+              <strong>{selectedCount.toLocaleString()}</strong> email unit(s).
+            </p>
+            <p className="text-[color:var(--color-text)]/65">This action can’t be undone.</p>
+          </div>
+        </MiniModal>
       ) : null}
 
       {openGenerate ? (

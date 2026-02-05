@@ -13,7 +13,7 @@ export const metadata: Metadata = {
   title: 'Data & CRM | Dataventure',
   description: 'Campaign reporting',
   icons: {
-    icon: '/dvlogo2.svg',
+    icon: '/dvlogomini.png',
   },
 };
 

@@ -552,6 +552,16 @@ form[data-variant="clean-tech"] button.input {
 .btn-primary:hover { filter: brightness(1.05); }
 .btn-primary:active { transform: translateY(0.5px); }
 
+/* BotÃ³n danger */
+.btn-danger {
+  @apply inline-flex items-center justify-center rounded-lg px-4 py-2 font-semibold transition-all;
+  color: white;
+  background: linear-gradient(180deg, #ff6b6b 0%, var(--color-accent) 100%);
+  box-shadow: 0 6px 18px color-mix(in oklab, var(--color-accent) 28%, transparent);
+}
+.btn-danger:hover { filter: brightness(1.05); }
+.btn-danger:active { transform: translateY(0.5px); }
+
 /* Botón ghost */
 .btn-ghost {
   @apply inline-flex items-center justify-center rounded-lg px-4 py-2 font-medium transition-colors border;

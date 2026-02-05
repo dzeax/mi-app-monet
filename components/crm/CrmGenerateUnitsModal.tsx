@@ -751,7 +751,7 @@ const currentProfile = TIME_PROFILES[profileKey] ?? TIME_PROFILES.standard;
   return (
     <MiniModal
       onClose={onClose}
-      title="Generate campaign email units"
+      title="Add units"
       widthClass="max-w-2xl"
     >
       <div className="space-y-4 text-sm text-[color:var(--color-text)]">
