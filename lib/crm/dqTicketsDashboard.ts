@@ -2,7 +2,14 @@ import type { SupabaseClient } from "@supabase/supabase-js";
 
 const DEFAULT_LIMIT = 1000;
 
-const normalizeKey = (value?: string | null) => value?.trim().toLowerCase() ?? "";
+const normalizeKey = (value?: string | null) =>
+  value
+    ? value
+        .normalize("NFD")
+        .replace(/[\u0300-\u036f]/g, "")
+        .trim()
+        .toLowerCase()
+    : "";
 
 const normalizeList = (values?: string[]) =>
   (values ?? []).map((value) => normalizeKey(value)).filter(Boolean);
@@ -40,10 +47,18 @@ export async function getDqTicketsDashboardData({
   const searchKey = normalizeKey(search ?? "");
   const safeLimit = clampLimit(limit);
 
-  const [{ data: peopleRows, error: peopleError }, { data: aliasRows, error: aliasError }] =
+  const [
+    { data: peopleRows, error: peopleError },
+    { data: aliasRows, error: aliasError },
+    { data: appUsersRows, error: appUsersError },
+  ] =
     await Promise.all([
       admin.from("crm_people").select("id, display_name").eq("client_slug", client),
       admin.from("crm_people_aliases").select("person_id, alias").eq("client_slug", client),
+      admin
+        .from("app_users")
+        .select("display_name, avatar_url")
+        .eq("is_active", true),
     ]);
 
   if (peopleError) {
@@ -51,6 +66,9 @@ export async function getDqTicketsDashboardData({
   }
   if (aliasError) {
     throw new Error(aliasError.message);
+  }
+  if (appUsersError) {
+    throw new Error(appUsersError.message);
   }
 
   const peopleById = new Map<string, string>();
@@ -67,6 +85,14 @@ export async function getDqTicketsDashboardData({
   (aliasRows ?? []).forEach((row: { person_id?: string | null; alias?: string | null }) => {
     if (!row?.person_id || !row.alias) return;
     aliasToPerson.set(normalizeKey(row.alias), String(row.person_id));
+  });
+
+  const avatarByDisplayName = new Map<string, string>();
+  (appUsersRows ?? []).forEach((row: { display_name?: string | null; avatar_url?: string | null }) => {
+    const displayName = String(row?.display_name ?? "").trim();
+    const avatarUrl = String(row?.avatar_url ?? "").trim();
+    if (!displayName || !avatarUrl) return;
+    avatarByDisplayName.set(normalizeKey(displayName), avatarUrl);
   });
 
   const { data: ticketRows, error: ticketError } = await admin
@@ -92,6 +118,7 @@ export async function getDqTicketsDashboardData({
           personId && peopleById.get(personId)
             ? peopleById.get(personId) ?? rawAssignee
             : rawAssignee || "Unassigned";
+        const assigneeAvatarUrl = avatarByDisplayName.get(normalizeKey(assigneeLabel)) ?? null;
 
         return {
           id: String(row.id),
@@ -122,6 +149,7 @@ export async function getDqTicketsDashboardData({
           updatedAt: row.updated_at ?? null,
           assigneeLabel,
           assigneeKey: personId || assigneeLabel,
+          assigneeAvatarUrl,
         };
       })
       .filter((ticket) => {

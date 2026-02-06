@@ -29,6 +29,7 @@ type Option = { label: string; value: string };
 type DashboardTicket = DataQualityTicket & {
   assigneeLabel?: string | null;
   assigneeKey?: string | null;
+  assigneeAvatarUrl?: string | null;
 };
 
 type DqTicketsViewProps = {
@@ -69,12 +70,21 @@ const SLA_TYPE_ALLOWLIST = new Set(["data", "lifecycle"]);
 const P1_ACK_CUTOFF_DATE = process.env.NEXT_PUBLIC_P1_ACK_CUTOFF_DATE ?? "";
 
 const STATUS_COLORS: Record<string, string> = {
-  "In progress": "bg-amber-100 text-amber-800",
-  Ready: "bg-blue-100 text-blue-800",
-  Backlog: "bg-slate-100 text-slate-700",
-  Refining: "bg-purple-100 text-purple-800",
-  Validation: "bg-teal-100 text-teal-800",
-  Done: "bg-emerald-50 text-emerald-700",
+  "in progress": "bg-amber-100 text-amber-800",
+  ready: "bg-blue-100 text-blue-800",
+  backlog: "bg-slate-100 text-slate-700",
+  refining: "bg-purple-100 text-purple-800",
+  validation: "bg-teal-100 text-teal-800",
+  done: "bg-emerald-50 text-emerald-700",
+};
+
+const STATUS_LABELS: Record<string, string> = {
+  "in progress": "In progress",
+  ready: "Ready",
+  backlog: "Backlog",
+  refining: "Refining",
+  validation: "Validation",
+  done: "Done",
 };
 
 const PRIORITY_COLORS: Record<string, string> = {
@@ -90,12 +100,8 @@ const APP_STATUS_OPTIONS = [
   { value: "Blocked", label: "Blocked" },
 ];
 
-const APP_STATUS_STYLES: Record<string, string> = {
-  Standby: "border-amber-200 bg-amber-50 text-amber-700",
-  "Waiting EMG": "border-sky-200 bg-sky-50 text-sky-700",
-  "Waiting Internal": "border-purple-200 bg-purple-50 text-purple-700",
-  Blocked: "border-rose-200 bg-rose-50 text-rose-700",
-};
+const BLOCKER_BADGE_CLASS =
+  "inline-flex items-center gap-1 whitespace-nowrap rounded-full border border-rose-300 bg-rose-50 px-1 py-px text-[8px] font-semibold leading-none text-rose-700";
 
 const P1_ACK_STATUS_STYLES: Record<string, string> = {
   on_time: "border-emerald-200 bg-emerald-50 text-emerald-700",
@@ -113,6 +119,26 @@ const P1_ACK_STATUS_LABELS: Record<string, string> = {
 
 const normalizePersonKey = (value?: string | null) =>
   value?.trim().toLowerCase() ?? "";
+
+const normalizeStatusKey = (value?: string | null) =>
+  value?.trim().toLowerCase().replace(/\s+/g, " ") ?? "";
+
+const getStatusLabel = (value?: string | null) =>
+  STATUS_LABELS[normalizeStatusKey(value)] ?? value?.trim() ?? "";
+
+const getStatusClass = (value?: string | null) =>
+  STATUS_COLORS[normalizeStatusKey(value)] ?? "bg-slate-100 text-slate-700";
+
+const getAvatarInitials = (name?: string | null) => {
+  const safeName = (name ?? "").trim();
+  if (!safeName) return "?";
+  const tokens = safeName.split(/\s+/).filter(Boolean);
+  if (tokens.length === 1) return tokens[0].slice(0, 1).toUpperCase();
+  return tokens
+    .slice(0, 2)
+    .map((token) => token.slice(0, 1).toUpperCase())
+    .join("");
+};
 
 const formatDate = (value?: string | null) => {
   if (!value) return "--";
@@ -196,7 +222,7 @@ const parseSlaCutoffDate = (value?: string | null) => {
 
 const getReadyAt = (row: DashboardTicket) =>
   parseIsoDateTime(row.jiraReadyAt) ||
-  (["Ready", "In progress", "Validation", "Done"].includes(row.status)
+  (["ready", "in progress", "validation", "done"].includes(normalizeStatusKey(row.status))
     ? parseIsoDateTime(row.jiraCreatedAt)
     : null);
 
@@ -965,7 +991,7 @@ export default function CrmDqTicketsAnalyticsView({
 
   const statusOptions = useMemo<Option[]>(() => {
     const source = meta?.statuses?.length ? meta.statuses : rows.map((r) => r.status);
-    const found = new Set(source.filter(Boolean));
+    const found = new Set(source.map((status) => getStatusLabel(status)).filter(Boolean));
     const merged = [
       ...STATUS_OPTIONS,
       ...Array.from(found).filter((s) => !STATUS_OPTIONS.includes(s)),
@@ -1024,6 +1050,19 @@ export default function CrmDqTicketsAnalyticsView({
       return true;
     });
   }, [viewRows, statusFilters, assigneeFilters, priorityFilters, typeFilters, searchQuery]);
+
+  const tableRows = useMemo(() => {
+    const priorityRank: Record<string, number> = { P1: 0, P2: 1, P3: 2 };
+    return filteredRows
+      .map((row, index) => ({ row, index }))
+      .sort((a, b) => {
+        const rankA = priorityRank[a.row.priority] ?? 3;
+        const rankB = priorityRank[b.row.priority] ?? 3;
+        if (rankA !== rankB) return rankA - rankB;
+        return a.index - b.index;
+      })
+      .map((entry) => entry.row);
+  }, [filteredRows]);
 
   const p1AckCutoffAt = useMemo(
     () => parseSlaCutoffDate(P1_ACK_CUTOFF_DATE),
@@ -1143,7 +1182,7 @@ export default function CrmDqTicketsAnalyticsView({
     const statusMap = new Map<string, Map<string, number>>();
     const ownerCounts = new Map<string, number>();
     filteredRows.forEach((row) => {
-      const status = row.status || "Unknown";
+      const status = getStatusLabel(row.status) || "Unknown";
       const owner = row.assigneeLabel || "Unassigned";
       const ownerMap = statusMap.get(status) ?? new Map<string, number>();
       ownerMap.set(owner, (ownerMap.get(owner) ?? 0) + 1);
@@ -1630,10 +1669,10 @@ export default function CrmDqTicketsAnalyticsView({
           </span>
         </div>
         <div className="mt-4 table-wrap">
-          <table className="table min-w-[1040px]">
+          <table className="table min-w-[1040px] [&_td]:py-1 [&_td]:leading-tight [&_.title-cell]:gap-0">
             <thead>
               <tr>
-                <th>Status</th>
+                <th className="w-[128px]">Status</th>
                 <th>Ticket</th>
                 <th>Created</th>
                 <th>Priority</th>
@@ -1658,18 +1697,15 @@ export default function CrmDqTicketsAnalyticsView({
                   </td>
                 </tr>
               ) : (
-                filteredRows.map((row) => {
-                  const statusClass = STATUS_COLORS[row.status] ?? "bg-slate-100 text-slate-700";
+                tableRows.map((row) => {
+                  const statusClass = getStatusClass(row.status);
+                  const statusLabel = getStatusLabel(row.status) || "--";
                   const priorityClass = PRIORITY_COLORS[row.priority] ?? "bg-slate-50 text-slate-600";
                   const etaClass = row.isOverdue
                     ? "text-red-600 font-semibold"
                     : row.isDueSoon
                     ? "text-amber-600 font-semibold"
                     : "text-[color:var(--color-text)]";
-                  const appStatusClass = row.appStatus
-                    ? APP_STATUS_STYLES[row.appStatus] ||
-                      "border-amber-200 bg-amber-50 text-amber-700"
-                    : "";
                   const etaMeta = row.isOverdue
                     ? "Overdue"
                     : row.isDueSoon
@@ -1678,70 +1714,62 @@ export default function CrmDqTicketsAnalyticsView({
                     ? `${row.etaDays}d`
                     : "";
                   return (
-                    <tr key={row.id}>
-                      <td>
-                        <div className="flex flex-col gap-1">
-                          <span
-                            className={`dq-badge inline-flex items-center rounded-full px-2 py-0.5 text-xs font-semibold ${statusClass}`}
-                          >
-                            {row.status}
-                          </span>
+                    <tr key={row.id} className={row.appStatus ? "group bg-rose-50/20" : "group"}>
+                      <td className="w-[128px] align-top">
+                        <div className="flex w-full max-w-[120px] flex-col gap-0 rounded-md px-0.5 py-0">
+                          <div className="relative flex items-center gap-1 pr-6">
+                            <span
+                              className={`dq-badge inline-flex items-center whitespace-nowrap rounded-full px-1.5 py-px text-[10px] font-semibold ${statusClass}`}
+                            >
+                              {statusLabel}
+                            </span>
+                            {canEdit && !row.appStatus ? (
+                              <button
+                                type="button"
+                                className="absolute right-0 top-1/2 inline-flex h-5 w-5 -translate-y-1/2 items-center justify-center rounded-full border border-[color:var(--color-border)] bg-[color:var(--color-surface-2)] text-[color:var(--color-text)]/60 opacity-0 pointer-events-none transition hover:text-[color:var(--color-text)] group-hover:opacity-100 group-hover:pointer-events-auto focus:opacity-100 focus:pointer-events-auto"
+                                onClick={() => openBlockerModal(row)}
+                                title="Add blocker status"
+                                aria-label="Add blocker status"
+                              >
+                                <AlertTriangle className="h-3 w-3" />
+                              </button>
+                            ) : null}
+                          </div>
                           {row.appStatus ? (
-                            <div className="flex items-center gap-1">
+                            <div className="relative flex items-center gap-1 pr-6">
                               {canEdit ? (
                                 <button
                                   type="button"
-                                  className={[
-                                    "inline-flex items-center gap-1 rounded-full border px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wide transition",
-                                    appStatusClass,
-                                  ].join(" ")}
+                                  className={`${BLOCKER_BADGE_CLASS} transition hover:bg-rose-100`}
                                   onClick={() => openBlockerModal(row)}
-                                  title="Edit blocker status"
+                                  title={`Edit blocker status (${row.appStatus})`}
                                 >
-                                  <AlertTriangle className="h-3 w-3" />
-                                  {`Blocker: ${row.appStatus}`}
+                                  <AlertTriangle className="h-2.5 w-2.5" />
+                                  {row.appStatus}
                                 </button>
                               ) : (
-                                <span
-                                  className={[
-                                    "inline-flex items-center gap-1 rounded-full border px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wide",
-                                    appStatusClass,
-                                  ].join(" ")}
-                                >
-                                  <AlertTriangle className="h-3 w-3" />
-                                  {`Blocker: ${row.appStatus}`}
+                                <span className={BLOCKER_BADGE_CLASS}>
+                                  <AlertTriangle className="h-2.5 w-2.5" />
+                                  {row.appStatus}
                                 </span>
                               )}
                               {canEdit ? (
                                 <button
                                   type="button"
-                                  className="inline-flex h-5 w-5 items-center justify-center rounded-full border border-[color:var(--color-border)] text-[color:var(--color-text)]/60 transition hover:text-[color:var(--color-text)]"
+                                  className="absolute right-0 top-1/2 inline-flex h-5 w-5 -translate-y-1/2 items-center justify-center rounded-full border border-rose-300 bg-rose-50 text-rose-600 opacity-0 pointer-events-none transition hover:bg-rose-100 group-hover:opacity-100 group-hover:pointer-events-auto focus:opacity-100 focus:pointer-events-auto"
                                   onClick={() => clearBlockerInline(row)}
                                   title="Clear blocker"
                                   aria-label="Clear blocker"
                                   disabled={quickClearId === row.id}
                                 >
                                   {quickClearId === row.id ? (
-                                    <Clock className="h-3 w-3 animate-spin" />
+                                    <Clock className="h-2.5 w-2.5 animate-spin" />
                                   ) : (
-                                    <X className="h-3 w-3" />
+                                    <X className="h-2.5 w-2.5" />
                                   )}
                                 </button>
                               ) : null}
                             </div>
-                          ) : canEdit ? (
-                            <button
-                              type="button"
-                              className={[
-                                "inline-flex items-center gap-1 rounded-full border px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wide transition",
-                                "border-[color:var(--color-border)] bg-[color:var(--color-surface-2)] text-[color:var(--color-text)]/60 hover:text-[color:var(--color-text)]",
-                              ].join(" ")}
-                              onClick={() => openBlockerModal(row)}
-                              title="Add blocker status"
-                            >
-                              <AlertTriangle className="h-3 w-3" />
-                              Add blocker
-                            </button>
                           ) : null}
                         </div>
                       </td>
@@ -1770,7 +1798,28 @@ export default function CrmDqTicketsAnalyticsView({
                           {row.priority}
                         </span>
                       </td>
-                      <td>{row.assigneeLabel}</td>
+                      <td>
+                        <div className="flex items-center">
+                          <div
+                            className="h-7 w-7 shrink-0 overflow-hidden rounded-full border border-[color:var(--color-border)] bg-[color:var(--color-surface-2)]"
+                            title={row.assigneeLabel}
+                            aria-label={row.assigneeLabel}
+                          >
+                            {row.assigneeAvatarUrl ? (
+                              <img
+                                src={row.assigneeAvatarUrl}
+                                alt={row.assigneeLabel}
+                                className="h-full w-full object-cover"
+                                referrerPolicy="no-referrer"
+                              />
+                            ) : (
+                              <div className="flex h-full w-full items-center justify-center text-[11px] font-semibold text-[color:var(--color-text)]/60">
+                                {getAvatarInitials(row.assigneeLabel)}
+                              </div>
+                            )}
+                          </div>
+                        </div>
+                      </td>
                       <td>
                         <span className="inline-flex items-center rounded-full border border-[color:var(--color-border)] bg-[color:var(--color-surface-2)] px-2 py-0.5 text-xs font-semibold text-[color:var(--color-text)]/80">
                           {row.type ? stripTypePrefix(row.type) : "--"}

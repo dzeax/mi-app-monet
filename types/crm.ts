@@ -26,6 +26,7 @@ export type DataQualityTicket = {
   priority: "P1" | "P2" | "P3";
   owner: string;
   jiraAssignee?: string | null;
+  assigneeAvatarUrl?: string | null;
   reporter: string | null;
   type: string | null;
   jiraUrl: string | null;
