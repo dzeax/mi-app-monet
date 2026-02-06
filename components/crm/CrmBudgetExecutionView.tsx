@@ -137,6 +137,35 @@ type BudgetExecutionResponse = {
   };
 };
 
+type BudgetCarryoverSummary = {
+  fromYear: number;
+  total: number;
+  allocated: number;
+  unallocated: number;
+};
+
+type BudgetCarryoverCache = {
+  at: number;
+  payload: BudgetCarryoverSummary;
+};
+
+type BudgetYearResponse = {
+  roles?: Array<{
+    adjustedPoolAmount?: number;
+    poolAmount?: number;
+    carryoverAmount?: number;
+  }>;
+  spendByPerson?: Record<string, number>;
+  error?: string;
+};
+
+type BudgetAdjustmentsResponse = {
+  adjustments?: Array<{
+    amount?: number;
+  }>;
+  error?: string;
+};
+
 type KpiItem = {
   label: string;
   value: string;
@@ -179,6 +208,9 @@ const COLUMN_LABELS: Record<ColumnKey, string> = {
 };
 const PRODUCTION_SCOPE = "Production";
 const EMPTY_SET = new Set<string>();
+const CARRYOVER_CACHE_TTL_MS = 10 * 60 * 1000;
+
+const roundAmount = (value: number) => Math.round(value * 100) / 100;
 
 const percentFormatter = new Intl.NumberFormat("es-ES", {
   style: "percent",
@@ -757,6 +789,9 @@ export default function CrmBudgetExecutionView({
   const [shareAllowedYears, setShareAllowedYears] = useState<number[] | null>(null);
   const [workstreamDetailOpen, setWorkstreamDetailOpen] = useState(false);
   const [workstreamDetailScope, setWorkstreamDetailScope] = useState<string | null>(null);
+  const [carryoverSummary, setCarryoverSummary] = useState<BudgetCarryoverSummary | null>(null);
+  const [carryoverLoading, setCarryoverLoading] = useState(false);
+  const [carryoverError, setCarryoverError] = useState<string | null>(null);
 
   useEffect(() => {
     if (typeof window === "undefined") return;
@@ -770,6 +805,132 @@ export default function CrmBudgetExecutionView({
     if (typeof window === "undefined") return;
     window.localStorage.setItem(PRESET_STORAGE_KEY, columnPreset);
   }, [columnPreset]);
+
+  useEffect(() => {
+    if (shareMode) {
+      setCarryoverSummary(null);
+      setCarryoverLoading(false);
+      setCarryoverError(null);
+      return;
+    }
+
+    const fromYear = year - 1;
+    if (!Number.isFinite(fromYear) || fromYear < 1900) {
+      setCarryoverSummary(null);
+      setCarryoverLoading(false);
+      setCarryoverError(null);
+      return;
+    }
+
+    const cacheKey = `crm_budget_exec_carryover_${clientSlug}_${year}`;
+    let cached: BudgetCarryoverCache | null = null;
+    if (typeof window !== "undefined") {
+      try {
+        const raw = window.localStorage.getItem(cacheKey);
+        if (raw) {
+          const parsed = JSON.parse(raw) as BudgetCarryoverCache;
+          if (parsed?.payload && Number.isFinite(Number(parsed?.at))) {
+            cached = parsed;
+          }
+        }
+      } catch {
+        cached = null;
+      }
+    }
+
+    if (cached?.payload) {
+      setCarryoverSummary(cached.payload);
+      const isFresh = Date.now() - Number(cached.at) <= CARRYOVER_CACHE_TTL_MS;
+      if (isFresh) {
+        setCarryoverLoading(false);
+        setCarryoverError(null);
+        return;
+      }
+    } else {
+      setCarryoverSummary(null);
+    }
+
+    let active = true;
+    setCarryoverLoading(!cached?.payload);
+    setCarryoverError(null);
+
+    const loadCarryover = async () => {
+      try {
+        const [budgetRes, adjustmentsRes] = await Promise.all([
+          fetch(`/api/crm/budget?client=${clientSlug}&year=${fromYear}`),
+          fetch(
+            `/api/crm/budget-adjustments?client=${clientSlug}&fromYear=${fromYear}&toYear=${year}&type=carryover`,
+          ),
+        ]);
+
+        const budgetBody =
+          (await budgetRes.json().catch(() => null)) as BudgetYearResponse | null;
+        const adjustmentsBody =
+          (await adjustmentsRes.json().catch(() => null)) as BudgetAdjustmentsResponse | null;
+
+        if (!budgetRes.ok) {
+          throw new Error(
+            budgetBody?.error || `Failed to load carry-over source year (${budgetRes.status})`,
+          );
+        }
+        if (!adjustmentsRes.ok) {
+          throw new Error(
+            adjustmentsBody?.error || `Failed to load carry-over allocations (${adjustmentsRes.status})`,
+          );
+        }
+
+        const totalBudget = (budgetBody?.roles ?? []).reduce((acc, role) => {
+          const adjusted = Number(role.adjustedPoolAmount);
+          if (Number.isFinite(adjusted)) return acc + adjusted;
+          const pool = Number(role.poolAmount ?? 0);
+          const carry = Number(role.carryoverAmount ?? 0);
+          return acc + pool + carry;
+        }, 0);
+        const totalSpent = Object.values(budgetBody?.spendByPerson ?? {}).reduce(
+          (acc, value) => acc + Number(value ?? 0),
+          0,
+        );
+        const total = roundAmount(totalBudget - totalSpent);
+        const allocated = roundAmount(
+          (adjustmentsBody?.adjustments ?? []).reduce(
+            (acc, row) => acc + Number(row?.amount ?? 0),
+            0,
+          ),
+        );
+        const unallocated = roundAmount(total - allocated);
+
+        const nextPayload: BudgetCarryoverSummary = {
+          fromYear,
+          total,
+          allocated,
+          unallocated,
+        };
+
+        if (!active) return;
+        setCarryoverSummary(nextPayload);
+        setCarryoverError(null);
+
+        if (typeof window !== "undefined") {
+          window.localStorage.setItem(
+            cacheKey,
+            JSON.stringify({ at: Date.now(), payload: nextPayload }),
+          );
+        }
+      } catch (err) {
+        if (!active) return;
+        setCarryoverError(
+          err instanceof Error ? err.message : "Unable to load carry-over summary",
+        );
+      } finally {
+        if (active) setCarryoverLoading(false);
+      }
+    };
+
+    void loadCarryover();
+    return () => {
+      active = false;
+    };
+  }, [clientSlug, shareMode, year]);
 
   const panelStorageKey = useCallback(
     (panel: "production" | "workstreams") =>
@@ -2231,6 +2392,79 @@ export default function CrmBudgetExecutionView({
             );
           })}
         </div>
+
+        {!shareMode ? (
+          <div className="relative z-10 mt-4 rounded-2xl border border-[color:var(--color-border)] bg-[color:var(--color-surface-2)]/70 p-4">
+            <div className="flex flex-wrap items-start justify-between gap-3">
+              <div>
+                <div className="flex items-center gap-2 text-xs font-semibold uppercase tracking-[0.2em] text-[color:var(--color-text)]/65">
+                  <PiggyBank className="h-3.5 w-3.5 text-[color:var(--color-primary)]" />
+                  Carry-over From {year - 1}
+                </div>
+                <p className="mt-1 text-xs text-[color:var(--color-text)]/65">
+                  Previous-year remnant pending allocation into {year} role pools.
+                </p>
+              </div>
+              <span
+                className="rounded-full border border-[color:var(--color-border)] bg-[color:var(--color-surface)] px-2.5 py-1 text-[11px] font-medium text-[color:var(--color-text)]/70"
+                title="Computed as previous year plan minus actuals. Not affected by current filters."
+              >
+                Not affected by filters
+              </span>
+            </div>
+
+            {carryoverLoading && !carryoverSummary ? (
+              <div className="mt-3 text-sm text-[color:var(--color-text)]/65">
+                Loading carry-over...
+              </div>
+            ) : null}
+
+            {carryoverError && !carryoverSummary ? (
+              <div className="mt-3 rounded-xl border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-800">
+                {carryoverError}
+              </div>
+            ) : null}
+
+            {carryoverSummary ? (
+              <div className="mt-3 grid gap-3 sm:grid-cols-3">
+                <div className="rounded-xl border border-[color:var(--color-border)] bg-[color:var(--color-surface)] p-3">
+                  <p className="text-[11px] font-semibold uppercase tracking-[0.2em] text-[color:var(--color-text)]/55">
+                    Total ({carryoverSummary.fromYear})
+                  </p>
+                  <p className="mt-1 text-xl font-semibold text-[color:var(--color-text)]">
+                    {formatCurrency(carryoverSummary.total, true)}
+                  </p>
+                </div>
+                <div className="rounded-xl border border-[color:var(--color-border)] bg-[color:var(--color-surface)] p-3">
+                  <p className="text-[11px] font-semibold uppercase tracking-[0.2em] text-[color:var(--color-text)]/55">
+                    Allocated To {year}
+                  </p>
+                  <p className="mt-1 text-xl font-semibold text-[color:var(--color-text)]">
+                    {formatCurrency(carryoverSummary.allocated, true)}
+                  </p>
+                </div>
+                <div className="rounded-xl border border-[color:var(--color-border)] bg-[color:var(--color-surface)] p-3">
+                  <p className="text-[11px] font-semibold uppercase tracking-[0.2em] text-[color:var(--color-text)]/55">
+                    Unallocated
+                  </p>
+                  <p
+                    className={`mt-1 text-xl font-semibold ${
+                      carryoverSummary.unallocated < 0 ? "text-red-600" : "text-emerald-600"
+                    }`}
+                  >
+                    {formatCurrency(carryoverSummary.unallocated, true)}
+                  </p>
+                </div>
+              </div>
+            ) : null}
+
+            {carryoverError && carryoverSummary ? (
+              <p className="mt-2 text-xs text-amber-700">
+                Showing cached values. {carryoverError}
+              </p>
+            ) : null}
+          </div>
+        ) : null}
       </header>
 
       <section className="card px-6 py-5">
