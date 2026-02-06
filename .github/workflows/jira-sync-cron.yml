@@ -11,6 +11,7 @@ jobs:
     timeout-minutes: 15
     steps:
       - name: Call cron endpoint
+        id: cron
         env:
           CRON_URL_JIRA_SYNC: ${{ secrets.CRON_URL_JIRA_SYNC }}
           CRON_SECRET: ${{ secrets.CRON_SECRET }}
@@ -31,7 +32,25 @@ jobs:
           BODY=$(echo "$RESPONSE" | head -n 1)
           STATUS=$(echo "$RESPONSE" | tail -n 1)
           echo "$BODY"
+          echo "status=$STATUS" >> "$GITHUB_OUTPUT"
           if [ "$STATUS" -ge 400 ]; then
             echo "Cron endpoint failed with HTTP $STATUS"
             exit 1
           fi
+
+      - name: Notify Slack on failure
+        if: failure()
+        env:
+          SLACK_WEBHOOK_URL: ${{ secrets.SLACK_WEBHOOK_URL }}
+          CRON_STATUS: ${{ steps.cron.outputs.status }}
+        run: |
+          if [ -z "$SLACK_WEBHOOK_URL" ]; then
+            echo "Missing SLACK_WEBHOOK_URL; skipping Slack notification"
+            exit 0
+          fi
+
+          RUN_URL="https://github.com/${GITHUB_REPOSITORY}/actions/runs/${GITHUB_RUN_ID}"
+          MSG="JIRA sync failed (${GITHUB_REPOSITORY}) HTTP ${CRON_STATUS}. ${RUN_URL}"
+          curl -sS -X POST -H "Content-type: application/json" \
+            --data "{\"text\":\"${MSG}\"}" \
+            "$SLACK_WEBHOOK_URL"
