@@ -49,6 +49,21 @@ type Filters = {
   workstream: string[];
 };
 
+type JiraSyncStatus = {
+  available: boolean;
+  client: string;
+  isRunning: boolean;
+  lockedUntil: string | null;
+  lastCursorAt: string | null;
+  lastStartedAt: string | null;
+  lastFinishedAt: string | null;
+  lastSuccessAt: string | null;
+  lastError: string | null;
+  lastImported: number;
+  lastPages: number;
+  updatedAt: string | null;
+};
+
 const STATUS_OPTIONS = [
   "Backlog",
   "Refining",
@@ -92,6 +107,28 @@ const formatRangeInputDate = (value?: string | null) => {
   const parsed = parseISO(value);
   if (Number.isNaN(parsed.getTime())) return null;
   return format(parsed, "dd/MM/yy");
+};
+
+const formatSyncAgo = (value?: string | null) => {
+  if (!value) return null;
+  const parsed = parseISO(value);
+  if (Number.isNaN(parsed.getTime())) return null;
+  const diffMs = Date.now() - parsed.getTime();
+  if (diffMs < 0) return "just now";
+  const minuteMs = 60 * 1000;
+  const hourMs = 60 * minuteMs;
+  const dayMs = 24 * hourMs;
+  if (diffMs < minuteMs) return "just now";
+  if (diffMs < hourMs) return `${Math.floor(diffMs / minuteMs)}m ago`;
+  if (diffMs < dayMs) return `${Math.floor(diffMs / hourMs)}h ago`;
+  return `${Math.floor(diffMs / dayMs)}d ago`;
+};
+
+const formatSyncTimestamp = (value?: string | null) => {
+  if (!value) return null;
+  const parsed = parseISO(value);
+  if (Number.isNaN(parsed.getTime())) return null;
+  return format(parsed, "dd/MM/yyyy HH:mm");
 };
 
 const formatRangeLabel = (
@@ -768,11 +805,13 @@ export default function CrmDataQualityView() {
   const [editRow, setEditRow] = useState<DataQualityTicket | null>(null);
   const [openMenuId, setOpenMenuId] = useState<string | null>(null);
   const [syncingJira, setSyncingJira] = useState(false);
+  const [syncStatus, setSyncStatus] = useState<JiraSyncStatus | null>(null);
   const [lastSyncDetectedCount, setLastSyncDetectedCount] = useState(0);
   const [showNeedsEffortNudge, setShowNeedsEffortNudge] = useState(false);
   const [needsEffortBusyId, setNeedsEffortBusyId] = useState<string | null>(null);
   const [dismissDialogTicket, setDismissDialogTicket] = useState<DataQualityTicket | null>(null);
   const rowsRef = useRef<DataQualityTicket[]>([]);
+  const lastSeenSyncSuccessRef = useRef<string | null>(null);
   const [compact, setCompact] = useState(() =>
     readBool(COMPACT_VIEW_STORAGE_KEY, true),
   );
@@ -1329,28 +1368,110 @@ export default function CrmDataQualityView() {
     return chips;
   }, [filters, needsEffortCount, labelForPersonKey]);
 
-  const fetchTickets = useCallback(async () => {
-    setLoading(true);
-    setError(null);
-    try {
-      const res = await fetch(`/api/crm/data-quality?client=${clientSlug}`);
-      if (!res.ok) {
-        const body = await res.json().catch(() => null);
-        throw new Error(body?.error || `Failed to load tickets (${res.status})`);
+  const fetchTickets = useCallback(
+    async ({ silent = false }: { silent?: boolean } = {}) => {
+      if (!silent) {
+        setLoading(true);
       }
+      setError(null);
+      try {
+        const res = await fetch(`/api/crm/data-quality?client=${clientSlug}`);
+        if (!res.ok) {
+          const body = await res.json().catch(() => null);
+          throw new Error(body?.error || `Failed to load tickets (${res.status})`);
+        }
+        const body = await res.json().catch(() => null);
+        const tickets = Array.isArray(body?.tickets) ? body.tickets : [];
+        setRows(tickets);
+      } catch (err) {
+        setError(err instanceof Error ? err.message : "Unable to load tickets");
+      } finally {
+        if (!silent) {
+          setLoading(false);
+        }
+      }
+    },
+    [clientSlug],
+  );
+
+  const fetchJiraSyncStatus = useCallback(
+    async ({
+      refreshOnNewSuccess = false,
+    }: { refreshOnNewSuccess?: boolean } = {}) => {
+      try {
+        const res = await fetch(`/api/crm/jira-sync-status?client=${clientSlug}`, {
+          cache: "no-store",
+        });
+        if (!res.ok) return;
+        const body = await res.json().catch(() => null);
+        const status = (body?.status ?? null) as JiraSyncStatus | null;
+        setSyncStatus(status);
+        const currentSuccess = status?.lastSuccessAt ?? null;
+        const previousSuccess = lastSeenSyncSuccessRef.current;
+        if (
+          refreshOnNewSuccess &&
+          currentSuccess &&
+          previousSuccess &&
+          currentSuccess !== previousSuccess
+        ) {
+          await fetchTickets({ silent: true });
+        }
+        lastSeenSyncSuccessRef.current = currentSuccess;
+      } catch {
+        // ignore status polling failures
+      }
+    },
+    [clientSlug, fetchTickets],
+  );
+
+  const triggerJiraSync = useCallback(async () => {
+    setSyncingJira(true);
+    try {
+      const res = await fetch(`/api/admin/jira-sync?client=${clientSlug}`, {
+        method: "POST",
+      });
       const body = await res.json().catch(() => null);
-      const tickets = Array.isArray(body?.tickets) ? body.tickets : [];
-      setRows(tickets);
+      if (res.status === 409) {
+        showSuccess(body?.message || "JIRA sync is already running");
+        await fetchJiraSyncStatus();
+        return;
+      }
+      if (!res.ok) {
+        throw new Error(body?.error || `JIRA sync failed (${res.status})`);
+      }
+      const detectedRaw = Number(body?.needsEffortDetected ?? 0);
+      const detectedCount = Number.isFinite(detectedRaw) ? detectedRaw : 0;
+      setLastSyncDetectedCount(detectedCount);
+      setShowNeedsEffortNudge(detectedCount > 0);
+      showSuccess(`JIRA synced: ${body?.imported ?? 0} tickets`);
+      await fetchTickets({ silent: true });
+      await fetchJiraSyncStatus();
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Unable to load tickets");
+      const message =
+        err instanceof Error
+          ? err.message
+          : typeof err === "object" && err && "error" in (err as any)
+            ? String((err as any).error)
+            : "JIRA sync failed";
+      showError(message);
     } finally {
-      setLoading(false);
+      setSyncingJira(false);
     }
-  }, [clientSlug]);
+  }, [clientSlug, fetchJiraSyncStatus, fetchTickets]);
 
   useEffect(() => {
     void fetchTickets();
   }, [fetchTickets]);
+
+  useEffect(() => {
+    void fetchJiraSyncStatus();
+    const intervalHandle = window.setInterval(() => {
+      void fetchJiraSyncStatus({ refreshOnNewSuccess: true });
+    }, 60_000);
+    return () => {
+      window.clearInterval(intervalHandle);
+    };
+  }, [fetchJiraSyncStatus]);
 
   const updateNeedsEffortFlag = useCallback(
     async (
@@ -2298,82 +2419,36 @@ export default function CrmDataQualityView() {
               >
                 Work logged: {hasWorkCount}
               </button>
-              {isEditor || isAdmin ? (
-                <>
-                  <div
-                    className="mx-1 h-6 w-px bg-[color:var(--color-border)]/60"
-                    aria-hidden="true"
-                  />
-                  <button
-                    className="btn-primary h-10"
-                    type="button"
-                    title="Sync tickets from JIRA"
-                    onClick={async () => {
-                      setSyncingJira(true);
-                      try {
-                        const res = await fetch(
-                          `/api/admin/jira-sync?client=${clientSlug}`,
-                          { method: "POST" },
-                        );
-                        const body = await res.json().catch(() => null);
-                        if (!res.ok)
-                          throw new Error(
-                            body?.error || `JIRA sync failed (${res.status})`,
-                          );
-                        const detectedRaw = Number(body?.needsEffortDetected ?? 0);
-                        const detectedCount = Number.isFinite(detectedRaw)
-                          ? detectedRaw
-                          : 0;
-                        setLastSyncDetectedCount(detectedCount);
-                        setShowNeedsEffortNudge(detectedCount > 0);
-                        showSuccess(
-                          `JIRA synced: ${body?.imported ?? 0} tickets`,
-                        );
-                        setLoading(true);
-                        const reload = await fetch(
-                          `/api/crm/data-quality?client=${clientSlug}`,
-                        );
-                        const reloadBody = await reload.json().catch(() => null);
-                        if (reload.ok && Array.isArray(reloadBody?.tickets)) {
-                          const nextRows = reloadBody.tickets as DataQualityTicket[];
-                          setRows(nextRows);
-                        }
-                        setLoading(false);
-                      } catch (err) {
-                        const message =
-                          err instanceof Error
-                            ? err.message
-                            : typeof err === "object" &&
-                                err &&
-                                "error" in (err as any)
-                              ? String((err as any).error)
-                              : "JIRA sync failed";
-                        showError(message);
-                        setLoading(false);
-                      } finally {
-                        setSyncingJira(false);
-                      }
-                    }}
-                    disabled={syncingJira}
-                  >
-                    <span className="flex items-center gap-2">
-                      {syncingJira ? (
-                        <>
-                          {/* eslint-disable-next-line @next/next/no-img-element */}
-                          <img
-                            src="/animations/data-sync.gif"
-                            alt="Syncing JIRA"
-                            className="h-8 w-8 rounded-full border border-[color:var(--color-border)] bg-white/70 shadow-sm"
-                          />
-                          <span>Syncing...</span>
-                        </>
-                      ) : (
-                        <span>Sync JIRA</span>
-                      )}
-                    </span>
-                  </button>
-                </>
-              ) : null}
+              <div
+                className={[
+                  "inline-flex items-center gap-2 rounded-full border px-3 py-1.5 text-xs font-medium",
+                  syncStatus?.isRunning
+                    ? "border-amber-200 bg-amber-50 text-amber-900"
+                    : "border-[color:var(--color-border)] bg-[color:var(--color-surface)] text-[color:var(--color-text)]/75",
+                ].join(" ")}
+                title={
+                  formatSyncTimestamp(syncStatus?.lastSuccessAt)
+                    ? `Last sync: ${formatSyncTimestamp(syncStatus?.lastSuccessAt)}${
+                        syncStatus?.lastError ? ` | Last error: ${syncStatus.lastError}` : ""
+                      }`
+                    : "JIRA sync has not completed yet"
+                }
+              >
+                <span
+                  className={[
+                    "h-2 w-2 rounded-full",
+                    syncStatus?.isRunning ? "animate-pulse bg-amber-500" : "bg-emerald-500",
+                  ].join(" ")}
+                  aria-hidden="true"
+                />
+                <span>
+                  {syncStatus?.isRunning
+                    ? "Syncing JIRA..."
+                    : syncStatus?.lastSuccessAt
+                      ? `Synced ${formatSyncAgo(syncStatus.lastSuccessAt) ?? "recently"}`
+                      : "Not synced yet"}
+                </span>
+              </div>
               <div className="relative">
                 <button
                   id="actions-btn-dq-actions"
@@ -2439,6 +2514,21 @@ export default function CrmDataQualityView() {
                           className="my-1 h-px bg-[color:var(--color-border)]/70"
                           aria-hidden="true"
                         />
+                        <button
+                          className="flex w-full items-center justify-between gap-2 px-3 py-2 text-left text-sm font-medium hover:bg-[color:var(--color-surface-2)] disabled:cursor-not-allowed disabled:opacity-60"
+                          onClick={async () => {
+                            setOpenMenuId(null);
+                            await triggerJiraSync();
+                          }}
+                          disabled={syncingJira}
+                        >
+                          <span>Sync JIRA now</span>
+                          {syncingJira ? (
+                            <span className="text-xs text-[color:var(--color-text)]/60">
+                              Running...
+                            </span>
+                          ) : null}
+                        </button>
                         <button
                           className="block w-full px-3 py-2 text-left text-sm hover:bg-[color:var(--color-surface-2)]"
                           onClick={() => {
