@@ -93,6 +93,36 @@ const PRIORITY_COLORS: Record<string, string> = {
   P3: "bg-slate-50 text-slate-600",
 };
 
+const PRIORITY_CHART_COLORS: Record<string, string> = {
+  P1: "#ef4444",
+  P2: "#f59e0b",
+  P3: "#94a3b8",
+};
+
+const STATUS_CHART_COLORS: Record<string, string> = {
+  ready: "#3b82f6",
+  "in progress": "#f59e0b",
+  backlog: "#64748b",
+  refining: "#a855f7",
+  validation: "#14b8a6",
+  done: "#10b981",
+};
+
+const ETA_BUCKET_COLORS: Record<string, string> = {
+  Overdue: "#ef4444",
+  "Due 0-7d": "#f59e0b",
+  "Due 8-14d": "#eab308",
+  "Due 15+d": "#22c55e",
+  "No ETA": "#94a3b8",
+};
+
+const BLOCKER_CHART_COLORS: Record<string, string> = {
+  Blocked: "#dc2626",
+  "Waiting EMG": "#f97316",
+  "Waiting Internal": "#f59e0b",
+  Standby: "#fb7185",
+};
+
 const APP_STATUS_OPTIONS = [
   { value: "Standby", label: "Standby" },
   { value: "Waiting EMG", label: "Waiting EMG" },
@@ -128,6 +158,24 @@ const getStatusLabel = (value?: string | null) =>
 
 const getStatusClass = (value?: string | null) =>
   STATUS_COLORS[normalizeStatusKey(value)] ?? "bg-slate-100 text-slate-700";
+
+const getStatusChartColor = (value?: string | null) =>
+  STATUS_CHART_COLORS[normalizeStatusKey(value)] ?? "var(--chart-5)";
+
+const getPriorityChartColor = (value?: string | null) =>
+  PRIORITY_CHART_COLORS[(value ?? "").trim().toUpperCase()] ?? "var(--chart-5)";
+
+const getBlockerChartColor = (value?: string | null) =>
+  BLOCKER_CHART_COLORS[(value ?? "").trim()] ?? "#f43f5e";
+
+const getEtaBucketLabel = (row: Pick<TicketView, "etaDays">) => {
+  const days = row.etaDays;
+  if (days == null) return "No ETA";
+  if (days < 0) return "Overdue";
+  if (days <= 7) return "Due 0-7d";
+  if (days <= 14) return "Due 8-14d";
+  return "Due 15+d";
+};
 
 const getAvatarInitials = (name?: string | null) => {
   const safeName = (name ?? "").trim();
@@ -386,12 +434,17 @@ const renderStatusOwnerTooltip = ({ active, payload, label }: any) => {
 const renderPriorityTooltip = ({ active, payload }: any) => {
   if (!active || !payload || payload.length === 0) return null;
   const entry = payload[0];
+  const pct = Number(entry?.payload?.pct ?? 0);
   return (
     <div className={tooltipContainerClassName}>
       <div className="font-semibold">{entry?.name ?? "Priority"}</div>
       <div className="mt-1 flex items-center justify-between gap-3">
         <span>Tickets</span>
         <span className="font-semibold">{entry?.value ?? 0}</span>
+      </div>
+      <div className="mt-1 flex items-center justify-between gap-3">
+        <span>Share</span>
+        <span className="font-semibold">{pct}%</span>
       </div>
     </div>
   );
@@ -653,6 +706,7 @@ export default function CrmDqTicketsAnalyticsView({
   const [assigneeFilters, setAssigneeFilters] = useState<string[]>(DEFAULT_ASSIGNEES);
   const [priorityFilters, setPriorityFilters] = useState<string[]>([]);
   const [typeFilters, setTypeFilters] = useState<string[]>([]);
+  const [etaBucketFilters, setEtaBucketFilters] = useState<string[]>([]);
   const [searchQuery, setSearchQuery] = useState("");
   const [quickClearId, setQuickClearId] = useState<string | null>(null);
   const [blockerTicket, setBlockerTicket] = useState<TicketView | null>(null);
@@ -1032,7 +1086,7 @@ export default function CrmDqTicketsAnalyticsView({
     return found.map((value) => ({ label: value, value }));
   }, [meta, rows]);
 
-  const filteredRows = useMemo(() => {
+  const baseFilteredRows = useMemo(() => {
     const query = searchQuery.trim().toLowerCase();
     const statusSet = new Set(statusFilters.map(normalizePersonKey));
     const assigneeSet = new Set(assigneeFilters.map(normalizePersonKey));
@@ -1050,6 +1104,14 @@ export default function CrmDqTicketsAnalyticsView({
       return true;
     });
   }, [viewRows, statusFilters, assigneeFilters, priorityFilters, typeFilters, searchQuery]);
+
+  const filteredRows = useMemo(() => {
+    if (etaBucketFilters.length === 0) return baseFilteredRows;
+    const etaBucketSet = new Set(etaBucketFilters.map(normalizePersonKey));
+    return baseFilteredRows.filter((row) =>
+      etaBucketSet.has(normalizePersonKey(getEtaBucketLabel(row))),
+    );
+  }, [baseFilteredRows, etaBucketFilters]);
 
   const tableRows = useMemo(() => {
     const priorityRank: Record<string, number> = { P1: 0, P2: 1, P3: 2 };
@@ -1178,35 +1240,52 @@ export default function CrmDqTicketsAnalyticsView({
     };
   }, [filteredRows]);
 
-  const statusOwnerChart = useMemo(() => {
-    const statusMap = new Map<string, Map<string, number>>();
-    const ownerCounts = new Map<string, number>();
+  const ownerStatusChart = useMemo(() => {
+    const ownerMap = new Map<string, Map<string, number>>();
+    const statusCounts = new Map<string, number>();
+
     filteredRows.forEach((row) => {
-      const status = getStatusLabel(row.status) || "Unknown";
       const owner = row.assigneeLabel || "Unassigned";
-      const ownerMap = statusMap.get(status) ?? new Map<string, number>();
-      ownerMap.set(owner, (ownerMap.get(owner) ?? 0) + 1);
-      statusMap.set(status, ownerMap);
-      ownerCounts.set(owner, (ownerCounts.get(owner) ?? 0) + 1);
+      const status = getStatusLabel(row.status) || "Unknown";
+      const ownerCounts = ownerMap.get(owner) ?? new Map<string, number>();
+      ownerCounts.set(status, (ownerCounts.get(status) ?? 0) + 1);
+      ownerMap.set(owner, ownerCounts);
+      statusCounts.set(status, (statusCounts.get(status) ?? 0) + 1);
     });
-    const owners = Array.from(ownerCounts.entries())
-      .sort((a, b) => b[1] - a[1])
-      .map(([label], idx) => ({ label, key: `owner_${idx}` }));
-    const ownerKeyMap = new Map(owners.map((owner) => [owner.key, owner.label]));
-    const baseStatuses = STATUS_OPTIONS.filter((status) => statusMap.has(status));
-    const extraStatuses = Array.from(statusMap.keys()).filter(
-      (status) => !STATUS_OPTIONS.includes(status),
-    );
-    const statuses = [...baseStatuses, ...extraStatuses];
-    const data = statuses.map((status) => {
-      const entry: Record<string, number | string> = { status };
-      owners.forEach((owner) => {
-        entry[owner.key] = statusMap.get(status)?.get(owner.label) ?? 0;
+
+    const baseStatuses = STATUS_OPTIONS.filter((status) => statusCounts.has(status));
+    const extraStatuses = Array.from(statusCounts.keys())
+      .filter((status) => !STATUS_OPTIONS.includes(status))
+      .sort((a, b) => a.localeCompare(b));
+    const statusLabels = [...baseStatuses, ...extraStatuses];
+
+    const series = statusLabels.map((label, idx) => {
+      const normalized = normalizeStatusKey(label).replace(/[^a-z0-9]+/g, "_") || "unknown";
+      return {
+        label,
+        key: `status_${normalized}_${idx}`,
+        color: getStatusChartColor(label),
+      };
+    });
+    const statusByKey = new Map(series.map((item) => [item.key, item.label]));
+
+    const sortedOwners = Array.from(ownerMap.entries())
+      .map(([owner, counts]) => ({
+        owner,
+        counts,
+        total: Array.from(counts.values()).reduce((acc, value) => acc + value, 0),
+      }))
+      .sort((a, b) => b.total - a.total);
+
+    const data = sortedOwners.map(({ owner, counts, total }) => {
+      const entry: Record<string, number | string> = { owner, total };
+      series.forEach((item) => {
+        entry[item.key] = counts.get(item.label) ?? 0;
       });
-      entry.total = owners.reduce((acc, owner) => acc + Number(entry[owner.key] || 0), 0);
       return entry;
     });
-    return { data, owners, ownerKeyMap };
+
+    return { data, series, statusByKey };
   }, [filteredRows]);
 
   const priorityChartData = useMemo(() => {
@@ -1221,41 +1300,61 @@ export default function CrmDqTicketsAnalyticsView({
     const ordered = [...PRIORITY_OPTIONS, ...extras].filter((priority) =>
       counts.has(priority),
     );
-    return ordered.map((priority) => ({
-      name: priority,
-      value: counts.get(priority) ?? 0,
-    }));
+    const total = filteredRows.length;
+    return ordered.map((priority) => {
+      const value = counts.get(priority) ?? 0;
+      return {
+        name: priority,
+        value,
+        pct: total > 0 ? Math.round((value / total) * 100) : 0,
+        fill: getPriorityChartColor(priority),
+      };
+    });
   }, [filteredRows]);
 
   const etaBucketData = useMemo(() => {
-    const buckets = [
-      { label: "Overdue", count: 0 },
-      { label: "Due 0-7d", count: 0 },
-      { label: "Due 8-14d", count: 0 },
-      { label: "Due 15+d", count: 0 },
-      { label: "No ETA", count: 0 },
-    ];
-    filteredRows.forEach((row) => {
-      const days = row.etaDays;
-      if (days == null) {
-        buckets[4].count += 1;
-      } else if (days < 0) {
-        buckets[0].count += 1;
-      } else if (days <= 7) {
-        buckets[1].count += 1;
-      } else if (days <= 14) {
-        buckets[2].count += 1;
-      } else {
-        buckets[3].count += 1;
-      }
+    const orderedLabels = ["Overdue", "Due 0-7d", "Due 8-14d", "Due 15+d", "No ETA"];
+    const counts = new Map(orderedLabels.map((label) => [label, 0]));
+    baseFilteredRows.forEach((row) => {
+      const bucket = getEtaBucketLabel(row);
+      counts.set(bucket, (counts.get(bucket) ?? 0) + 1);
     });
-    return buckets;
+    return orderedLabels.map((label) => ({
+      label,
+      count: counts.get(label) ?? 0,
+      fill: ETA_BUCKET_COLORS[label] ?? "var(--chart-5)",
+    }));
+  }, [baseFilteredRows]);
+
+  const blockerTypeChartData = useMemo(() => {
+    const counts = new Map<string, number>();
+    filteredRows.forEach((row) => {
+      const blocker = row.appStatus?.trim();
+      if (!blocker) return;
+      counts.set(blocker, (counts.get(blocker) ?? 0) + 1);
+    });
+
+    const knownOrder = APP_STATUS_OPTIONS.map((option) => option.label);
+    const extras = Array.from(counts.keys())
+      .filter((label) => !knownOrder.includes(label))
+      .sort((a, b) => a.localeCompare(b));
+    const ordered = [...knownOrder, ...extras].filter((label) => counts.has(label));
+
+    return ordered.map((label) => ({
+      label,
+      count: counts.get(label) ?? 0,
+      fill: getBlockerChartColor(label),
+    }));
   }, [filteredRows]);
 
-  const handleStatusBarClick = useCallback((entry: any) => {
-    const status = entry?.payload?.status;
-    if (typeof status !== "string") return;
-    setStatusFilters((prev) => toggleFilterValue(prev, status));
+  const handleOwnerStatusSegmentClick = useCallback((entry: any, statusLabel: string) => {
+    const owner = entry?.payload?.owner;
+    if (typeof owner === "string" && owner.length > 0) {
+      setAssigneeFilters((prev) => toggleFilterValue(prev, owner));
+    }
+    if (statusLabel) {
+      setStatusFilters((prev) => toggleFilterValue(prev, statusLabel));
+    }
   }, []);
 
   const handlePriorityClick = useCallback((entry: any) => {
@@ -1269,11 +1368,18 @@ export default function CrmDqTicketsAnalyticsView({
     setPriorityFilters((prev) => toggleFilterValue(prev, priority));
   }, []);
 
+  const handleEtaBucketClick = useCallback((entry: any) => {
+    const label = entry?.payload?.label;
+    if (typeof label !== "string" || !label) return;
+    setEtaBucketFilters((prev) => toggleFilterValue(prev, label));
+  }, []);
+
   const clearFilters = () => {
     setStatusFilters([]);
     setAssigneeFilters([]);
     setPriorityFilters([]);
     setTypeFilters([]);
+    setEtaBucketFilters([]);
     setSearchQuery("");
   };
 
@@ -1282,6 +1388,7 @@ export default function CrmDqTicketsAnalyticsView({
     setAssigneeFilters(DEFAULT_ASSIGNEES);
     setPriorityFilters([]);
     setTypeFilters([]);
+    setEtaBucketFilters([]);
     setSearchQuery("");
   };
 
@@ -1495,9 +1602,9 @@ export default function CrmDqTicketsAnalyticsView({
       <section className="grid gap-4 lg:grid-cols-2">
         <article className="card px-6 py-5">
           <div className="flex flex-wrap items-center justify-between gap-2">
-            <h2 className="text-lg font-semibold text-[color:var(--color-text)]">Tickets by status</h2>
+            <h2 className="text-lg font-semibold text-[color:var(--color-text)]">Tickets by owner</h2>
             <span className="text-xs uppercase tracking-[0.2em] text-[color:var(--color-text)]/60">
-              Click bars or legend to filter
+              Click segments to filter owner + status
             </span>
           </div>
           <div className="mt-4 min-h-[240px] rounded-2xl border border-[color:var(--color-border)] bg-[color:var(--color-surface-2)]/40 p-3">
@@ -1505,52 +1612,56 @@ export default function CrmDqTicketsAnalyticsView({
               <div className="flex h-full items-center justify-center text-sm text-[color:var(--color-text)]/65">
                 Loading chart...
               </div>
-            ) : statusOwnerChart.data.length === 0 ? (
+            ) : ownerStatusChart.data.length === 0 ? (
               <div className="flex h-full items-center justify-center text-sm text-[color:var(--color-text)]/60">
                 No data for the selected filters.
               </div>
             ) : (
               <ResponsiveContainer width="100%" height={240}>
-                <BarChart data={statusOwnerChart.data} margin={{ top: 8, right: 16, left: 0, bottom: 0 }}>
-                  <CartesianGrid stroke={chartTheme.grid} vertical={false} />
+                <BarChart
+                  data={ownerStatusChart.data}
+                  layout="vertical"
+                  margin={{ top: 8, right: 16, left: 12, bottom: 0 }}
+                >
+                  <CartesianGrid stroke={chartTheme.grid} vertical={true} horizontal={false} />
                   <XAxis
-                    dataKey="status"
-                    tick={chartTheme.tick}
-                    axisLine={chartTheme.axisLine}
-                    tickLine={chartTheme.tickLine}
-                  />
-                  <YAxis
+                    type="number"
                     tick={chartTheme.tick}
                     axisLine={chartTheme.axisLine}
                     tickLine={chartTheme.tickLine}
                     allowDecimals={false}
                   />
-                  <Tooltip
-                    cursor={false}
-                    content={renderStatusOwnerTooltip}
+                  <YAxis
+                    type="category"
+                    dataKey="owner"
+                    width={130}
+                    tick={chartTheme.tick}
+                    axisLine={chartTheme.axisLine}
+                    tickLine={chartTheme.tickLine}
                   />
+                  <Tooltip cursor={false} content={renderStatusOwnerTooltip} />
                   <Legend
                     onClick={(entry: any) => {
                       const key = typeof entry?.dataKey === "string" ? entry.dataKey : "";
-                      const label = statusOwnerChart.ownerKeyMap.get(key) ?? "";
-                      if (!label) return;
-                      setAssigneeFilters((prev) => toggleFilterValue(prev, label));
+                      const status = ownerStatusChart.statusByKey.get(key) ?? "";
+                      if (!status) return;
+                      setStatusFilters((prev) => toggleFilterValue(prev, status));
                     }}
                   />
-                  {statusOwnerChart.owners.map((owner, idx) => (
+                  {ownerStatusChart.series.map((series) => (
                     <Bar
-                      key={owner.key}
-                      dataKey={owner.key}
-                      name={owner.label}
-                      stackId="status"
-                      fill={chartTheme.palette[idx % chartTheme.palette.length]}
+                      key={series.key}
+                      dataKey={series.key}
+                      name={series.label}
+                      stackId="owner"
+                      fill={series.color}
                       activeBar={{
-                        fill: chartTheme.palette[idx % chartTheme.palette.length],
+                        fill: series.color,
                         stroke: "var(--color-primary)",
                         strokeWidth: 2,
                         fillOpacity: 1,
                       }}
-                      onClick={handleStatusBarClick}
+                      onClick={(entry: any) => handleOwnerStatusSegmentClick(entry, series.label)}
                       cursor="pointer"
                     />
                   ))}
@@ -1585,40 +1696,57 @@ export default function CrmDqTicketsAnalyticsView({
                     nameKey="name"
                     innerRadius="55%"
                     outerRadius="82%"
+                    labelLine={false}
+                    label={({ name, percent }) =>
+                      percent != null && percent >= 0.1 ? `${name} ${Math.round(percent * 100)}%` : ""
+                    }
                     onClick={handlePriorityClick}
                     cursor="pointer"
                   >
-                    {priorityChartData.map((entry, idx) => (
-                      <Cell
-                        key={entry.name}
-                        fill={chartTheme.palette[idx % chartTheme.palette.length]}
-                      />
+                    {priorityChartData.map((entry) => (
+                      <Cell key={entry.name} fill={entry.fill} />
                     ))}
                   </Pie>
-                  <Tooltip
-                    cursor={false}
-                    content={renderPriorityTooltip}
-                  />
-                  <Legend />
+                  <Tooltip cursor={false} content={renderPriorityTooltip} />
+                  <Legend formatter={(value, entry: any) => `${value} (${entry?.payload?.value ?? 0})`} />
                 </PieChart>
               </ResponsiveContainer>
             )}
           </div>
         </article>
 
-        <article className="card px-6 py-5 lg:col-span-2">
+        <article className="card px-6 py-5">
           <div className="flex flex-wrap items-center justify-between gap-2">
             <h2 className="text-lg font-semibold text-[color:var(--color-text)]">ETA risk buckets</h2>
             <span className="text-xs uppercase tracking-[0.2em] text-[color:var(--color-text)]/60">
-              Overdue vs due soon
+              Click bars to filter
             </span>
           </div>
+          {etaBucketFilters.length > 0 ? (
+            <div className="mt-3 flex flex-wrap items-center gap-2">
+              {etaBucketFilters.map((label) => (
+                <span
+                  key={label}
+                  className="inline-flex items-center rounded-full border border-[color:var(--color-border)] bg-[color:var(--color-surface-2)] px-2 py-0.5 text-[10px] font-semibold text-[color:var(--color-text)]/70"
+                >
+                  {label}
+                </span>
+              ))}
+              <button
+                type="button"
+                className="text-xs font-medium text-[color:var(--color-primary)] hover:underline"
+                onClick={() => setEtaBucketFilters([])}
+              >
+                Clear ETA filter
+              </button>
+            </div>
+          ) : null}
           <div className="mt-4 min-h-[220px] rounded-2xl border border-[color:var(--color-border)] bg-[color:var(--color-surface-2)]/40 p-3">
             {loading ? (
               <div className="flex h-full items-center justify-center text-sm text-[color:var(--color-text)]/65">
                 Loading chart...
               </div>
-            ) : filteredRows.length === 0 ? (
+            ) : baseFilteredRows.length === 0 ? (
               <div className="flex h-full items-center justify-center text-sm text-[color:var(--color-text)]/60">
                 No data for the selected filters.
               </div>
@@ -1638,22 +1766,71 @@ export default function CrmDqTicketsAnalyticsView({
                     tickLine={chartTheme.tickLine}
                     allowDecimals={false}
                   />
-                  <Tooltip
-                    cursor={false}
-                    content={renderEtaTooltip}
+                  <Tooltip cursor={false} content={renderEtaTooltip} />
+                  <Bar dataKey="count" name="Tickets" radius={[8, 8, 0, 0]} onClick={handleEtaBucketClick} cursor="pointer">
+                    {etaBucketData.map((entry) => {
+                      const isActive = etaBucketFilters.includes(entry.label);
+                      return (
+                        <Cell
+                          key={entry.label}
+                          fill={entry.fill}
+                          stroke={isActive ? "var(--color-primary)" : entry.fill}
+                          strokeWidth={isActive ? 2 : 0}
+                        />
+                      );
+                    })}
+                  </Bar>
+                </BarChart>
+              </ResponsiveContainer>
+            )}
+          </div>
+        </article>
+
+        <article className="card px-6 py-5">
+          <div className="flex flex-wrap items-center justify-between gap-2">
+            <h2 className="text-lg font-semibold text-[color:var(--color-text)]">Blockers by type</h2>
+            <span className="text-xs uppercase tracking-[0.2em] text-[color:var(--color-text)]/60">
+              App-only blocker tags
+            </span>
+          </div>
+          <div className="mt-4 min-h-[220px] rounded-2xl border border-[color:var(--color-border)] bg-[color:var(--color-surface-2)]/40 p-3">
+            {loading ? (
+              <div className="flex h-full items-center justify-center text-sm text-[color:var(--color-text)]/65">
+                Loading chart...
+              </div>
+            ) : blockerTypeChartData.length === 0 ? (
+              <div className="flex h-full items-center justify-center text-sm text-[color:var(--color-text)]/60">
+                No active blockers in current filters.
+              </div>
+            ) : (
+              <ResponsiveContainer width="100%" height={220}>
+                <BarChart
+                  data={blockerTypeChartData}
+                  layout="vertical"
+                  margin={{ top: 8, right: 16, left: 8, bottom: 0 }}
+                >
+                  <CartesianGrid stroke={chartTheme.grid} vertical={true} horizontal={false} />
+                  <XAxis
+                    type="number"
+                    tick={chartTheme.tick}
+                    axisLine={chartTheme.axisLine}
+                    tickLine={chartTheme.tickLine}
+                    allowDecimals={false}
                   />
-                  <Bar
-                    dataKey="count"
-                    name="Tickets"
-                    fill="var(--chart-3)"
-                    radius={[8, 8, 0, 0]}
-                    activeBar={{
-                      fill: "var(--chart-3)",
-                      stroke: "var(--color-primary)",
-                      strokeWidth: 2,
-                      fillOpacity: 1,
-                    }}
+                  <YAxis
+                    type="category"
+                    dataKey="label"
+                    width={130}
+                    tick={chartTheme.tick}
+                    axisLine={chartTheme.axisLine}
+                    tickLine={chartTheme.tickLine}
                   />
+                  <Tooltip cursor={false} content={renderEtaTooltip} />
+                  <Bar dataKey="count" name="Tickets" radius={[0, 8, 8, 0]}>
+                    {blockerTypeChartData.map((entry) => (
+                      <Cell key={entry.label} fill={entry.fill} />
+                    ))}
+                  </Bar>
                 </BarChart>
               </ResponsiveContainer>
             )}
