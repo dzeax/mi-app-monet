@@ -57,23 +57,27 @@ type ContributionRow = {
   owner: string | null;
   work_hours: number | null;
   prep_hours: number | null;
+  effort_date: string | null;
 };
 
 type ManualEffortRow = {
   person_id: string | null;
   owner: string | null;
   hours: number | null;
+  effort_date: string | null;
 };
 
 type StrategyEffortRow = {
   owner: string | null;
   hours: number | null;
+  effort_date: string | null;
 };
 
 type CampaignUnitRow = {
   person_id: string | null;
   owner: string | null;
   hours_total: number | null;
+  send_date: string | null;
 };
 
 type WorklogRow = {
@@ -81,6 +85,29 @@ type WorklogRow = {
   owner: string | null;
   hours: number | null;
   scope: string | null;
+  effort_date: string | null;
+};
+
+type WeeklyBucket = {
+  weekStart: string;
+  weekEnd: string;
+  capacityHours: number;
+  workloadHours: number;
+  externalHours: number;
+  utilization: number | null;
+  isCurrentWeek: boolean;
+  isFutureWeek: boolean;
+  isClosedWeek: boolean;
+};
+
+type WeekDefinition = {
+  weekStart: Date;
+  weekEnd: Date;
+  weekKey: string;
+  weekEndKey: string;
+  isCurrentWeek: boolean;
+  isFutureWeek: boolean;
+  isClosedWeek: boolean;
 };
 
 const querySchema = z.object({
@@ -123,8 +150,67 @@ const addDays = (date: Date, amount: number) => {
   return next;
 };
 
+const getWeekdayMonFirst = (date: Date) => {
+  const day = date.getUTCDay();
+  return day === 0 ? 7 : day;
+};
+
+const startOfWorkweek = (date: Date) => addDays(date, -(getWeekdayMonFirst(date) - 1));
+const endOfWorkweek = (weekStart: Date) => addDays(weekStart, 4);
+const getWeekKey = (date: Date) => formatDate(startOfWorkweek(date));
+
 const maxDate = (a: Date, b: Date) => (a > b ? a : b);
 const minDate = (a: Date, b: Date) => (a < b ? a : b);
+
+const buildWeekDefinitions = (
+  rangeStart: Date,
+  rangeEnd: Date,
+  currentWeekStart: Date,
+  todayUtc: Date,
+): WeekDefinition[] => {
+  const definitions: WeekDefinition[] = [];
+  let weekCursor = startOfWorkweek(rangeStart);
+  while (weekCursor <= rangeEnd) {
+    const weekEnd = endOfWorkweek(weekCursor);
+    const intersectionStart = maxDate(weekCursor, rangeStart);
+    const intersectionEnd = minDate(weekEnd, rangeEnd);
+
+    let hasWeekdayInRange = false;
+    if (intersectionStart <= intersectionEnd) {
+      let dayCursor = intersectionStart;
+      while (dayCursor <= intersectionEnd) {
+        if (isWeekday(dayCursor)) {
+          hasWeekdayInRange = true;
+          break;
+        }
+        dayCursor = addDays(dayCursor, 1);
+      }
+    }
+
+    if (hasWeekdayInRange) {
+      const weekKey = formatDate(weekCursor);
+      definitions.push({
+        weekStart: weekCursor,
+        weekEnd,
+        weekKey,
+        weekEndKey: formatDate(weekEnd),
+        isCurrentWeek: weekKey === formatDate(currentWeekStart),
+        isFutureWeek: weekCursor > currentWeekStart,
+        isClosedWeek: weekEnd <= todayUtc,
+      });
+    }
+
+    weekCursor = addDays(weekCursor, 7);
+  }
+
+  return definitions;
+};
+
+const addToNestedMap = (target: Map<string, Map<string, number>>, keyA: string, keyB: string, value: number) => {
+  const nested = target.get(keyA) ?? new Map<string, number>();
+  nested.set(keyB, (nested.get(keyB) ?? 0) + value);
+  target.set(keyA, nested);
+};
 
 const computeContributionHours = (work: number | null, prep: number | null) => {
   const safeWork = Number.isFinite(work ?? null) ? Number(work ?? 0) : 0;
@@ -206,6 +292,8 @@ export async function GET(req: Request) {
 
   const startStr = parsed.data.start;
   const endStr = parsed.data.end;
+  const todayUtc = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate()));
+  const currentWeekStart = startOfWorkweek(todayUtc);
   const year = startDate.getUTCFullYear();
   const yearStart = new Date(Date.UTC(year, 0, 1));
   const yearEnd = new Date(Date.UTC(year, 11, 31));
@@ -225,6 +313,11 @@ export async function GET(req: Request) {
   const members = (users ?? []) as AppUserRow[];
   const userIds = members.map((user) => user.user_id);
   const userIdSet = new Set(userIds);
+  const teamCapacityUserIds = new Set(
+    members
+      .filter((member) => member.in_team_capacity ?? true)
+      .map((member) => member.user_id),
+  );
 
   const { data: contracts, error: contractError } = await admin
     .from('team_capacity_contracts')
@@ -348,6 +441,9 @@ export async function GET(req: Request) {
   });
 
   const workloadByUser = new Map<string, number>();
+  const weeklyWorkloadByTeam = new Map<string, number>();
+  const weeklyExternalWorkload = new Map<string, number>();
+  const weeklyWorkloadByUser = new Map<string, Map<string, number>>();
   let unmappedHours = 0;
 
   const resolveUser = (personId?: string | null, owner?: string | null) => {
@@ -376,42 +472,64 @@ export async function GET(req: Request) {
     return resolveUser(null, owner);
   };
 
-  const addWorkload = (userId: string | null, hours: number) => {
+  const addWorkload = (userId: string | null, hours: number, weekKey: string | null) => {
     if (!Number.isFinite(hours) || hours <= 0) return;
     if (!userId) {
       unmappedHours += hours;
+      if (weekKey) {
+        weeklyExternalWorkload.set(
+          weekKey,
+          (weeklyExternalWorkload.get(weekKey) ?? 0) + hours,
+        );
+      }
       return;
     }
     workloadByUser.set(userId, (workloadByUser.get(userId) ?? 0) + hours);
+    if (weekKey) {
+      addToNestedMap(weeklyWorkloadByUser, userId, weekKey, hours);
+    }
+    if (weekKey && teamCapacityUserIds.has(userId)) {
+      weeklyWorkloadByTeam.set(weekKey, (weeklyWorkloadByTeam.get(weekKey) ?? 0) + hours);
+    }
   };
 
   contributions.forEach((row) => {
     const userId = resolveUser(row.person_id, row.owner);
-    addWorkload(userId, computeContributionHours(row.work_hours, row.prep_hours));
+    const effortDate = row.effort_date ? parseDate(row.effort_date) : null;
+    const weekKey = effortDate ? getWeekKey(effortDate) : null;
+    addWorkload(userId, computeContributionHours(row.work_hours, row.prep_hours), weekKey);
   });
 
   manualEfforts.forEach((row) => {
     const userId = resolveUser(row.person_id, row.owner);
     const hours = Number.isFinite(row.hours ?? null) ? Number(row.hours ?? 0) : 0;
-    addWorkload(userId, hours);
+    const effortDate = row.effort_date ? parseDate(row.effort_date) : null;
+    const weekKey = effortDate ? getWeekKey(effortDate) : null;
+    addWorkload(userId, hours, weekKey);
   });
 
   strategyEfforts.forEach((row) => {
     const userId = resolveUser(null, row.owner);
     const hours = Number.isFinite(row.hours ?? null) ? Number(row.hours ?? 0) : 0;
-    addWorkload(userId, hours);
+    const effortDate = row.effort_date ? parseDate(row.effort_date) : null;
+    const weekKey = effortDate ? getWeekKey(effortDate) : null;
+    addWorkload(userId, hours, weekKey);
   });
 
   campaignUnits.forEach((row) => {
     const userId = resolveUser(row.person_id, row.owner);
     const hours = Number.isFinite(row.hours_total ?? null) ? Number(row.hours_total ?? 0) : 0;
-    addWorkload(userId, hours);
+    const sendDate = row.send_date ? parseDate(row.send_date) : null;
+    const weekKey = sendDate ? getWeekKey(sendDate) : null;
+    addWorkload(userId, hours, weekKey);
   });
 
   worklogs.forEach((row) => {
     const userId = resolveWorklogUser(row.user_id, row.owner);
     const hours = Number.isFinite(row.hours ?? null) ? Number(row.hours ?? 0) : 0;
-    addWorkload(userId, hours);
+    const effortDate = row.effort_date ? parseDate(row.effort_date) : null;
+    const weekKey = effortDate ? getWeekKey(effortDate) : null;
+    addWorkload(userId, hours, weekKey);
   });
 
   const holidayByCalendar = new Map<string, Set<string>>();
@@ -484,6 +602,9 @@ export async function GET(req: Request) {
 
   const contractRows = (contracts ?? []) as ContractRow[];
 
+  const weeklyCapacityByTeam = new Map<string, number>();
+  const weeklyCapacityByUser = new Map<string, Map<string, number>>();
+
   const rows = members.map((user) => {
     const relevantContracts = contractRows
       .filter((contract) => contract.user_id === user.user_id)
@@ -511,6 +632,7 @@ export async function GET(req: Request) {
         : contractCountry
           ? DEFAULT_VACATION_DAYS[contractCountry]
           : null;
+    const isInTeamCapacity = user.in_team_capacity ?? true;
 
     let capacityHours: number | null = null;
     let holidayDays = 0;
@@ -526,6 +648,8 @@ export async function GET(req: Request) {
     const rangeStart = maxDate(startDate, contractStart);
     const rangeEnd = minDate(endDate, contractEnd);
 
+    const hoursPerDay = contract ? contract.weekly_hours / 5 : null;
+
     let availableDays = 0;
     let cursor = rangeStart;
     while (cursor <= rangeEnd) {
@@ -538,17 +662,33 @@ export async function GET(req: Request) {
           holidayDays += 1;
         } else {
           const cappedOff = Math.min(1, dayOffTotal);
-          availableDays += 1 - cappedOff;
+          const availableFraction = 1 - cappedOff;
+          availableDays += availableFraction;
           timeOffTotals.vacation += dayTotals.vacation;
           timeOffTotals.sick += dayTotals.sick;
           timeOffTotals.other += dayTotals.other;
+          if (isInTeamCapacity && hoursPerDay != null && availableFraction > 0) {
+            const weekKey = getWeekKey(cursor);
+            weeklyCapacityByTeam.set(
+              weekKey,
+              (weeklyCapacityByTeam.get(weekKey) ?? 0) + hoursPerDay * availableFraction,
+            );
+          }
+          if (hoursPerDay != null && availableFraction > 0) {
+            const weekKey = getWeekKey(cursor);
+            addToNestedMap(
+              weeklyCapacityByUser,
+              user.user_id,
+              weekKey,
+              hoursPerDay * availableFraction,
+            );
+          }
         }
       }
       cursor = addDays(cursor, 1);
     }
 
-    if (contract) {
-      const hoursPerDay = contract.weekly_hours / 5;
+    if (hoursPerDay != null) {
       capacityHours = availableDays * hoursPerDay;
     }
 
@@ -604,10 +744,59 @@ export async function GET(req: Request) {
     };
   });
 
+  const weekDefinitions = buildWeekDefinitions(startDate, endDate, currentWeekStart, todayUtc);
+
+  const weeklyBuckets: WeeklyBucket[] = [];
+  weekDefinitions.forEach((week) => {
+    const capacityHours = weeklyCapacityByTeam.get(week.weekKey) ?? 0;
+    const workloadHours = weeklyWorkloadByTeam.get(week.weekKey) ?? 0;
+    const externalHours = weeklyExternalWorkload.get(week.weekKey) ?? 0;
+    const utilization = capacityHours > 0 ? workloadHours / capacityHours : null;
+
+    weeklyBuckets.push({
+      weekStart: week.weekKey,
+      weekEnd: week.weekEndKey,
+      capacityHours,
+      workloadHours,
+      externalHours,
+      utilization,
+      isCurrentWeek: week.isCurrentWeek,
+      isFutureWeek: week.isFutureWeek,
+      isClosedWeek: week.isClosedWeek,
+    });
+  });
+
+  const weeklyByUser = Object.fromEntries(
+    rows.map((member) => {
+      const capacityMap = weeklyCapacityByUser.get(member.userId) ?? new Map<string, number>();
+      const workloadMap = weeklyWorkloadByUser.get(member.userId) ?? new Map<string, number>();
+
+      const buckets: WeeklyBucket[] = weekDefinitions.map((week) => {
+        const capacityHours = capacityMap.get(week.weekKey) ?? 0;
+        const workloadHours = workloadMap.get(week.weekKey) ?? 0;
+        return {
+          weekStart: week.weekKey,
+          weekEnd: week.weekEndKey,
+          capacityHours,
+          workloadHours,
+          externalHours: 0,
+          utilization: capacityHours > 0 ? workloadHours / capacityHours : null,
+          isCurrentWeek: week.isCurrentWeek,
+          isFutureWeek: week.isFutureWeek,
+          isClosedWeek: week.isClosedWeek,
+        };
+      });
+
+      return [member.userId, buckets];
+    }),
+  );
+
   return NextResponse.json({
     start: startStr,
     end: endStr,
     members: rows,
     unmappedHours,
+    weekly: weeklyBuckets,
+    weeklyByUser,
   });
 }

@@ -49,12 +49,28 @@ type CapacityMember = {
   };
 };
 
+type WeeklyCapacityBucket = {
+  weekStart: string;
+  weekEnd: string;
+  capacityHours: number;
+  workloadHours: number;
+  externalHours: number;
+  utilization: number | null;
+  isCurrentWeek: boolean;
+  isFutureWeek: boolean;
+  isClosedWeek: boolean;
+};
+
 type CapacityResponse = {
   start: string;
   end: string;
   members: CapacityMember[];
   unmappedHours: number;
+  weekly?: WeeklyCapacityBucket[];
+  weeklyByUser?: Record<string, WeeklyCapacityBucket[]>;
 };
+
+type WeeklyScope = 'team' | 'member';
 
 type EditingState = {
   member: CapacityMember;
@@ -158,6 +174,12 @@ const percentFormatter = new Intl.NumberFormat('es-ES', {
 const dayFormatter = new Intl.NumberFormat('es-ES', {
   minimumFractionDigits: 0,
   maximumFractionDigits: 1,
+});
+
+const weekDayMonthFormatter = new Intl.DateTimeFormat('en-GB', {
+  day: '2-digit',
+  month: 'short',
+  timeZone: 'UTC',
 });
 
 const WORKDAYS_PER_WEEK = 5;
@@ -424,6 +446,19 @@ const formatFraction = (value: number) => dayFormatter.format(value);
 
 const CSV_DATE_RE = /^\d{4}-\d{2}-\d{2}$/;
 
+const parseIsoDateUtc = (value?: string | null) => {
+  if (!value || !CSV_DATE_RE.test(value)) return null;
+  const parsed = new Date(`${value}T00:00:00Z`);
+  return Number.isNaN(parsed.getTime()) ? null : parsed;
+};
+
+const formatWeekLabel = (start: string, end: string) => {
+  const parsedStart = parseIsoDateUtc(start);
+  const parsedEnd = parseIsoDateUtc(end);
+  if (!parsedStart || !parsedEnd) return formatIsoRange(start, end);
+  return `${weekDayMonthFormatter.format(parsedStart)} - ${weekDayMonthFormatter.format(parsedEnd)}`;
+};
+
 const splitCsvLine = (line: string) => {
   const output: string[] = [];
   let current = '';
@@ -524,6 +559,8 @@ export default function TeamCapacityPage() {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [data, setData] = useState<CapacityResponse | null>(null);
+  const [weeklyScope, setWeeklyScope] = useState<WeeklyScope>('team');
+  const [weeklyMemberId, setWeeklyMemberId] = useState<string | null>(null);
   const [editing, setEditing] = useState<EditingState | null>(null);
   const [holidays, setHolidays] = useState<HolidayEntry[]>([]);
   const [timeOff, setTimeOff] = useState<TimeOffEntry[]>([]);
@@ -556,6 +593,7 @@ export default function TeamCapacityPage() {
   const [calendarModalOpen, setCalendarModalOpen] = useState(false);
   const [calendarTab, setCalendarTab] = useState<'holidays' | 'timeoff'>('holidays');
   const [vacationOpen, setVacationOpen] = useState(false);
+  const [weeklyPanelOpen, setWeeklyPanelOpen] = useState(false);
   const [workloadDrawerMember, setWorkloadDrawerMember] = useState<CapacityMember | null>(null);
   const [workloadDetailItems, setWorkloadDetailItems] = useState<WorkloadDetailItem[]>([]);
   const [workloadDetailLoading, setWorkloadDetailLoading] = useState(false);
@@ -633,6 +671,143 @@ export default function TeamCapacityPage() {
   const averageHoursPerDay =
     totalCapacityDays != null && totalCapacityDays > 0 ? totalCapacity / totalCapacityDays : null;
   const unmappedDays = toDaysFromHours(unmappedHours, averageHoursPerDay);
+  const teamWeeklyBuckets = useMemo(
+    () => (data?.weekly ?? []).filter((bucket) => !bucket.isFutureWeek),
+    [data],
+  );
+  const effectiveWeeklyMemberId = useMemo(
+    () => weeklyMemberId ?? activeMembers[0]?.userId ?? null,
+    [activeMembers, weeklyMemberId],
+  );
+  const selectedWeeklyMember = useMemo(
+    () =>
+      activeMembers.find((member) => member.userId === effectiveWeeklyMemberId) ?? null,
+    [activeMembers, effectiveWeeklyMemberId],
+  );
+  const memberWeeklyBuckets = useMemo(() => {
+    if (!effectiveWeeklyMemberId) return [];
+    const source = data?.weeklyByUser?.[effectiveWeeklyMemberId] ?? [];
+    return source.filter((bucket) => !bucket.isFutureWeek);
+  }, [data, effectiveWeeklyMemberId]);
+  const scopedWeeklyBuckets = weeklyScope === 'member' ? memberWeeklyBuckets : teamWeeklyBuckets;
+
+  const closedWeeklyBuckets = useMemo(
+    () => scopedWeeklyBuckets.filter((bucket) => bucket.isClosedWeek),
+    [scopedWeeklyBuckets],
+  );
+
+  const lastReportedWeek = useMemo(() => {
+    if (!scopedWeeklyBuckets.length) return null;
+    const closedWithWorkload = closedWeeklyBuckets.filter((bucket) => bucket.workloadHours > 0);
+    if (closedWithWorkload.length) return closedWithWorkload[closedWithWorkload.length - 1];
+    if (closedWeeklyBuckets.length) return closedWeeklyBuckets[closedWeeklyBuckets.length - 1];
+    return scopedWeeklyBuckets[scopedWeeklyBuckets.length - 1] ?? null;
+  }, [closedWeeklyBuckets, scopedWeeklyBuckets]);
+
+  const weeklyReferenceRange = lastReportedWeek
+    ? formatWeekLabel(lastReportedWeek.weekStart, lastReportedWeek.weekEnd)
+    : '--';
+  const weeklyScopeHoursPerDay =
+    weeklyScope === 'member'
+      ? getHoursPerDay(selectedWeeklyMember?.weeklyHours ?? null)
+      : averageHoursPerDay;
+  const weeklyReferenceDays =
+    weeklyScopeHoursPerDay != null && lastReportedWeek
+      ? toDaysFromHours(lastReportedWeek.workloadHours, weeklyScopeHoursPerDay)
+      : null;
+
+  const weeklyRateBuckets = useMemo(
+    () =>
+      closedWeeklyBuckets.filter(
+        (bucket) => bucket.capacityHours > 0 || bucket.workloadHours > 0,
+      ),
+    [closedWeeklyBuckets],
+  );
+
+  const averageWeeklyWorkload = useMemo(() => {
+    if (!weeklyRateBuckets.length) return null;
+    const total = weeklyRateBuckets.reduce((sum, bucket) => sum + bucket.workloadHours, 0);
+    return total / weeklyRateBuckets.length;
+  }, [weeklyRateBuckets]);
+
+  const averageWeeklyUtilization = useMemo(() => {
+    const measurable = weeklyRateBuckets.filter((bucket) => bucket.utilization != null);
+    if (!measurable.length) return null;
+    const total = measurable.reduce((sum, bucket) => sum + (bucket.utilization ?? 0), 0);
+    return total / measurable.length;
+  }, [weeklyRateBuckets]);
+
+  const weeklyHoursPeak = useMemo(() => {
+    const max = scopedWeeklyBuckets.reduce(
+      (acc, bucket) => Math.max(acc, bucket.capacityHours, bucket.workloadHours),
+      0,
+    );
+    return max > 0 ? max : 1;
+  }, [scopedWeeklyBuckets]);
+
+  const weeklyChartRows = useMemo(
+    () =>
+      scopedWeeklyBuckets.map((bucket) => {
+        const workloadPct = Math.max(
+          0,
+          Math.min((bucket.workloadHours / weeklyHoursPeak) * 100, 100),
+        );
+        const capacityPct = Math.max(
+          0,
+          Math.min((bucket.capacityHours / weeklyHoursPeak) * 100, 100),
+        );
+        const tooltipRows = [
+          `Week: ${formatWeekLabel(bucket.weekStart, bucket.weekEnd)}`,
+          `Workload: ${formatHours(bucket.workloadHours)}`,
+          `Capacity: ${formatHours(bucket.capacityHours)}`,
+          `Utilization: ${
+            bucket.utilization != null ? percentFormatter.format(bucket.utilization) : '--'
+          }`,
+        ];
+        if (weeklyScope === 'team') {
+          tooltipRows.push(`External (unmapped): ${formatHours(bucket.externalHours)}`);
+        }
+        return {
+          ...bucket,
+          label: formatWeekLabel(bucket.weekStart, bucket.weekEnd),
+          workloadPct,
+          capacityPct,
+          tooltip: tooltipRows.join('\n'),
+        };
+      }),
+    [scopedWeeklyBuckets, weeklyHoursPeak, weeklyScope],
+  );
+
+  const currentScopeWeeklyAll = useMemo(() => {
+    if (weeklyScope === 'member') {
+      if (!effectiveWeeklyMemberId) return [];
+      return data?.weeklyByUser?.[effectiveWeeklyMemberId] ?? [];
+    }
+    return data?.weekly ?? [];
+  }, [data, effectiveWeeklyMemberId, weeklyScope]);
+
+  const hasOpenCurrentWeek = currentScopeWeeklyAll.some(
+    (bucket) => bucket.isCurrentWeek && !bucket.isClosedWeek,
+  );
+
+  const memberWeeklySummary = useMemo(() => {
+    if (!data?.weeklyByUser) return [];
+    return activeMembers
+      .map((member) => {
+        const source = data.weeklyByUser?.[member.userId] ?? [];
+        const visible = source.filter((bucket) => !bucket.isFutureWeek);
+        const closed = visible.filter((bucket) => bucket.isClosedWeek);
+        const closedWithWorkload = closed.filter((bucket) => bucket.workloadHours > 0);
+        const last =
+          closedWithWorkload[closedWithWorkload.length - 1] ??
+          closed[closed.length - 1] ??
+          visible[visible.length - 1] ??
+          null;
+        return { member, last };
+      })
+      .filter((entry) => entry.last != null)
+      .sort((a, b) => (b.last?.workloadHours ?? 0) - (a.last?.workloadHours ?? 0));
+  }, [activeMembers, data]);
 
   const memberLookup = useMemo(() => {
     const map = new Map<string, CapacityMember>();
@@ -989,6 +1164,16 @@ export default function TeamCapacityPage() {
       return { ...prev, userId: activeMembers[0].userId };
     });
   }, [activeMembers]);
+
+  useEffect(() => {
+    if (!activeMembers.length) {
+      setWeeklyMemberId(null);
+      return;
+    }
+    if (!weeklyMemberId || !activeMembers.some((member) => member.userId === weeklyMemberId)) {
+      setWeeklyMemberId(activeMembers[0].userId);
+    }
+  }, [activeMembers, weeklyMemberId]);
 
   useEffect(() => {
     setTimeOffForm((prev) => {
@@ -1577,7 +1762,7 @@ export default function TeamCapacityPage() {
               </button>
             </div>
         </div>
-        <div className="grid gap-3 md:grid-cols-3">
+        <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-4">
           <div className="kpi-frame">
             <p className="text-xs font-bold tracking-widest text-[--color-muted] uppercase">Total capacity</p>
             <p className="mt-2 text-3xl font-bold tracking-tight">
@@ -1626,6 +1811,27 @@ export default function TeamCapacityPage() {
               {unmappedDays != null ? (
                 <span className="text-lg font-normal text-[var(--color-muted)] ml-2">
                   ({formatDaysValue(unmappedDays)})
+                </span>
+              ) : null}
+            </p>
+          </div>
+          <div className="kpi-frame">
+            <p className="text-xs font-bold tracking-widest text-[--color-muted] uppercase">
+              Last reported week
+            </p>
+            <p className="mt-2 text-3xl font-bold tracking-tight">
+              {formatHours(lastReportedWeek?.workloadHours ?? null)}
+              {weeklyReferenceDays != null ? (
+                <span className="text-lg font-normal text-[var(--color-muted)] ml-2">
+                  ({formatDaysValue(weeklyReferenceDays)})
+                </span>
+              ) : null}
+            </p>
+            <p className="mt-1 text-xs text-[var(--color-muted)]">
+              {weeklyReferenceRange}
+              {lastReportedWeek?.utilization != null ? (
+                <span className="ml-2">
+                  {percentFormatter.format(lastReportedWeek.utilization)}
                 </span>
               ) : null}
             </p>
@@ -1841,6 +2047,250 @@ export default function TeamCapacityPage() {
             </div>
           ) : null}
         </div>
+      </div>
+
+      <div className="card overflow-hidden">
+        <button
+          type="button"
+          className="flex w-full items-center justify-between bg-[var(--color-surface-2)]/80 border-b border-[var(--color-border)]/60 px-6 py-4 text-left"
+          onClick={() => setWeeklyPanelOpen((prev) => !prev)}
+          aria-expanded={weeklyPanelOpen}
+        >
+          <div>
+            <h2 className="text-base font-semibold">Weekly workload trend</h2>
+            <p className="text-xs muted">
+              Workload visibility by workweek (Mon-Fri). Expand only when needed.
+            </p>
+          </div>
+          {weeklyPanelOpen ? (
+            <ChevronUp className="h-5 w-5 text-[var(--color-muted)]" />
+          ) : (
+            <ChevronDown className="h-5 w-5 text-[var(--color-muted)]" />
+          )}
+        </button>
+        {weeklyPanelOpen ? (
+          <div className="p-6 space-y-4">
+            <div className="flex flex-wrap items-start justify-between gap-3">
+              <div>
+                <p className="text-xs text-[var(--color-muted)]">
+                  {weeklyScope === 'team'
+                    ? 'Workload vs capacity by workweek (Mon-Fri). External workload is only shown in tooltip.'
+                    : `Workload vs capacity by workweek for ${selectedWeeklyMember?.displayName || selectedWeeklyMember?.email || 'selected member'}.`}
+                </p>
+              </div>
+              <div className="flex flex-wrap items-center gap-3">
+                <div className="inline-flex rounded-lg border border-[var(--color-border)] bg-[var(--color-surface)] p-0.5">
+                  <button
+                    type="button"
+                    className={`rounded-md px-3 py-1 text-xs font-semibold transition-colors ${
+                      weeklyScope === 'team'
+                        ? 'bg-[var(--color-primary)] text-white'
+                        : 'text-[var(--color-muted)] hover:text-[var(--color-text)]'
+                    }`}
+                    onClick={() => setWeeklyScope('team')}
+                  >
+                    Team
+                  </button>
+                  <button
+                    type="button"
+                    className={`rounded-md px-3 py-1 text-xs font-semibold transition-colors ${
+                      weeklyScope === 'member'
+                        ? 'bg-[var(--color-primary)] text-white'
+                        : 'text-[var(--color-muted)] hover:text-[var(--color-text)]'
+                    }`}
+                    onClick={() => setWeeklyScope('member')}
+                  >
+                    Member
+                  </button>
+                </div>
+                {weeklyScope === 'member' ? (
+                  <select
+                    className="input h-8 w-[220px] text-xs"
+                    value={effectiveWeeklyMemberId ?? ''}
+                    onChange={(event) => setWeeklyMemberId(event.target.value || null)}
+                  >
+                    {activeMembers.map((member) => (
+                      <option key={member.userId} value={member.userId}>
+                        {member.displayName || member.email || 'Unnamed'}
+                      </option>
+                    ))}
+                  </select>
+                ) : null}
+                <div className="flex items-center gap-3 text-xs text-[var(--color-muted)]">
+                  <span className="inline-flex items-center gap-1.5">
+                    <span className="h-2.5 w-2.5 rounded-full bg-emerald-500" />
+                    Workload
+                  </span>
+                  <span className="inline-flex items-center gap-1.5">
+                    <span className="h-2.5 w-2.5 rounded-full bg-slate-300" />
+                    Capacity
+                  </span>
+                </div>
+              </div>
+            </div>
+
+            <div className="grid gap-4 xl:grid-cols-[minmax(0,1fr)_260px]">
+              <div className="space-y-2">
+                {weeklyChartRows.length ? (
+                  weeklyChartRows.map((bucket) => (
+                    <div
+                      key={bucket.weekStart}
+                      className="rounded-xl border border-[var(--color-border)] bg-[var(--color-surface)] p-2.5"
+                      title={bucket.tooltip}
+                    >
+                      <div className="flex items-center justify-between gap-3 text-[11px]">
+                        <span className="font-medium text-[var(--color-text)]">{bucket.label}</span>
+                        <span className="text-[var(--color-muted)]">
+                          {formatHours(bucket.workloadHours)} / {formatHours(bucket.capacityHours)}
+                        </span>
+                      </div>
+                      <div className="mt-1.5 h-2.5 overflow-hidden rounded-full bg-slate-200/70">
+                        <div className="relative h-full w-full">
+                          <div
+                            className="absolute left-0 top-0 h-full rounded-full bg-slate-300/80"
+                            style={{ width: `${bucket.capacityPct}%` }}
+                          />
+                          <div
+                            className="absolute left-0 top-0 h-full rounded-full bg-emerald-500"
+                            style={{ width: `${bucket.workloadPct}%` }}
+                          />
+                        </div>
+                      </div>
+                      <div className="mt-1.5 flex items-center justify-between text-[10px] text-[var(--color-muted)]">
+                        <span>
+                          {bucket.isCurrentWeek && !bucket.isClosedWeek
+                            ? 'Current week (pending Friday logs)'
+                            : bucket.isClosedWeek
+                              ? 'Closed week'
+                              : 'Open week'}
+                        </span>
+                        <span>
+                          {bucket.utilization != null ? percentFormatter.format(bucket.utilization) : '--'}
+                        </span>
+                      </div>
+                    </div>
+                  ))
+                ) : (
+                  <div className="rounded-xl border border-dashed border-[--color-border] p-4 text-sm text-[var(--color-muted)]">
+                    No weekly workload data in this period.
+                  </div>
+                )}
+              </div>
+
+              <div className="rounded-xl border border-[var(--color-border)] bg-[var(--color-surface)] p-4 space-y-3">
+                <h3 className="text-xs font-bold uppercase tracking-widest text-[var(--color-muted)]">
+                  Weekly rate
+                </h3>
+                <div className="space-y-2 text-sm">
+                  <div className="flex items-center justify-between gap-2">
+                    <span className="text-[var(--color-muted)]">Scope</span>
+                    <span className="font-semibold">
+                      {weeklyScope === 'team'
+                        ? 'Team'
+                        : selectedWeeklyMember?.displayName || selectedWeeklyMember?.email || 'Member'}
+                    </span>
+                  </div>
+                  <div className="flex items-center justify-between gap-2">
+                    <span className="text-[var(--color-muted)]">Avg weekly workload</span>
+                    <span className="font-semibold">{formatHours(averageWeeklyWorkload)}</span>
+                  </div>
+                  <div className="flex items-center justify-between gap-2">
+                    <span className="text-[var(--color-muted)]">Avg weekly utilization</span>
+                    <span className="font-semibold">
+                      {averageWeeklyUtilization != null
+                        ? percentFormatter.format(averageWeeklyUtilization)
+                        : '--'}
+                    </span>
+                  </div>
+                  <div className="flex items-center justify-between gap-2">
+                    <span className="text-[var(--color-muted)]">Reported weeks</span>
+                    <span className="font-semibold">{weeklyRateBuckets.length}</span>
+                  </div>
+                </div>
+                {hasOpenCurrentWeek ? (
+                  <p className="text-xs text-[var(--color-muted)]">
+                    Current week remains open until Friday logging closes.
+                  </p>
+                ) : null}
+              </div>
+            </div>
+
+            <div className="rounded-xl border border-[var(--color-border)] bg-[var(--color-surface)] p-3">
+              <div className="mb-2 flex items-center justify-between gap-2">
+                <h3 className="text-xs font-bold uppercase tracking-widest text-[var(--color-muted)]">
+                  Last reported week per member
+                </h3>
+                <span className="text-[11px] text-[var(--color-muted)]">
+                  Click a member to open weekly member view
+                </span>
+              </div>
+              <div className="grid gap-2 md:grid-cols-2 xl:grid-cols-3">
+                {memberWeeklySummary.length ? (
+                  memberWeeklySummary.map((entry) => {
+                    const member = entry.member;
+                    const last = entry.last;
+                    if (!last) return null;
+                    const displayName = member.displayName || member.email || 'Unnamed';
+                    const isSelected = weeklyScope === 'member' && effectiveWeeklyMemberId === member.userId;
+                    return (
+                      <button
+                        key={`weekly-summary-${member.userId}`}
+                        type="button"
+                        className={`rounded-lg border px-2.5 py-2 text-left transition-colors ${
+                          isSelected
+                            ? 'border-[var(--color-primary)] bg-[var(--color-primary)]/5'
+                            : 'border-[var(--color-border)] hover:bg-[var(--color-surface-2)]/60'
+                        }`}
+                        onClick={() => {
+                          setWeeklyMemberId(member.userId);
+                          setWeeklyScope('member');
+                        }}
+                      >
+                        <div className="flex items-center gap-2.5">
+                          <div className="h-7 w-7 shrink-0 overflow-hidden rounded-full border border-[--color-border] bg-[color:var(--color-surface-2)]">
+                            {member.avatarUrl ? (
+                              <img
+                                src={member.avatarUrl}
+                                alt={displayName}
+                                className="h-full w-full object-cover"
+                                referrerPolicy="no-referrer"
+                              />
+                            ) : (
+                              <div className="flex h-full w-full items-center justify-center text-[10px] font-semibold text-[color:var(--color-text)]/60">
+                                {displayName
+                                  .split(' ')
+                                  .slice(0, 2)
+                                  .map((chunk) => chunk[0])
+                                  .join('')
+                                  .toUpperCase()}
+                              </div>
+                            )}
+                          </div>
+                          <div className="min-w-0">
+                            <div className="truncate text-xs font-semibold text-[var(--color-text)]">
+                              {displayName}
+                            </div>
+                            <div className="truncate text-[11px] text-[var(--color-muted)]">
+                              {formatWeekLabel(last.weekStart, last.weekEnd)}
+                            </div>
+                          </div>
+                        </div>
+                        <div className="mt-1.5 flex items-center justify-between text-[11px] text-[var(--color-muted)]">
+                          <span>{formatHours(last.workloadHours)}</span>
+                          <span>{last.utilization != null ? percentFormatter.format(last.utilization) : '--'}</span>
+                        </div>
+                      </button>
+                    );
+                  })
+                ) : (
+                  <div className="rounded-lg border border-dashed border-[--color-border] p-3 text-xs text-[var(--color-muted)] md:col-span-2 xl:col-span-3">
+                    No reported member weeks in this period.
+                  </div>
+                )}
+              </div>
+            </div>
+          </div>
+        ) : null}
       </div>
 
       <div className="card overflow-hidden">
