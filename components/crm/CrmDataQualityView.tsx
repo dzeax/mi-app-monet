@@ -839,6 +839,8 @@ export default function CrmDataQualityView() {
   const lastSeenSyncSuccessRef = useRef<string | null>(null);
   const actionsMenuRef = useRef<HTMLDivElement | null>(null);
   const actionsButtonRefs = useRef<Record<string, HTMLButtonElement | null>>({});
+  const dqActionsMenuRef = useRef<HTMLDivElement | null>(null);
+  const dqActionsButtonRef = useRef<HTMLButtonElement | null>(null);
   const contributorsPopoverRef = useRef<HTMLDivElement | null>(null);
   const contributorsChipRefs = useRef<Record<string, HTMLButtonElement | null>>({});
   const jiraTooltipRef = useRef<HTMLDivElement | null>(null);
@@ -1186,18 +1188,6 @@ export default function CrmDataQualityView() {
     },
     [workstreamFilter],
   );
-
-  useEffect(() => {
-    const handler = (e: MouseEvent) => {
-      if (!openMenuId) return;
-      const menu = document.getElementById(`actions-menu-${openMenuId}`);
-      const btn = document.getElementById(`actions-btn-${openMenuId}`);
-      if (menu?.contains(e.target as Node) || btn?.contains(e.target as Node)) return;
-      setOpenMenuId(null);
-    };
-    document.addEventListener("mousedown", handler);
-    return () => document.removeEventListener("mousedown", handler);
-  }, [openMenuId]);
 
   const openDatePicker = (
     event:
@@ -2492,6 +2482,10 @@ export default function CrmDataQualityView() {
       setActionsMenuStyle(null);
       return;
     }
+    if (openMenuId === "dq-actions") {
+      setActionsMenuStyle(null);
+      return;
+    }
     if (!openMenuTicket) {
       setOpenMenuId(null);
       setActionsMenuStyle(null);
@@ -2552,12 +2546,21 @@ export default function CrmDataQualityView() {
     const handler = (event: MouseEvent) => {
       const target = event.target as Node;
       if (openMenuId) {
-        const trigger = actionsButtonRefs.current[openMenuId];
-        if (
-          !actionsMenuRef.current?.contains(target) &&
-          !trigger?.contains(target)
-        ) {
-          setOpenMenuId(null);
+        if (openMenuId === "dq-actions") {
+          if (
+            !dqActionsMenuRef.current?.contains(target) &&
+            !dqActionsButtonRef.current?.contains(target)
+          ) {
+            setOpenMenuId(null);
+          }
+        } else {
+          const trigger = actionsButtonRefs.current[openMenuId];
+          if (
+            !actionsMenuRef.current?.contains(target) &&
+            !trigger?.contains(target)
+          ) {
+            setOpenMenuId(null);
+          }
         }
       }
       if (contributorsPopover) {
@@ -2781,6 +2784,7 @@ export default function CrmDataQualityView() {
               <div className="relative">
                 <button
                   id="actions-btn-dq-actions"
+                  ref={dqActionsButtonRef}
                   className="btn-ghost h-10 w-10"
                   style={{ padding: 0 }}
                   type="button"
@@ -2802,6 +2806,7 @@ export default function CrmDataQualityView() {
                 {openMenuId === "dq-actions" ? (
                   <div
                     id="actions-menu-dq-actions"
+                    ref={dqActionsMenuRef}
                     className="absolute right-0 top-11 z-50 w-56 rounded-lg border border-[color:var(--color-border)] bg-[color:var(--color-surface)] shadow-xl ring-1 ring-black/5"
                   >
                     <div className="px-3 pt-2 text-[10px] font-semibold uppercase tracking-wide text-[color:var(--color-text)]/60">
