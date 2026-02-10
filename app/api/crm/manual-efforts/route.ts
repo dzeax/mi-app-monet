@@ -67,6 +67,53 @@ const loadPeopleMap = async (
   return map;
 };
 
+const loadAvatarByPerson = async (
+  supabase: ReturnType<typeof createRouteHandlerClient>,
+  clientSlug: string,
+  personIds: string[],
+) => {
+  if (personIds.length === 0) return new Map<string, string>();
+
+  const { data: peopleRows, error: peopleError } = await supabase
+    .from("crm_people")
+    .select("id,display_name,email")
+    .eq("client_slug", clientSlug)
+    .in("id", personIds);
+  if (peopleError) throw new Error(peopleError.message);
+
+  const { data: appUsersRows, error: appUsersError } = await supabase
+    .from("app_users")
+    .select("display_name,email,avatar_url")
+    .eq("is_active", true);
+  if (appUsersError) throw new Error(appUsersError.message);
+
+  const avatarByMatcher = new Map<string, string>();
+  (appUsersRows ?? []).forEach(
+    (row: { display_name?: string | null; email?: string | null; avatar_url?: string | null }) => {
+      const avatar = String(row?.avatar_url ?? "").trim();
+      if (!avatar) return;
+      const displayNameKey = normalizeKey(row?.display_name);
+      const emailKey = normalizeKey(row?.email);
+      if (displayNameKey) avatarByMatcher.set(displayNameKey, avatar);
+      if (emailKey) avatarByMatcher.set(emailKey, avatar);
+    },
+  );
+
+  const avatarByPersonId = new Map<string, string>();
+  (peopleRows ?? []).forEach((row: { id?: string | null; display_name?: string | null; email?: string | null }) => {
+    const id = row?.id ? String(row.id) : "";
+    if (!id) return;
+    const displayNameKey = normalizeKey(row?.display_name);
+    const emailKey = normalizeKey(row?.email);
+    const avatar =
+      (emailKey ? avatarByMatcher.get(emailKey) : null) ??
+      (displayNameKey ? avatarByMatcher.get(displayNameKey) : null) ??
+      "";
+    if (avatar) avatarByPersonId.set(id, avatar);
+  });
+  return avatarByPersonId;
+};
+
 const requireAuthProfile = async (
   supabase: ReturnType<typeof createRouteHandlerClient>,
 ): Promise<{ profile: AuthProfile } | { error: NextResponse }> => {
@@ -150,7 +197,13 @@ export async function GET(request: Request) {
       : await resolveEditorPersonIds(supabase, client, profile);
 
     if (!isAdmin && personId && !allowedPersonIds.includes(personId)) {
-      return NextResponse.json({ rows: [] });
+      return NextResponse.json({
+        rows: [],
+        scope: {
+          role: profile.role,
+          allowedPersonIds,
+        },
+      });
     }
 
     const query = supabase
@@ -174,6 +227,15 @@ export async function GET(request: Request) {
       return NextResponse.json({ error: error.message }, { status: 500 });
     }
 
+    const personIds = Array.from(
+      new Set(
+        (data ?? [])
+          .map((row: { person_id?: string | null }) => String(row?.person_id ?? ""))
+          .filter((value) => isUuid(value)),
+      ),
+    );
+    const avatarByPersonId = await loadAvatarByPerson(supabase, client, personIds);
+
     const rows =
       data?.map((row) => ({
         id: row.id as string,
@@ -181,6 +243,7 @@ export async function GET(request: Request) {
         effortDate: row.effort_date as string,
         personId: row.person_id as string,
         owner: row.owner as string,
+        ownerAvatarUrl: avatarByPersonId.get(String(row.person_id ?? "")) ?? null,
         workstream: row.workstream as string,
         inputUnit: row.input_unit as "hours" | "days",
         inputValue: Number(row.input_value ?? 0),
@@ -190,7 +253,13 @@ export async function GET(request: Request) {
         updatedAt: row.updated_at as string,
       })) ?? [];
 
-    return NextResponse.json({ rows });
+    return NextResponse.json({
+      rows,
+      scope: {
+        role: profile.role,
+        allowedPersonIds: isAdmin ? null : allowedPersonIds,
+      },
+    });
   } catch (err) {
     const msg = err instanceof Error ? err.message : "Unexpected error";
     return NextResponse.json({ error: msg }, { status: 500 });
@@ -661,6 +730,7 @@ export async function DELETE(request: Request) {
   const supabase = createRouteHandlerClient({ cookies: () => cookieStore });
   const { searchParams } = new URL(request.url);
   const id = searchParams.get("id");
+  const clientSlug = searchParams.get("client") || DEFAULT_CLIENT;
   if (!id) {
     return NextResponse.json({ error: "Missing id" }, { status: 400 });
   }
@@ -668,14 +738,37 @@ export async function DELETE(request: Request) {
   try {
     const auth = await requireAuthProfile(supabase);
     if ("error" in auth) return auth.error;
-    if (auth.profile.role !== "admin") {
-      return NextResponse.json({ error: "Forbidden" }, { status: 403 });
+    const profile = auth.profile;
+    const isAdmin = profile.role === "admin";
+
+    const { data: existing, error: existingError } = await supabase
+      .from("crm_manual_efforts")
+      .select("person_id,created_by,client_slug")
+      .eq("id", id)
+      .eq("client_slug", clientSlug)
+      .maybeSingle();
+    if (existingError) {
+      return NextResponse.json({ error: existingError.message }, { status: 500 });
+    }
+    if (!existing) {
+      return NextResponse.json({ error: "Entry not found" }, { status: 404 });
+    }
+
+    if (!isAdmin) {
+      const allowedPersonIds = await resolveEditorPersonIds(supabase, clientSlug, profile);
+      const canDelete =
+        allowedPersonIds.includes(String(existing.person_id ?? "")) ||
+        String(existing.created_by ?? "") === profile.userId;
+      if (!canDelete) {
+        return NextResponse.json({ error: "Forbidden" }, { status: 403 });
+      }
     }
 
     const { error } = await supabase
       .from("crm_manual_efforts")
       .delete()
-      .eq("id", id);
+      .eq("id", id)
+      .eq("client_slug", clientSlug);
     if (error) {
       return NextResponse.json({ error: error.message }, { status: 500 });
     }

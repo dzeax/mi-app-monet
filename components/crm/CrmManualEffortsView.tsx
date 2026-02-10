@@ -18,6 +18,7 @@ type ManualEffortRow = {
   effortDate: string;
   personId: string;
   owner: string;
+  ownerAvatarUrl?: string | null;
   workstream: string;
   inputUnit: "hours" | "days";
   inputValue: number;
@@ -25,6 +26,11 @@ type ManualEffortRow = {
   comments: string | null;
   createdAt: string;
   updatedAt: string;
+};
+
+type ManualEffortScope = {
+  role: "admin" | "editor";
+  allowedPersonIds: string[] | null;
 };
 
 type PersonOption = {
@@ -376,6 +382,23 @@ const formatNumber = (val: number, digits = 2) =>
     ? val.toLocaleString("es-ES", { minimumFractionDigits: digits, maximumFractionDigits: digits })
     : "0,00";
 
+const formatEffortDate = (value: string) => {
+  if (!isIsoDate(value)) return value;
+  const parsed = parseISO(value);
+  if (Number.isNaN(parsed.getTime())) return value;
+  return format(parsed, "dd-MM-yyyy");
+};
+
+const getInitials = (name: string) =>
+  name
+    .split(" ")
+    .map((chunk) => chunk.trim())
+    .filter(Boolean)
+    .slice(0, 2)
+    .map((chunk) => chunk[0])
+    .join("")
+    .toUpperCase();
+
 const parseYearFromDate = (value?: string | null) => {
   if (!value || value.length < 4) return null;
   const year = Number.parseInt(value.slice(0, 4), 10);
@@ -388,10 +411,11 @@ export default function CrmManualEffortsView() {
   const pathname = usePathname();
   const segments = pathname?.split("/").filter(Boolean) ?? [];
   const clientSlug = segments[1] || "emg";
-  const { isAdmin, isEditor } = useAuth();
+  const { isAdmin, isEditor, user } = useAuth();
   const currentYear = new Date().getFullYear();
 
   const [rows, setRows] = useState<ManualEffortRow[]>([]);
+  const [scope, setScope] = useState<ManualEffortScope | null>(null);
   const [people, setPeople] = useState<PersonOption[]>([]);
   const [workstreams, setWorkstreams] = useState<string[]>([]);
   const [ratesByYear, setRatesByYear] = useState<Record<number, RateBucket>>({});
@@ -408,6 +432,7 @@ export default function CrmManualEffortsView() {
   const [openImport, setOpenImport] = useState(false);
   const [editRow, setEditRow] = useState<ManualEffortRow | null>(null);
   const [draftEntries, setDraftEntries] = useState<DraftEntry[]>([]);
+  const [removeDraftDialogId, setRemoveDraftDialogId] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
 
   const [showWorkstreamInput, setShowWorkstreamInput] = useState(false);
@@ -514,6 +539,14 @@ export default function CrmManualEffortsView() {
         throw new Error(body?.error || "Failed to load manual efforts");
       }
       const list = Array.isArray(body?.rows) ? (body.rows as ManualEffortRow[]) : [];
+      const responseScope = body?.scope as Partial<ManualEffortScope> | undefined;
+      const nextScope: ManualEffortScope = {
+        role: responseScope?.role === "admin" ? "admin" : "editor",
+        allowedPersonIds: Array.isArray(responseScope?.allowedPersonIds)
+          ? responseScope.allowedPersonIds.map((value) => String(value))
+          : null,
+      };
+      setScope(nextScope);
       setRows(list);
       await loadRates(list);
     } catch (err) {
@@ -529,14 +562,61 @@ export default function CrmManualEffortsView() {
     void Promise.all([loadPeople(), loadWorkstreams(), loadRows()]);
   }, [loadPeople, loadRows, loadWorkstreams]);
 
+  const scopedPeople = useMemo(() => {
+    const activePeople = people.filter((person) => person.isActive);
+    if (isAdmin) return activePeople;
+
+    const allowedIds = new Set<string>(
+      Array.isArray(scope?.allowedPersonIds) && scope.allowedPersonIds.length > 0
+        ? scope.allowedPersonIds
+        : rows.map((row) => row.personId),
+    );
+    if (allowedIds.size > 0) {
+      return activePeople.filter((person) => allowedIds.has(person.value));
+    }
+
+    const userDisplayName = user?.displayName?.trim().toLowerCase() ?? "";
+    if (!userDisplayName) return [];
+    return activePeople.filter((person) => person.label.trim().toLowerCase() === userDisplayName);
+  }, [isAdmin, people, rows, scope?.allowedPersonIds, user?.displayName]);
+
   const ownerOptions = useMemo(
-    () => people.map((p) => ({ label: p.label, value: p.value })),
-    [people],
+    () => scopedPeople.map((p) => ({ label: p.label, value: p.value })),
+    [scopedPeople],
   );
   const workstreamOptions = useMemo(
     () => workstreams.map((label) => ({ label, value: label })),
     [workstreams],
   );
+
+  const defaultDraftPersonId = useMemo(() => {
+    if (isAdmin) return "";
+    if (scopedPeople.length === 1) return scopedPeople[0].value;
+    const userDisplayName = user?.displayName?.trim().toLowerCase() ?? "";
+    if (!userDisplayName) return "";
+    return (
+      scopedPeople.find((person) => person.label.trim().toLowerCase() === userDisplayName)?.value ??
+      ""
+    );
+  }, [isAdmin, scopedPeople, user?.displayName]);
+
+  const createDefaultDraftEntry = useCallback(
+    (): DraftEntry => ({
+      id: buildKey(),
+      effortDate: new Date().toISOString().slice(0, 10),
+      personId: defaultDraftPersonId,
+      workstream: DEFAULT_WORKSTREAM,
+      unit: "hours",
+      value: "",
+      comments: "",
+    }),
+    [defaultDraftPersonId],
+  );
+
+  useEffect(() => {
+    const allowed = new Set(ownerOptions.map((option) => option.value));
+    setOwnerFilters((prev) => prev.filter((value) => allowed.has(value)));
+  }, [ownerOptions]);
 
   const getRateForRow = useCallback(
     (row: ManualEffortRow) => {
@@ -592,17 +672,8 @@ export default function CrmManualEffortsView() {
     setEditRow(null);
     setShowWorkstreamInput(false);
     setNewWorkstream("");
-    setDraftEntries([
-      {
-        id: buildKey(),
-        effortDate: new Date().toISOString().slice(0, 10),
-        personId: "",
-        workstream: DEFAULT_WORKSTREAM,
-        unit: "hours",
-        value: "",
-        comments: "",
-      },
-    ]);
+    setRemoveDraftDialogId(null);
+    setDraftEntries([createDefaultDraftEntry()]);
     setOpenModal(true);
   };
 
@@ -610,6 +681,7 @@ export default function CrmManualEffortsView() {
     setEditRow(row);
     setShowWorkstreamInput(false);
     setNewWorkstream("");
+    setRemoveDraftDialogId(null);
     setDraftEntries([
       {
         id: buildKey(),
@@ -724,6 +796,7 @@ export default function CrmManualEffortsView() {
         showSuccess("Entries saved");
       }
       setOpenModal(false);
+      setRemoveDraftDialogId(null);
       await loadRows();
     } catch (err) {
       const message = err instanceof Error ? err.message : "Unable to save entries";
@@ -734,9 +807,21 @@ export default function CrmManualEffortsView() {
   };
 
   const handleDelete = async (row: ManualEffortRow) => {
-    if (!isAdmin) return;
+    if (!(isAdmin || isEditor)) return;
+    if (isEditor && Array.isArray(scope?.allowedPersonIds) && scope.allowedPersonIds.length > 0) {
+      if (!scope.allowedPersonIds.includes(row.personId)) {
+        showError("You can only delete your own entries.");
+        return;
+      }
+    }
+    if (!window.confirm(`Delete entry for ${row.owner} on ${formatEffortDate(row.effortDate)}?`)) {
+      return;
+    }
     try {
-      const res = await fetch(`/api/crm/manual-efforts?id=${row.id}`, { method: "DELETE" });
+      const res = await fetch(
+        `/api/crm/manual-efforts?id=${encodeURIComponent(row.id)}&client=${encodeURIComponent(clientSlug)}`,
+        { method: "DELETE" },
+      );
       const body = await res.json().catch(() => null);
       if (!res.ok) {
         throw new Error(body?.error || "Failed to delete entry");
@@ -748,6 +833,24 @@ export default function CrmManualEffortsView() {
       showError(message);
     }
   };
+
+  const handleAddDraftEntry = useCallback(() => {
+    setDraftEntries((prev) => [...prev, createDefaultDraftEntry()]);
+  }, [createDefaultDraftEntry]);
+
+  const requestRemoveDraftEntry = useCallback(
+    (entryId: string) => {
+      if (draftEntries.length <= 1) return;
+      setRemoveDraftDialogId(entryId);
+    },
+    [draftEntries.length],
+  );
+
+  const confirmRemoveDraftEntry = useCallback(() => {
+    if (!removeDraftDialogId) return;
+    setDraftEntries((prev) => prev.filter((item) => item.id !== removeDraftDialogId));
+    setRemoveDraftDialogId(null);
+  }, [removeDraftDialogId]);
 
   const clearFilters = () => {
     setSearch("");
@@ -900,10 +1003,37 @@ export default function CrmManualEffortsView() {
                 filteredRows.map((row) => {
                   const loggedLabel = `${formatNumber(row.inputValue, 2)} ${row.inputUnit === "days" ? "d" : "h"}`;
                   const budgetMissing = row.rate <= 0 && row.hours > 0;
+                  const canManageRow =
+                    isAdmin ||
+                    (isEditor &&
+                      (Array.isArray(scope?.allowedPersonIds) && scope.allowedPersonIds.length > 0
+                        ? scope.allowedPersonIds.includes(row.personId)
+                        : true));
                   return (
                     <tr key={row.id} className="border-t border-[color:var(--color-border)]">
-                      <td className="px-3 py-3 whitespace-nowrap">{row.effortDate}</td>
-                      <td className="px-3 py-3 whitespace-nowrap">{row.owner}</td>
+                      <td className="px-3 py-3 whitespace-nowrap">{formatEffortDate(row.effortDate)}</td>
+                      <td className="px-3 py-3 whitespace-nowrap">
+                        <div className="flex items-center gap-2">
+                          <div
+                            className="h-8 w-8 shrink-0 overflow-hidden rounded-full border border-[color:var(--color-border)] bg-[color:var(--color-surface-2)]"
+                            title={row.owner}
+                          >
+                            {row.ownerAvatarUrl ? (
+                              <img
+                                src={row.ownerAvatarUrl}
+                                alt={row.owner}
+                                className="h-full w-full object-cover"
+                                referrerPolicy="no-referrer"
+                              />
+                            ) : (
+                              <div className="flex h-full w-full items-center justify-center text-[11px] font-semibold text-[color:var(--color-text)]/70">
+                                {getInitials(row.owner)}
+                              </div>
+                            )}
+                          </div>
+                          <span>{row.owner}</span>
+                        </div>
+                      </td>
                       <td className="px-3 py-3 whitespace-nowrap">{row.workstream}</td>
                       <td className="px-3 py-3 text-right">{loggedLabel}</td>
                       <td className="px-3 py-3 text-right">{formatNumber(row.hours)}</td>
@@ -914,25 +1044,27 @@ export default function CrmManualEffortsView() {
                       <td className="px-3 py-3 max-w-[260px] truncate" title={row.comments || ""}>
                         {row.comments || "--"}
                       </td>
-                      <td className="px-3 py-3 text-right">
-                        {isEditor || isAdmin ? (
-                          <button
-                            className="btn-ghost h-8 px-2 text-xs"
-                            type="button"
-                            onClick={() => openEditModal(row)}
-                          >
-                            Edit
-                          </button>
-                        ) : null}
-                        {isAdmin ? (
-                          <button
-                            className="btn-ghost h-8 px-2 text-xs text-red-500"
-                            type="button"
-                            onClick={() => void handleDelete(row)}
-                          >
-                            Delete
-                          </button>
-                        ) : null}
+                      <td className="px-3 py-3">
+                        <div className="flex items-center justify-end gap-2">
+                          {canManageRow ? (
+                            <button
+                              className="btn-ghost h-8 px-2 text-xs"
+                              type="button"
+                              onClick={() => openEditModal(row)}
+                            >
+                              Edit
+                            </button>
+                          ) : null}
+                          {canManageRow ? (
+                            <button
+                              className="h-8 rounded-lg border border-red-200 bg-red-50/60 px-2 text-xs font-medium text-red-600 transition hover:bg-red-100"
+                              type="button"
+                              onClick={() => void handleDelete(row)}
+                            >
+                              Remove
+                            </button>
+                          ) : null}
+                        </div>
                       </td>
                     </tr>
                   );
@@ -945,7 +1077,10 @@ export default function CrmManualEffortsView() {
 
       {openModal ? (
         <MiniModal
-          onClose={() => setOpenModal(false)}
+          onClose={() => {
+            setOpenModal(false);
+            setRemoveDraftDialogId(null);
+          }}
           title={editRow ? "Edit manual effort" : "Add manual efforts"}
           widthClass="max-w-4xl"
           bodyClassName="space-y-4"
@@ -954,15 +1089,26 @@ export default function CrmManualEffortsView() {
             <div className="text-sm text-[color:var(--color-text)]/70">
               Log non-ticket effort entries for the team.
             </div>
-            {isEditor || isAdmin ? (
-              <button
-                type="button"
-                className="btn-ghost h-8 px-3 text-xs"
-                onClick={() => setShowWorkstreamInput((prev) => !prev)}
-              >
-                {showWorkstreamInput ? "Cancel" : "Add workstream"}
-              </button>
-            ) : null}
+            <div className="flex flex-wrap items-center gap-2">
+              {isEditor || isAdmin ? (
+                <button
+                  type="button"
+                  className="btn-ghost h-8 px-3 text-xs"
+                  onClick={() => setShowWorkstreamInput((prev) => !prev)}
+                >
+                  {showWorkstreamInput ? "Cancel" : "Add workstream"}
+                </button>
+              ) : null}
+              {!editRow && (isEditor || isAdmin) ? (
+                <button
+                  type="button"
+                  className="btn-primary h-8 px-3 text-xs"
+                  onClick={handleAddDraftEntry}
+                >
+                  Add entry
+                </button>
+              ) : null}
+            </div>
           </div>
 
           {showWorkstreamInput ? (
@@ -1018,7 +1164,7 @@ export default function CrmManualEffortsView() {
                     }
                   >
                     <option value="">Select person</option>
-                    {people.map((person) => (
+                    {scopedPeople.map((person) => (
                       <option key={person.value} value={person.value}>
                         {person.label}{!person.isActive ? " (inactive)" : ""}
                       </option>
@@ -1098,10 +1244,8 @@ export default function CrmManualEffortsView() {
                 {!editRow && draftEntries.length > 1 ? (
                   <button
                     type="button"
-                    className="btn-ghost h-10 px-3 text-xs text-red-500"
-                    onClick={() =>
-                      setDraftEntries((prev) => prev.filter((item) => item.id !== entry.id))
-                    }
+                    className="h-10 rounded-lg border border-red-200 bg-red-50/60 px-3 text-xs font-medium text-red-600 transition hover:bg-red-100"
+                    onClick={() => requestRemoveDraftEntry(entry.id)}
                   >
                     Remove
                   </button>
@@ -1112,31 +1256,14 @@ export default function CrmManualEffortsView() {
             ))}
           </div>
 
-          {!editRow ? (
-            <button
-              type="button"
-              className="btn-ghost h-9 px-3 text-xs"
-              onClick={() =>
-                setDraftEntries((prev) => [
-                  ...prev,
-                  {
-                    id: buildKey(),
-                    effortDate: new Date().toISOString().slice(0, 10),
-                    personId: "",
-                    workstream: DEFAULT_WORKSTREAM,
-                    unit: "hours",
-                    value: "",
-                    comments: "",
-                  },
-                ])
-              }
-            >
-              Add another entry
-            </button>
-          ) : null}
-
           <div className="flex items-center justify-end gap-2">
-            <button className="btn-ghost h-9 px-3 text-xs" onClick={() => setOpenModal(false)}>
+            <button
+              className="btn-ghost h-9 px-3 text-xs"
+              onClick={() => {
+                setOpenModal(false);
+                setRemoveDraftDialogId(null);
+              }}
+            >
               Cancel
             </button>
             <button
@@ -1146,6 +1273,35 @@ export default function CrmManualEffortsView() {
             >
               {saving ? "Saving..." : editRow ? "Save changes" : "Save entries"}
             </button>
+          </div>
+        </MiniModal>
+      ) : null}
+      {removeDraftDialogId ? (
+        <MiniModal
+          onClose={() => setRemoveDraftDialogId(null)}
+          title="Confirm removal"
+          widthClass="max-w-md"
+          footer={
+            <div className="flex items-center justify-end gap-2">
+              <button
+                type="button"
+                className="btn-ghost"
+                onClick={() => setRemoveDraftDialogId(null)}
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                className="btn-danger"
+                onClick={confirmRemoveDraftEntry}
+              >
+                Remove
+              </button>
+            </div>
+          }
+        >
+          <div className="text-sm text-[color:var(--color-text)]/80">
+            Remove this entry from the draft list?
           </div>
         </MiniModal>
       ) : null}
