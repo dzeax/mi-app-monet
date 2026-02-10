@@ -737,6 +737,17 @@ export async function DELETE(request: Request) {
     if (sessionError) return NextResponse.json({ error: sessionError.message }, { status: 500 });
     const userId = sessionData.session?.user?.id;
     if (!userId) return NextResponse.json({ error: "Not authenticated" }, { status: 401 });
+    const { data: appUser, error: appUserError } = await supabase
+      .from("app_users")
+      .select("role,is_active")
+      .eq("user_id", userId)
+      .maybeSingle();
+    if (appUserError) {
+      return NextResponse.json({ error: appUserError.message }, { status: 500 });
+    }
+    if (!appUser || appUser.is_active === false || appUser.role !== "admin") {
+      return NextResponse.json({ error: "Forbidden" }, { status: 403 });
+    }
 
     const { error } = await supabase
       .from("crm_data_quality_tickets")

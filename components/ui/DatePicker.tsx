@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import { DayPicker } from 'react-day-picker';
 import { format, parseISO } from 'date-fns';
 
@@ -24,6 +24,7 @@ export interface DatePickerProps {
   disabled?: boolean;
   displayFormat?: string;
   buttonClassName?: string;
+  placement?: 'bottom' | 'top';
 }
 
 export default function DatePicker({
@@ -37,13 +38,94 @@ export default function DatePicker({
   disabled = false,
   displayFormat = 'dd/MM/yyyy',
   buttonClassName,
+  placement = 'bottom',
 }: DatePickerProps) {
   const [open, setOpen] = useState(false);
   const wrapRef = useRef<HTMLDivElement | null>(null);
+  const popoverRef = useRef<HTMLDivElement | null>(null);
+  const buttonElRef = useRef<HTMLButtonElement | null>(null);
+  const rafRef = useRef<number | null>(null);
+  const [popoverStyle, setPopoverStyle] = useState<Record<string, string | number>>({});
   const selectedDate = value && isIsoDate(value) ? parseISO(value) : undefined;
   const display = formatPickerDate(value, displayFormat) ?? placeholder;
   const hasValue = Boolean(selectedDate);
   const toIso = (date: Date) => format(date, 'yyyy-MM-dd');
+  const POP_WIDTH = 280;
+  const EDGE_GAP = 8;
+  const FLOAT_GAP = 6;
+
+  const setButtonRef = useCallback(
+    (node: HTMLButtonElement | null) => {
+      buttonElRef.current = node;
+      if (!buttonRef) return;
+      if (typeof buttonRef === 'function') {
+        buttonRef(node);
+      } else {
+        (buttonRef as { current: HTMLButtonElement | null }).current = node;
+      }
+    },
+    [buttonRef],
+  );
+
+  const updatePopoverPosition = useCallback(() => {
+    const button = buttonElRef.current;
+    if (!button) return;
+    const rect = button.getBoundingClientRect();
+    const measuredHeight = popoverRef.current?.getBoundingClientRect().height || 300;
+    const availableTop = rect.top;
+    const availableBottom = window.innerHeight - rect.bottom;
+
+    let openTop = placement === 'top';
+    if (placement === 'top' && availableTop < measuredHeight + FLOAT_GAP + EDGE_GAP) {
+      openTop = false;
+    }
+    if (
+      placement === 'bottom' &&
+      availableBottom < measuredHeight + FLOAT_GAP + EDGE_GAP &&
+      availableTop > availableBottom
+    ) {
+      openTop = true;
+    }
+
+    let top = openTop
+      ? rect.top - measuredHeight - FLOAT_GAP
+      : rect.bottom + FLOAT_GAP;
+    const maxTop = Math.max(EDGE_GAP, window.innerHeight - measuredHeight - EDGE_GAP);
+    top = Math.min(Math.max(EDGE_GAP, top), maxTop);
+
+    let left = rect.left;
+    const maxLeft = Math.max(EDGE_GAP, window.innerWidth - POP_WIDTH - EDGE_GAP);
+    left = Math.min(Math.max(EDGE_GAP, left), maxLeft);
+
+    setPopoverStyle({
+      position: 'fixed',
+      top,
+      left,
+      width: POP_WIDTH,
+    });
+  }, [placement]);
+
+  const scheduleReposition = useCallback(() => {
+    if (rafRef.current !== null) {
+      cancelAnimationFrame(rafRef.current);
+    }
+    rafRef.current = requestAnimationFrame(() => {
+      updatePopoverPosition();
+      rafRef.current = requestAnimationFrame(() => {
+        updatePopoverPosition();
+      });
+    });
+  }, [updatePopoverPosition]);
+
+  const setPopoverNodeRef = useCallback(
+    (node: HTMLDivElement | null) => {
+      popoverRef.current = node;
+      if (node && open) {
+        scheduleReposition();
+      }
+    },
+    [open, scheduleReposition],
+  );
 
   // Cierre al hacer click fuera
   useEffect(() => {
@@ -51,17 +133,34 @@ export default function DatePicker({
     const handler = (event: MouseEvent) => {
       if (!wrapRef.current) return;
       if (wrapRef.current.contains(event.target as Node)) return;
+      if (popoverRef.current?.contains(event.target as Node)) return;
       setOpen(false);
     };
     document.addEventListener('mousedown', handler);
     return () => document.removeEventListener('mousedown', handler);
   }, [open]);
 
+  useEffect(() => {
+    if (!open) return;
+    scheduleReposition();
+    const handleReposition = () => scheduleReposition();
+    window.addEventListener('resize', handleReposition);
+    window.addEventListener('scroll', handleReposition, true);
+    return () => {
+      window.removeEventListener('resize', handleReposition);
+      window.removeEventListener('scroll', handleReposition, true);
+      if (rafRef.current !== null) {
+        cancelAnimationFrame(rafRef.current);
+        rafRef.current = null;
+      }
+    };
+  }, [open, scheduleReposition]);
+
   return (
     <div className="relative w-full" ref={wrapRef}>
       <div className="relative">
         <button
-          ref={buttonRef}
+          ref={setButtonRef}
           type="button"
           disabled={disabled}
           // Nota: Usamos la clase 'input' para heredar los estilos globales (Solid Depth)
@@ -98,7 +197,13 @@ export default function DatePicker({
 
       {/* Popover del Calendario */}
       {open && (
-        <div className="absolute left-0 top-[calc(100%+6px)] z-50 w-[280px] rounded-xl border border-[color:var(--color-border)] bg-[color:var(--color-surface)] p-3 shadow-xl ring-1 ring-black/5">
+        <div
+          ref={setPopoverNodeRef}
+          className={[
+            'z-[1200] rounded-xl border border-[color:var(--color-border)] bg-[color:var(--color-surface)] p-3 shadow-xl ring-1 ring-black/5',
+          ].join(' ')}
+          style={popoverStyle}
+        >
           <div className="rounded-lg border border-[color:var(--color-border)] bg-white/60 p-2">
             <DayPicker
               mode="single"

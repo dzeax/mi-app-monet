@@ -213,7 +213,12 @@ export default function Sidebar({
     items: (ReactNode | null | false)[];
   };
 
-  const crmModuleButtons = (activeClient?.modules || []).map((module) => {
+  const crmModuleButtons = (activeClient?.modules || [])
+    .filter((module) => {
+      if (isAdmin) return true;
+      return module.type !== "budget" && module.type !== "budget_execution";
+    })
+    .map((module) => {
     const target = `/crm/${activeClient?.slug}/${module.slug}`;
     const isActive = pathname?.startsWith(target);
     const iconSrc =
@@ -284,7 +289,7 @@ export default function Sidebar({
       description: "Client modules",
         items: [
           ...crmModuleButtons,
-          isEditor ? (
+          isAdmin ? (
             <button
             key="crm-import"
             onClick={() => setOpenCrmImport(true)}
@@ -296,7 +301,7 @@ export default function Sidebar({
             {!collapsed && <span>Import CSV</span>}
           </button>
           ) : null,
-          isEditor ? (
+          isAdmin ? (
             <button
               key="crm-people"
               onClick={() => setOpenCrmPeople(true)}
@@ -327,7 +332,7 @@ export default function Sidebar({
             {!collapsed && <span>Manage catalogs</span>}
           </button>
         ) : null,
-        isEditor ? (
+        isAdmin ? (
           <button
             key="crm-rates"
             onClick={() => setOpenRates(true)}
@@ -453,7 +458,7 @@ export default function Sidebar({
           }}
         />
       )}
-      {unit === "crm" && isEditor && openCrmImport && activeClient && (
+      {unit === "crm" && isAdmin && openCrmImport && activeClient && (
         <CrmImportModal
           clientSlug={activeClient.slug}
           onClose={() => {
@@ -465,13 +470,13 @@ export default function Sidebar({
       {unit === "crm" && isEditor && openCrmCatalogs && (
         <CrmCatalogsModal onClose={() => setOpenCrmCatalogs(false)} clientSlug={activeClient?.slug || "emg"} />
       )}
-      {unit === "crm" && isEditor && openCrmPeople && (
+      {unit === "crm" && isAdmin && openCrmPeople && (
         <CrmPeopleModal
           clientSlug={activeClient?.slug || "emg"}
           onClose={() => setOpenCrmPeople(false)}
         />
       )}
-      {unit === "crm" && openRates && activeClient && (
+      {unit === "crm" && isAdmin && openRates && activeClient && (
         <ManageRatesModal
           clientSlug={activeClient.slug}
           onClose={() => {

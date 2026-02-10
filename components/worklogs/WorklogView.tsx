@@ -148,7 +148,9 @@ const defaultWorkstreamForScope: Record<WorklogScope, string> = {
 export default function WorklogView() {
   const router = useRouter();
   const searchParams = useSearchParams();
-  const { isAdmin, isEditor } = useAuth();
+  const { user, isAdmin, isEditor } = useAuth();
+  const isSelfOnlyEditor = isEditor && !isAdmin;
+  const currentUserId = user?.id ?? "";
 
   const scopeParam = searchParams.get("scope");
   const initialScope = scopeParam === "internal" ? "internal" : "monetization";
@@ -296,7 +298,7 @@ export default function WorklogView() {
       {
         id: buildKey(),
         effortDate: new Date().toISOString().slice(0, 10),
-        userId: "",
+        userId: isSelfOnlyEditor ? currentUserId : "",
         workstream: defaultWorkstreamForScope[scope],
         unit: "hours",
         value: "",
@@ -314,7 +316,7 @@ export default function WorklogView() {
       {
         id: buildKey(),
         effortDate: row.effortDate,
-        userId: row.userId ?? "",
+        userId: isSelfOnlyEditor ? currentUserId || row.userId || "" : row.userId ?? "",
         workstream: row.workstream,
         unit: row.inputUnit,
         value: String(row.inputValue ?? ""),
@@ -326,6 +328,10 @@ export default function WorklogView() {
 
   const handleSave = async () => {
     if (!isEditor && !isAdmin) return;
+    if (isSelfOnlyEditor && !currentUserId) {
+      showError("Unable to resolve current user.");
+      return;
+    }
     const entries = draftEntries
       .map((entry) => ({
         ...entry,
@@ -333,8 +339,11 @@ export default function WorklogView() {
         workstream: entry.workstream.trim(),
       }))
       .filter((entry) => entry.effortDate && entry.userId && entry.workstream && entry.value.length > 0);
+    const normalizedEntries = isSelfOnlyEditor
+      ? entries.map((entry) => ({ ...entry, userId: currentUserId }))
+      : entries;
 
-    if (entries.length === 0) {
+    if (normalizedEntries.length === 0) {
       showError("Fill at least one valid entry.");
       return;
     }
@@ -342,7 +351,7 @@ export default function WorklogView() {
     setSaving(true);
     try {
       if (editRow) {
-        const entry = entries[0];
+        const entry = normalizedEntries[0];
         const res = await fetch("/api/worklogs", {
           method: "PATCH",
           headers: { "Content-Type": "application/json" },
@@ -361,7 +370,7 @@ export default function WorklogView() {
         if (!res.ok) throw new Error(body?.error || "Failed to update entry");
         showSuccess("Entry updated");
       } else {
-        const payload = entries.map((entry) => ({
+        const payload = normalizedEntries.map((entry) => ({
           effortDate: entry.effortDate,
           userId: entry.userId,
           workstream: entry.workstream,
@@ -699,6 +708,7 @@ export default function WorklogView() {
                   <select
                     className="input h-10 w-full"
                     value={entry.userId}
+                    disabled={isSelfOnlyEditor}
                     onChange={(e) =>
                       setDraftEntries((prev) =>
                         prev.map((item) =>
@@ -812,7 +822,7 @@ export default function WorklogView() {
                   {
                     id: buildKey(),
                     effortDate: new Date().toISOString().slice(0, 10),
-                    userId: "",
+                    userId: isSelfOnlyEditor ? currentUserId : "",
                     workstream: defaultWorkstreamForScope[scope],
                     unit: "hours",
                     value: "",

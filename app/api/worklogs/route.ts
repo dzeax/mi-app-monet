@@ -105,6 +105,11 @@ export async function GET(request: Request) {
   const userId = searchParams.get("userId");
   const owner = searchParams.get("owner");
   const workstream = searchParams.get("workstream");
+  const isAdmin = auth.role === "admin";
+
+  if (!isAdmin && userId && userId !== auth.user.id) {
+    return NextResponse.json({ error: "Forbidden" }, { status: 403 });
+  }
 
   try {
     const query = supabase
@@ -114,7 +119,11 @@ export async function GET(request: Request) {
 
     if (from) query.gte("effort_date", from);
     if (to) query.lte("effort_date", to);
-    if (userId) query.eq("user_id", userId);
+    if (isAdmin) {
+      if (userId) query.eq("user_id", userId);
+    } else {
+      query.eq("user_id", auth.user.id);
+    }
     if (owner) query.ilike("owner", owner);
     if (workstream) query.eq("workstream", workstream);
 
@@ -160,6 +169,11 @@ export async function POST(request: Request) {
   try {
     const body = await request.json();
     const parsed = CreatePayloadZ.parse(body);
+    const isAdmin = auth.role === "admin";
+
+    if (!isAdmin && parsed.entries.some((entry) => entry.userId !== auth.user.id)) {
+      return NextResponse.json({ error: "Editors can only create own entries" }, { status: 403 });
+    }
 
     const userIds = Array.from(new Set(parsed.entries.map((entry) => entry.userId)));
     const userMap = await loadUserMap(supabase, userIds);
@@ -233,6 +247,7 @@ export async function PATCH(request: Request) {
   try {
     const body = await request.json();
     const parsed = UpdatePayloadZ.parse(body);
+    const isAdmin = auth.role === "admin";
 
     const { data: existing, error: existingError } = await supabase
       .from("work_manual_efforts")
@@ -245,6 +260,12 @@ export async function PATCH(request: Request) {
     }
     if (!existing) {
       return NextResponse.json({ error: "Not found" }, { status: 404 });
+    }
+    if (!isAdmin && String(existing.user_id ?? "") !== auth.user.id) {
+      return NextResponse.json({ error: "Forbidden" }, { status: 403 });
+    }
+    if (!isAdmin && parsed.userId && parsed.userId !== auth.user.id) {
+      return NextResponse.json({ error: "Editors can only edit own entries" }, { status: 403 });
     }
 
     const unit = (parsed.unit ?? existing.input_unit) as "hours" | "days";

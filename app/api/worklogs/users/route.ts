@@ -15,7 +15,7 @@ export async function GET() {
 
   const { data: currentUser, error: currentUserError } = await supabase
     .from("app_users")
-    .select("is_active")
+    .select("user_id,role,is_active,display_name,email")
     .eq("user_id", userData.user.id)
     .maybeSingle();
 
@@ -25,6 +25,25 @@ export async function GET() {
 
   if (!currentUser || currentUser.is_active === false) {
     return NextResponse.json({ error: "Forbidden" }, { status: 403 });
+  }
+
+  if (currentUser.role !== "admin") {
+    const label = String(
+      currentUser.display_name ??
+        currentUser.email ??
+        userData.user.email ??
+        "Unknown",
+    ).trim();
+    return NextResponse.json({
+      users: [
+        {
+          value: String(currentUser.user_id ?? userData.user.id),
+          label,
+          email: (currentUser.email as string | null) ?? (userData.user.email ?? null),
+          isActive: true,
+        },
+      ],
+    });
   }
 
   const { data, error } = await supabase

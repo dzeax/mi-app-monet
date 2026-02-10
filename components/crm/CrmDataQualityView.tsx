@@ -10,6 +10,7 @@ import {
   useRef,
   useState,
 } from "react";
+import { createPortal } from "react-dom";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { DayPicker } from "react-day-picker";
@@ -30,6 +31,7 @@ import { DEFAULT_WORKSTREAM, WORKSTREAM_DEFAULTS } from "@/lib/crm/workstreams";
 import { useAuth } from "@/context/AuthContext";
 import MiniModal from "@/components/ui/MiniModal";
 import ColumnPicker from "@/components/ui/ColumnPicker";
+import DatePicker from "@/components/ui/DatePicker";
 import { showError, showSuccess } from "@/utils/toast";
 
 type Filters = {
@@ -756,11 +758,12 @@ type SortKey =
   | "";
 type SortDir = "asc" | "desc";
 type GroupBy = "none" | "owner" | "type";
+type FloatingStyle = Record<string, string | number>;
 export default function CrmDataQualityView() {
   const pathname = usePathname();
   const segments = pathname?.split("/").filter(Boolean) ?? [];
   const clientSlug = segments[1] || "emg";
-  const { isEditor, isAdmin, loading: authLoading } = useAuth();
+  const { user, isEditor, isAdmin, loading: authLoading } = useAuth();
   const currentYear = new Date().getFullYear();
 
   const [filters, setFilters] = useState<Filters>({
@@ -810,8 +813,36 @@ export default function CrmDataQualityView() {
   const [showNeedsEffortNudge, setShowNeedsEffortNudge] = useState(false);
   const [needsEffortBusyId, setNeedsEffortBusyId] = useState<string | null>(null);
   const [dismissDialogTicket, setDismissDialogTicket] = useState<DataQualityTicket | null>(null);
+  const [deleteDialogTicket, setDeleteDialogTicket] = useState<DataQualityTicket | null>(null);
+  const [deleteBusy, setDeleteBusy] = useState(false);
+  const [actionsMenuStyle, setActionsMenuStyle] = useState<FloatingStyle | null>(null);
+  const [contributorsPopoverStyle, setContributorsPopoverStyle] = useState<FloatingStyle | null>(null);
+  const [jiraTooltipStyle, setJiraTooltipStyle] = useState<FloatingStyle | null>(null);
+  const [contributorsPopover, setContributorsPopover] = useState<{
+    ticketId: string;
+    ownersCount: number;
+    rows: {
+      ownerLabel: string;
+      workHours: number;
+      prepHours: number;
+      workstream: string;
+      key: string;
+    }[];
+  } | null>(null);
+  const [removeContributionDialog, setRemoveContributionDialog] = useState<{
+    id: string;
+    owner: string;
+    effortDate: string;
+  } | null>(null);
+  const [jiraTooltipTicketId, setJiraTooltipTicketId] = useState<string | null>(null);
   const rowsRef = useRef<DataQualityTicket[]>([]);
   const lastSeenSyncSuccessRef = useRef<string | null>(null);
+  const actionsMenuRef = useRef<HTMLDivElement | null>(null);
+  const actionsButtonRefs = useRef<Record<string, HTMLButtonElement | null>>({});
+  const contributorsPopoverRef = useRef<HTMLDivElement | null>(null);
+  const contributorsChipRefs = useRef<Record<string, HTMLButtonElement | null>>({});
+  const jiraTooltipRef = useRef<HTMLDivElement | null>(null);
+  const jiraLinkRefs = useRef<Record<string, HTMLAnchorElement | null>>({});
   const [compact, setCompact] = useState(() =>
     readBool(COMPACT_VIEW_STORAGE_KEY, true),
   );
@@ -890,6 +921,70 @@ export default function CrmDataQualityView() {
   const labelForPersonKey = useCallback(
     (key: string) => peopleById.get(key) ?? key,
     [peopleById],
+  );
+  const editorOwnerOption = useMemo(() => {
+    if (!isEditor || isAdmin) return null;
+    const rawDisplayName = user?.displayName?.trim() || "";
+    const personIdFromDisplay = rawDisplayName
+      ? aliasToPersonId.get(normalizePersonKey(rawDisplayName)) ?? null
+      : null;
+    if (personIdFromDisplay) {
+      const byPersonId = ownerItems.find((item) => item.personId === personIdFromDisplay);
+      if (byPersonId) return byPersonId;
+      return {
+        id: personIdFromDisplay,
+        label: peopleById.get(personIdFromDisplay) ?? rawDisplayName,
+        personId: personIdFromDisplay,
+      };
+    }
+    if (!rawDisplayName) return null;
+    const byLabel = ownerItems.find(
+      (item) => normalizePersonKey(item.label) === normalizePersonKey(rawDisplayName),
+    );
+    if (byLabel) return byLabel;
+    return {
+      id: `self-owner-${normalizePersonKey(rawDisplayName) || "current"}`,
+      label: rawDisplayName,
+      personId: null,
+    };
+  }, [aliasToPersonId, isAdmin, isEditor, ownerItems, peopleById, user?.displayName]);
+  const defaultContributionOwner = useMemo(
+    () =>
+      isEditor && !isAdmin
+        ? {
+            owner: editorOwnerOption?.label || user?.displayName?.trim() || "",
+            personId: editorOwnerOption?.personId ?? null,
+          }
+        : null,
+    [editorOwnerOption, isAdmin, isEditor, user?.displayName],
+  );
+  const isContributionOwnedByEditor = useCallback(
+    (contrib: { owner: string; personId: string | null }) => {
+      if (!isEditor || isAdmin) return true;
+      const editorOwner = (defaultContributionOwner?.owner || "").trim();
+      const editorPersonId = defaultContributionOwner?.personId ?? null;
+      const contribOwner = (contrib.owner || "").trim();
+      const contribPersonId =
+        contrib.personId ??
+        (contribOwner
+          ? aliasToPersonId.get(normalizePersonKey(contribOwner)) ?? null
+          : null);
+
+      if (editorPersonId && contribPersonId) return editorPersonId === contribPersonId;
+      if (editorPersonId && !contribPersonId && contribOwner) {
+        const mapped = aliasToPersonId.get(normalizePersonKey(contribOwner));
+        if (mapped) return mapped === editorPersonId;
+      }
+      if (!editorOwner) return false;
+      return normalizePersonKey(contribOwner) === normalizePersonKey(editorOwner);
+    },
+    [
+      aliasToPersonId,
+      defaultContributionOwner?.owner,
+      defaultContributionOwner?.personId,
+      isAdmin,
+      isEditor,
+    ],
   );
   const getRateForContribution = useCallback(
     (
@@ -1116,25 +1211,6 @@ export default function CrmDataQualityView() {
       } catch {
         /* ignore */
       }
-    }
-  };
-
-  const contribDateInputRefs = useRef<Record<string, HTMLInputElement | null>>({});
-
-  const openContribDatePicker = (id: string) => {
-    const el = contribDateInputRefs.current[id];
-    if (!el) return;
-    el.focus();
-    // @ts-expect-error showPicker is not yet in lib.dom.d.ts everywhere
-    if (typeof el.showPicker === "function") {
-      try {
-        // @ts-expect-error showPicker is not yet in lib.dom.d.ts everywhere
-        el.showPicker();
-      } catch {
-        el.click();
-      }
-    } else {
-      el.click();
     }
   };
 
@@ -1507,6 +1583,32 @@ export default function CrmDataQualityView() {
       }
     },
     [clientSlug, fetchTickets, isAdmin],
+  );
+
+  const deleteTicket = useCallback(
+    async (ticket: DataQualityTicket) => {
+      if (!isAdmin) return;
+      setDeleteBusy(true);
+      try {
+        const res = await fetch(
+          `/api/crm/data-quality?client=${clientSlug}&ticketId=${encodeURIComponent(ticket.ticketId)}`,
+          { method: "DELETE" },
+        );
+        const body = await res.json().catch(() => null);
+        if (!res.ok) {
+          throw new Error(body?.error || `Delete failed (${res.status})`);
+        }
+        setRows((prev) => prev.filter((row) => row.ticketId !== ticket.ticketId));
+        setDeleteDialogTicket(null);
+        showSuccess(`Ticket ${ticket.ticketId} deleted`);
+      } catch (err) {
+        const message = err instanceof Error ? err.message : "Unable to delete ticket";
+        showError(message);
+      } finally {
+        setDeleteBusy(false);
+      }
+    },
+    [clientSlug, isAdmin],
   );
 
   useEffect(() => {
@@ -1935,6 +2037,14 @@ export default function CrmDataQualityView() {
     setForm((prev) => ({ ...prev, [key]: value }));
   };
 
+  const confirmRemoveContribution = useCallback(() => {
+    if (!removeContributionDialog) return;
+    setFormContribs((prev) =>
+      prev.filter((item) => item.id !== removeContributionDialog.id),
+    );
+    setRemoveContributionDialog(null);
+  }, [removeContributionDialog]);
+
   const handleAddWorkstream = async () => {
     const label = newWorkstream.trim();
     if (!label || workstreamSubmitting) return;
@@ -1969,6 +2079,7 @@ export default function CrmDataQualityView() {
   const openAddModal = () => {
     setModalStep("details");
     setEditRow(null);
+    setRemoveContributionDialog(null);
     setShowWorkstreamInput(false);
     setNewWorkstream("");
     setForm({
@@ -1992,8 +2103,8 @@ export default function CrmDataQualityView() {
       {
         id: `c-${Date.now()}`,
         effortDate: todaysIsoDate(),
-        owner: "",
-        personId: null,
+        owner: defaultContributionOwner?.owner || "",
+        personId: defaultContributionOwner?.personId ?? null,
         workHours: "",
         prepHours: "",
         prepIsManual: false,
@@ -2009,6 +2120,7 @@ export default function CrmDataQualityView() {
   ) => {
     setModalStep(startStep);
     setEditRow(row);
+    setRemoveContributionDialog(null);
     setShowWorkstreamInput(false);
     setNewWorkstream("");
     setForm({
@@ -2096,6 +2208,7 @@ export default function CrmDataQualityView() {
     () => formContribs.some((c) => c.owner.trim()),
     [formContribs],
   );
+  const jiraFieldsReadOnly = Boolean(editRow);
 
   const goToDetailsStep = () => setModalStep("details");
 
@@ -2114,6 +2227,9 @@ export default function CrmDataQualityView() {
         .map((c) => {
           const rawEffort = (c.effortDate || "").trim();
           const effortDate = rawEffort && isIsoDate(rawEffort) ? rawEffort : fallbackEffortDate;
+          const fallbackOwner = defaultContributionOwner?.owner || "";
+          const fallbackPersonId = defaultContributionOwner?.personId ?? null;
+          const owner = c.owner.trim() || fallbackOwner;
           const w = Number(c.workHours || "0");
           const pRaw = c.prepHours;
           const p =
@@ -2121,8 +2237,8 @@ export default function CrmDataQualityView() {
               ? w * 0.35
               : Number(pRaw);
           return {
-            owner: c.owner.trim(),
-            personId: c.personId || null,
+            owner,
+            personId: c.personId || fallbackPersonId,
             effortDate,
             workHours: Number.isFinite(w) && w >= 0 ? w : 0,
             prepHours: Number.isFinite(p) && p >= 0 ? p : w * 0.35,
@@ -2191,6 +2307,7 @@ export default function CrmDataQualityView() {
       }
       setModalStep("details");
       setOpenAdd(false);
+      setRemoveContributionDialog(null);
       setForm({
         status: STATUS_OPTIONS[0],
         assignedDate: new Date().toISOString().slice(0, 10),
@@ -2212,8 +2329,8 @@ export default function CrmDataQualityView() {
         {
           id: `c-${Date.now()}`,
           effortDate: todaysIsoDate(),
-          owner: "",
-          personId: null,
+          owner: defaultContributionOwner?.owner || "",
+          personId: defaultContributionOwner?.personId ?? null,
           workHours: "",
           prepHours: "",
           workstream: DEFAULT_WORKSTREAM,
@@ -2259,6 +2376,218 @@ export default function CrmDataQualityView() {
       return `${amount.toFixed(2)} ${currency}`;
     }
   };
+  const openMenuTicket = useMemo(
+    () => pagedRows.find((row) => row.ticketId === openMenuId) || null,
+    [pagedRows, openMenuId],
+  );
+  const openMenuNeedsEffort = useMemo(
+    () => (openMenuTicket ? isNeedsEffortTicket(openMenuTicket) : false),
+    [openMenuTicket, isNeedsEffortTicket],
+  );
+  const openMenuNeedsEffortBusy = Boolean(
+    openMenuTicket && needsEffortBusyId === openMenuTicket.id,
+  );
+  const canManageOpenMenuNeedsEffort = Boolean(isAdmin && openMenuNeedsEffort);
+
+  const positionActionsMenu = useCallback((ticketId: string) => {
+    const trigger = actionsButtonRefs.current[ticketId];
+    if (!trigger) return;
+    const rect = trigger.getBoundingClientRect();
+    const EDGE_GAP = 8;
+    const FLOAT_GAP = 8;
+    const MENU_WIDTH = 176;
+    const measuredHeight =
+      actionsMenuRef.current?.getBoundingClientRect().height || 220;
+    const openTop =
+      rect.bottom + FLOAT_GAP + measuredHeight > window.innerHeight - EDGE_GAP &&
+      rect.top - FLOAT_GAP - measuredHeight >= EDGE_GAP;
+    let top = openTop
+      ? rect.top - measuredHeight - FLOAT_GAP
+      : rect.bottom + FLOAT_GAP;
+    top = Math.min(
+      Math.max(EDGE_GAP, top),
+      Math.max(EDGE_GAP, window.innerHeight - measuredHeight - EDGE_GAP),
+    );
+    let left = rect.right - MENU_WIDTH;
+    left = Math.min(
+      Math.max(EDGE_GAP, left),
+      Math.max(EDGE_GAP, window.innerWidth - MENU_WIDTH - EDGE_GAP),
+    );
+    setActionsMenuStyle({
+      position: "fixed",
+      top,
+      left,
+      width: MENU_WIDTH,
+      zIndex: 1200,
+    });
+  }, []);
+
+  const positionContributorsPopover = useCallback((ticketId: string) => {
+    const trigger = contributorsChipRefs.current[ticketId];
+    if (!trigger) return;
+    const rect = trigger.getBoundingClientRect();
+    const EDGE_GAP = 8;
+    const FLOAT_GAP = 8;
+    const POPOVER_WIDTH = 260;
+    const measuredHeight =
+      contributorsPopoverRef.current?.getBoundingClientRect().height || 220;
+    const openTop =
+      rect.bottom + FLOAT_GAP + measuredHeight > window.innerHeight - EDGE_GAP &&
+      rect.top - FLOAT_GAP - measuredHeight >= EDGE_GAP;
+    let top = openTop
+      ? rect.top - measuredHeight - FLOAT_GAP
+      : rect.bottom + FLOAT_GAP;
+    top = Math.min(
+      Math.max(EDGE_GAP, top),
+      Math.max(EDGE_GAP, window.innerHeight - measuredHeight - EDGE_GAP),
+    );
+    let left = rect.left + rect.width / 2 - POPOVER_WIDTH / 2;
+    left = Math.min(
+      Math.max(EDGE_GAP, left),
+      Math.max(EDGE_GAP, window.innerWidth - POPOVER_WIDTH - EDGE_GAP),
+    );
+    setContributorsPopoverStyle({
+      position: "fixed",
+      top,
+      left,
+      width: POPOVER_WIDTH,
+      zIndex: 1200,
+    });
+  }, []);
+
+  const positionJiraTooltip = useCallback((ticketId: string) => {
+    const trigger = jiraLinkRefs.current[ticketId];
+    if (!trigger) return;
+    const rect = trigger.getBoundingClientRect();
+    const EDGE_GAP = 8;
+    const FLOAT_GAP = 8;
+    const measured = jiraTooltipRef.current?.getBoundingClientRect();
+    const tooltipWidth = measured?.width || 96;
+    const tooltipHeight = measured?.height || 32;
+    const openTop =
+      rect.bottom + FLOAT_GAP + tooltipHeight > window.innerHeight - EDGE_GAP &&
+      rect.top - FLOAT_GAP - tooltipHeight >= EDGE_GAP;
+    let top = openTop
+      ? rect.top - tooltipHeight - FLOAT_GAP
+      : rect.bottom + FLOAT_GAP;
+    top = Math.min(
+      Math.max(EDGE_GAP, top),
+      Math.max(EDGE_GAP, window.innerHeight - tooltipHeight - EDGE_GAP),
+    );
+    let left = rect.right - tooltipWidth;
+    left = Math.min(
+      Math.max(EDGE_GAP, left),
+      Math.max(EDGE_GAP, window.innerWidth - tooltipWidth - EDGE_GAP),
+    );
+    setJiraTooltipStyle({
+      position: "fixed",
+      top,
+      left,
+      zIndex: 1200,
+    });
+  }, []);
+
+  useEffect(() => {
+    if (!openMenuId) {
+      setActionsMenuStyle(null);
+      return;
+    }
+    if (!openMenuTicket) {
+      setOpenMenuId(null);
+      setActionsMenuStyle(null);
+      return;
+    }
+    const updatePosition = () => {
+      positionActionsMenu(openMenuId);
+      requestAnimationFrame(() => positionActionsMenu(openMenuId));
+    };
+    updatePosition();
+    window.addEventListener("resize", updatePosition);
+    window.addEventListener("scroll", updatePosition, true);
+    return () => {
+      window.removeEventListener("resize", updatePosition);
+      window.removeEventListener("scroll", updatePosition, true);
+    };
+  }, [openMenuId, openMenuTicket, positionActionsMenu]);
+
+  useEffect(() => {
+    if (!contributorsPopover) {
+      setContributorsPopoverStyle(null);
+      return;
+    }
+    const updatePosition = () => {
+      positionContributorsPopover(contributorsPopover.ticketId);
+      requestAnimationFrame(() =>
+        positionContributorsPopover(contributorsPopover.ticketId),
+      );
+    };
+    updatePosition();
+    window.addEventListener("resize", updatePosition);
+    window.addEventListener("scroll", updatePosition, true);
+    return () => {
+      window.removeEventListener("resize", updatePosition);
+      window.removeEventListener("scroll", updatePosition, true);
+    };
+  }, [contributorsPopover, positionContributorsPopover]);
+
+  useEffect(() => {
+    if (!jiraTooltipTicketId) {
+      setJiraTooltipStyle(null);
+      return;
+    }
+    const updatePosition = () => {
+      positionJiraTooltip(jiraTooltipTicketId);
+      requestAnimationFrame(() => positionJiraTooltip(jiraTooltipTicketId));
+    };
+    updatePosition();
+    window.addEventListener("resize", updatePosition);
+    window.addEventListener("scroll", updatePosition, true);
+    return () => {
+      window.removeEventListener("resize", updatePosition);
+      window.removeEventListener("scroll", updatePosition, true);
+    };
+  }, [jiraTooltipTicketId, positionJiraTooltip]);
+
+  useEffect(() => {
+    const handler = (event: MouseEvent) => {
+      const target = event.target as Node;
+      if (openMenuId) {
+        const trigger = actionsButtonRefs.current[openMenuId];
+        if (
+          !actionsMenuRef.current?.contains(target) &&
+          !trigger?.contains(target)
+        ) {
+          setOpenMenuId(null);
+        }
+      }
+      if (contributorsPopover) {
+        const trigger = contributorsChipRefs.current[contributorsPopover.ticketId];
+        if (
+          !contributorsPopoverRef.current?.contains(target) &&
+          !trigger?.contains(target)
+        ) {
+          setContributorsPopover(null);
+        }
+      }
+    };
+    document.addEventListener("mousedown", handler);
+    return () => document.removeEventListener("mousedown", handler);
+  }, [openMenuId, contributorsPopover]);
+
+  useEffect(() => {
+    if (!contributorsPopover) return;
+    const exists = pagedRows.some(
+      (row) => row.ticketId === contributorsPopover.ticketId,
+    );
+    if (!exists) setContributorsPopover(null);
+  }, [contributorsPopover, pagedRows]);
+
+  useEffect(() => {
+    if (!jiraTooltipTicketId) return;
+    const exists = pagedRows.some((row) => row.ticketId === jiraTooltipTicketId);
+    if (!exists) setJiraTooltipTicketId(null);
+  }, [jiraTooltipTicketId, pagedRows]);
+
   return (
     <div className="space-y-6">
       <header className="flex flex-col gap-3 rounded-3xl border border-[color:var(--color-border)] bg-[color:var(--color-surface)] px-5 py-6 shadow-sm">
@@ -3029,34 +3358,46 @@ export default function CrmDataQualityView() {
                                 ) : (
                                   <div className="inline-flex items-center gap-2">
                                     <span>{owners[0]}</span>
-                                    <div className="relative group">
-                                      <span
+                                    <div className="relative">
+                                      <button
+                                        type="button"
+                                        ref={(node) => {
+                                          contributorsChipRefs.current[t.ticketId] = node;
+                                        }}
+                                        onClick={() => {
+                                          if (
+                                            contributorsPopover?.ticketId === t.ticketId
+                                          ) {
+                                            setContributorsPopover(null);
+                                            return;
+                                          }
+                                          setContributorsPopover({
+                                            ticketId: t.ticketId,
+                                            ownersCount: owners.length,
+                                            rows: contribsWithLabels.map((c, idx) => ({
+                                              key: `${c.ownerLabel}-${idx}`,
+                                              ownerLabel: c.ownerLabel,
+                                              workHours: c.workHours ?? 0,
+                                              prepHours:
+                                                c.prepHours != null
+                                                  ? c.prepHours
+                                                  : Number(
+                                                      ((c.workHours ?? 0) * 0.35).toFixed(2),
+                                                    ),
+                                              workstream: normalizeWorkstream(c.workstream),
+                                            })),
+                                          });
+                                        }}
                                         className="dq-chip inline-flex items-center rounded-full bg-[color:var(--color-surface-2)] px-2 py-0.5 text-xs font-semibold text-[color:var(--color-text)]/80 ring-1 ring-[color:var(--color-border)]"
                                         tabIndex={0}
+                                        aria-haspopup="dialog"
+                                        aria-expanded={
+                                          contributorsPopover?.ticketId === t.ticketId
+                                        }
+                                        aria-label={`Show contributors for ${t.ticketId}`}
                                       >
                                         +{owners.length - 1}
-                                      </span>
-                                      <div className="pointer-events-none absolute left-0 top-7 z-50 hidden min-w-[220px] rounded-lg border border-[color:var(--color-border)] bg-[color:var(--color-surface)] px-3 py-2 text-xs text-[color:var(--color-text)] shadow-md group-hover:block group-focus-within:block">
-                                        <p className="mb-1 font-semibold text-[color:var(--color-text)]">
-                                          Contributors ({owners.length})
-                                        </p>
-                                        <ul className="space-y-1">
-                                          {contribsWithLabels.map((c, idx) => (
-                                            <li key={`${c.ownerLabel}-${idx}`} className="flex flex-col">
-                                              <span className="font-semibold">
-                                                {c.ownerLabel}
-                                              </span>
-                                              <span className="text-[color:var(--color-text)]/70">
-                                                Work {c.workHours ?? 0}h · Prep{" "}
-                                                {c.prepHours != null
-                                                  ? c.prepHours
-                                                  : ((c.workHours ?? 0) * 0.35).toFixed(2)}h ·{" "}
-                                                {normalizeWorkstream(c.workstream)}
-                                              </span>
-                                            </li>
-                                          ))}
-                                        </ul>
-                                      </div>
+                                      </button>
                                     </div>
                                   </div>
                                 )
@@ -3228,20 +3569,31 @@ export default function CrmDataQualityView() {
                               {t.jiraUrl ? (
                                 <Link
                                   href={t.jiraUrl}
-                                  className="jira-link group relative inline-flex h-8 w-8 items-center justify-center rounded-md hover:bg-[color:var(--color-surface-2)]/60"
+                                  ref={(node) => {
+                                    jiraLinkRefs.current[t.ticketId] = node;
+                                  }}
+                                  className="jira-link inline-flex h-8 w-8 items-center justify-center rounded-md hover:bg-[color:var(--color-surface-2)]/60"
                                   target="_blank"
-                                  title="Open in JIRA"
                                   aria-label="Open in JIRA"
+                                  onMouseEnter={() => setJiraTooltipTicketId(t.ticketId)}
+                                  onMouseLeave={() =>
+                                    setJiraTooltipTicketId((prev) =>
+                                      prev === t.ticketId ? null : prev,
+                                    )
+                                  }
+                                  onFocus={() => setJiraTooltipTicketId(t.ticketId)}
+                                  onBlur={() =>
+                                    setJiraTooltipTicketId((prev) =>
+                                      prev === t.ticketId ? null : prev,
+                                    )
+                                  }
                                 >
                                   {/* eslint-disable-next-line @next/next/no-img-element */}
                                   <img
                                     src="/icons/ui/jira.png"
                                     alt="Open in JIRA"
-                                    className="dq-icon jira-icon h-5 w-auto object-contain opacity-70 transition-opacity group-hover:opacity-100"
+                                    className="dq-icon jira-icon h-5 w-auto object-contain opacity-70 transition-opacity hover:opacity-100"
                                   />
-                                  <span className="tooltip-panel pointer-events-none absolute right-0 top-[calc(100%+6px)] hidden whitespace-nowrap text-xs group-hover:block">
-                                    Open in JIRA
-                                  </span>
                                 </Link>
                               ) : (
                                 renderPlaceholder()
@@ -3252,7 +3604,9 @@ export default function CrmDataQualityView() {
                             showCol("actions") ? (
                               <td className="relative px-3 py-3 text-right dq-action-cell cell-actions">
                                 <button
-                                  id={`actions-btn-${t.ticketId}`}
+                                  ref={(node) => {
+                                    actionsButtonRefs.current[t.ticketId] = node;
+                                  }}
                                   className="row-action-btn rounded-md p-1.5 text-[color:var(--color-text)]/70 hover:bg-[color:var(--color-surface-2)]"
                                   onClick={() =>
                                     setOpenMenuId((prev) =>
@@ -3260,85 +3614,13 @@ export default function CrmDataQualityView() {
                                     )
                                   }
                                   aria-label={`Actions for ${t.ticketId}`}
+                                  aria-haspopup="menu"
+                                  aria-expanded={openMenuId === t.ticketId}
                                 >
                                   <span className="text-lg leading-none">
                                     ⋯
                                   </span>
                                 </button>
-                                {openMenuId === t.ticketId ? (
-                                  <div
-                                    id={`actions-menu-${t.ticketId}`}
-                                    className="absolute right-2 top-10 z-50 w-44 rounded-lg border border-[color:var(--color-border)] bg-[color:var(--color-surface)] shadow-lg"
-                                  >
-                                    <button
-                                      className="block w-full px-3 py-2 text-left text-sm hover:bg-[color:var(--color-surface-2)]"
-                                      onClick={() => {
-                                        setOpenMenuId(null);
-                                        openEditModal(t, "effort");
-                                      }}
-                                    >
-                                      Log effort
-                                    </button>
-                                    <button
-                                      className="block w-full px-3 py-2 text-left text-sm hover:bg-[color:var(--color-surface-2)]"
-                                      onClick={() => {
-                                        setOpenMenuId(null);
-                                        openEditModal(t);
-                                      }}
-                                    >
-                                      Edit
-                                    </button>
-                                    {canManageNeedsEffort ? (
-                                      <>
-                                        <div
-                                          className="my-1 h-px bg-[color:var(--color-border)]/70"
-                                          aria-hidden="true"
-                                        />
-                                        <button
-                                          className="block w-full px-3 py-2 text-left text-sm font-semibold text-amber-900 hover:bg-amber-50 disabled:opacity-60"
-                                          onClick={() => {
-                                            setOpenMenuId(null);
-                                            void updateNeedsEffortFlag(t, "clear");
-                                          }}
-                                          disabled={needsEffortBusy}
-                                        >
-                                          Clear
-                                        </button>
-                                        <button
-                                          className="block w-full px-3 py-2 text-left text-sm text-amber-900 hover:bg-amber-50 disabled:opacity-60"
-                                          onClick={() => {
-                                            setOpenMenuId(null);
-                                            setDismissDialogTicket(t);
-                                          }}
-                                          disabled={needsEffortBusy}
-                                        >
-                                          Dismiss…
-                                        </button>
-                                      </>
-                                    ) : null}
-                                    <button
-                                      className="block w-full px-3 py-2 text-left text-sm text-[color:var(--color-accent)] hover:bg-[color:var(--color-surface-2)]"
-                                      onClick={async () => {
-                                        setOpenMenuId(null);
-                                        const ok = window.confirm(
-                                          `Delete ticket ${t.ticketId}?`,
-                                        );
-                                        if (!ok) return;
-                                        await fetch(
-                                          `/api/crm/data-quality?client=${clientSlug}&ticketId=${encodeURIComponent(t.ticketId)}`,
-                                          { method: "DELETE" },
-                                        );
-                                        setRows((prev) =>
-                                          prev.filter(
-                                            (row) => row.ticketId !== t.ticketId,
-                                          ),
-                                        );
-                                      }}
-                                    >
-                                      Delete
-                                    </button>
-                                  </div>
-                                ) : null}
                               </td>
                             ) : null
                           ) : null}
@@ -3388,6 +3670,156 @@ export default function CrmDataQualityView() {
           </div>
         </div>
       </div>
+      {openMenuId && openMenuTicket && actionsMenuStyle
+        ? createPortal(
+            <div
+              ref={actionsMenuRef}
+              id={`actions-menu-${openMenuId}`}
+              style={actionsMenuStyle}
+              className="rounded-lg border border-[color:var(--color-border)] bg-[color:var(--color-surface)] shadow-lg ring-1 ring-black/5"
+              role="menu"
+            >
+              <button
+                className="block w-full px-3 py-2 text-left text-sm hover:bg-[color:var(--color-surface-2)]"
+                onClick={() => {
+                  setOpenMenuId(null);
+                  openEditModal(openMenuTicket, "effort");
+                }}
+              >
+                Log effort
+              </button>
+              <button
+                className="block w-full px-3 py-2 text-left text-sm hover:bg-[color:var(--color-surface-2)]"
+                onClick={() => {
+                  setOpenMenuId(null);
+                  openEditModal(openMenuTicket);
+                }}
+              >
+                Edit
+              </button>
+              {canManageOpenMenuNeedsEffort ? (
+                <>
+                  <div
+                    className="my-1 h-px bg-[color:var(--color-border)]/70"
+                    aria-hidden="true"
+                  />
+                  <button
+                    className="block w-full px-3 py-2 text-left text-sm font-semibold text-amber-900 hover:bg-amber-50 disabled:opacity-60"
+                    onClick={() => {
+                      setOpenMenuId(null);
+                      void updateNeedsEffortFlag(openMenuTicket, "clear");
+                    }}
+                    disabled={openMenuNeedsEffortBusy}
+                  >
+                    Clear
+                  </button>
+                  <button
+                    className="block w-full px-3 py-2 text-left text-sm text-amber-900 hover:bg-amber-50 disabled:opacity-60"
+                    onClick={() => {
+                      setOpenMenuId(null);
+                      setDismissDialogTicket(openMenuTicket);
+                    }}
+                    disabled={openMenuNeedsEffortBusy}
+                  >
+                    Dismiss…
+                  </button>
+                </>
+              ) : null}
+              {isAdmin ? (
+                <button
+                  className="block w-full px-3 py-2 text-left text-sm text-[color:var(--color-accent)] hover:bg-[color:var(--color-surface-2)]"
+                  onClick={() => {
+                    setOpenMenuId(null);
+                    setDeleteDialogTicket(openMenuTicket);
+                  }}
+                >
+                  Delete
+                </button>
+              ) : null}
+            </div>,
+            document.body,
+          )
+        : null}
+      {contributorsPopover && contributorsPopoverStyle
+        ? createPortal(
+            <div
+              ref={contributorsPopoverRef}
+              style={contributorsPopoverStyle}
+              className="rounded-lg border border-[color:var(--color-border)] bg-[color:var(--color-surface)] px-3 py-2 text-xs text-[color:var(--color-text)] shadow-md ring-1 ring-black/5"
+              role="dialog"
+              aria-label="Contributors details"
+            >
+              <p className="mb-1 font-semibold text-[color:var(--color-text)]">
+                Contributors ({contributorsPopover.ownersCount})
+              </p>
+              <ul className="space-y-1">
+                {contributorsPopover.rows.map((row) => (
+                  <li key={row.key} className="flex flex-col">
+                    <span className="font-semibold">{row.ownerLabel}</span>
+                    <span className="text-[color:var(--color-text)]/70">
+                      Work {row.workHours}h · Prep {row.prepHours}h ·{" "}
+                      {row.workstream}
+                    </span>
+                  </li>
+                ))}
+              </ul>
+            </div>,
+            document.body,
+          )
+        : null}
+      {jiraTooltipTicketId && jiraTooltipStyle
+        ? createPortal(
+            <div
+              ref={jiraTooltipRef}
+              style={jiraTooltipStyle}
+              className="pointer-events-none whitespace-nowrap rounded-md border border-[color:var(--color-border)] bg-[color:var(--color-surface)] px-2 py-1 text-xs text-[color:var(--color-text)] shadow-md ring-1 ring-black/5"
+              role="tooltip"
+            >
+              Open in JIRA
+            </div>,
+            document.body,
+          )
+        : null}
+      {deleteDialogTicket && isAdmin ? (
+        <MiniModal
+          onClose={() => {
+            if (deleteBusy) return;
+            setDeleteDialogTicket(null);
+          }}
+          title={`Delete ticket ${deleteDialogTicket.ticketId}`}
+          widthClass="max-w-md"
+          footer={
+            <div className="flex items-center justify-end gap-2">
+              <button
+                className="btn-ghost"
+                type="button"
+                onClick={() => setDeleteDialogTicket(null)}
+                disabled={deleteBusy}
+              >
+                Cancel
+              </button>
+              <button
+                className="btn-danger"
+                type="button"
+                onClick={() => {
+                  void deleteTicket(deleteDialogTicket);
+                }}
+                disabled={deleteBusy}
+              >
+                {deleteBusy ? "Deleting..." : "Delete ticket"}
+              </button>
+            </div>
+          }
+        >
+          <div className="space-y-2 text-sm text-[color:var(--color-text)]/80">
+            <p>
+              You are about to permanently delete ticket{" "}
+              <strong>{deleteDialogTicket.ticketId}</strong>.
+            </p>
+            <p>This action cannot be undone. Do you want to continue?</p>
+          </div>
+        </MiniModal>
+      ) : null}
       {dismissDialogTicket && isAdmin ? (
         <MiniModal
           onClose={() => {
@@ -3432,6 +3864,7 @@ export default function CrmDataQualityView() {
           onClose={() => {
             if (submitting) return;
             setModalStep("details");
+            setRemoveContributionDialog(null);
             setOpenAdd(false);
           }}
           title={editRow ? "Edit ticket" : "Add ticket"}
@@ -3446,6 +3879,7 @@ export default function CrmDataQualityView() {
                   onClick={() => {
                     if (submitting) return;
                     setModalStep("details");
+                    setRemoveContributionDialog(null);
                     setOpenAdd(false);
                   }}
                   disabled={submitting}
@@ -3472,6 +3906,7 @@ export default function CrmDataQualityView() {
                   onClick={() => {
                     if (submitting) return;
                     setModalStep("details");
+                    setRemoveContributionDialog(null);
                     setOpenAdd(false);
                   }}
                   disabled={submitting}
@@ -3606,17 +4041,27 @@ export default function CrmDataQualityView() {
                 <span className="text-[color:var(--color-text)]/70">
                   Status
                 </span>
-                <select
-                  className="input h-10"
-                  value={form.status}
-                  onChange={(e) => handleChangeForm("status", e.target.value)}
-                >
-                  {STATUS_OPTIONS.map((s) => (
-                    <option key={s} value={s}>
-                      {s}
-                    </option>
-                  ))}
-                </select>
+                {jiraFieldsReadOnly ? (
+                  <input
+                    className="input h-10"
+                    value={form.status}
+                    readOnly
+                    aria-readonly="true"
+                    title="Synced from JIRA (read-only)"
+                  />
+                ) : (
+                  <select
+                    className="input h-10"
+                    value={form.status}
+                    onChange={(e) => handleChangeForm("status", e.target.value)}
+                  >
+                    {STATUS_OPTIONS.map((s) => (
+                      <option key={s} value={s}>
+                        {s}
+                      </option>
+                    ))}
+                  </select>
+                )}
               </label>
               <label className="flex flex-col gap-1 text-sm">
                 <span className="text-[color:var(--color-text)]/70">
@@ -3631,6 +4076,7 @@ export default function CrmDataQualityView() {
                   }
                   onFocus={openDatePicker}
                   onMouseDown={openDatePicker}
+                  disabled={jiraFieldsReadOnly}
                 />
               </label>
               <label className="flex flex-col gap-1 text-sm">
@@ -3647,6 +4093,7 @@ export default function CrmDataQualityView() {
                   readOnly
                   aria-readonly="true"
                   title="Synced from JIRA (read-only)"
+                  disabled
                 />
               </label>
               <label className="flex flex-col gap-1 text-sm">
@@ -3658,6 +4105,7 @@ export default function CrmDataQualityView() {
                   value={form.ticketId}
                   readOnly
                   placeholder="Auto from JIRA URL"
+                  disabled={jiraFieldsReadOnly}
                 />
               </label>
               <label className="flex flex-col gap-1 text-sm sm:col-span-2">
@@ -3666,21 +4114,32 @@ export default function CrmDataQualityView() {
                   className="input h-10"
                   value={form.title}
                   onChange={(e) => handleChangeForm("title", e.target.value)}
+                  disabled={jiraFieldsReadOnly}
                 />
               </label>
               <label className="flex flex-col gap-1 text-sm">
                 <span className="text-[color:var(--color-text)]/70">
                   Priority
                 </span>
-                <select
-                  className="input h-10"
-                  value={form.priority}
-                  onChange={(e) => handleChangeForm("priority", e.target.value)}
-                >
-                  <option value="P1">P1</option>
-                  <option value="P2">P2</option>
-                  <option value="P3">P3</option>
-                </select>
+                {jiraFieldsReadOnly ? (
+                  <input
+                    className="input h-10"
+                    value={form.priority}
+                    readOnly
+                    aria-readonly="true"
+                    title="Synced from JIRA (read-only)"
+                  />
+                ) : (
+                  <select
+                    className="input h-10"
+                    value={form.priority}
+                    onChange={(e) => handleChangeForm("priority", e.target.value)}
+                  >
+                    <option value="P1">P1</option>
+                    <option value="P2">P2</option>
+                    <option value="P3">P3</option>
+                  </select>
+                )}
               </label>
               <label className="flex flex-col gap-1 text-sm">
                 <span className="text-[color:var(--color-text)]/70">
@@ -3692,6 +4151,7 @@ export default function CrmDataQualityView() {
                   readOnly
                   placeholder="From JIRA sync"
                   title={form.jiraAssignee || "Synced from JIRA"}
+                  disabled
                 />
                 </label>
                 </>
@@ -3762,8 +4222,8 @@ export default function CrmDataQualityView() {
                           {
                             id: `c-${Date.now()}`,
                             effortDate: defaultEffortDateForAssignedDate(form.assignedDate),
-                            owner: "",
-                            personId: null,
+                            owner: defaultContributionOwner?.owner || "",
+                            personId: defaultContributionOwner?.personId ?? null,
                             workHours: "",
                             prepHours: "",
                             prepIsManual: false,
@@ -3798,86 +4258,90 @@ export default function CrmDataQualityView() {
 
                 <div className="space-y-2">
                   {formContribs.map((c) => (
+                    (() => {
+                      const isReadOnlyRow =
+                        isEditor && !isAdmin && !isContributionOwnedByEditor(c);
+                      const readOnlyFieldClass = isReadOnlyRow
+                        ? "bg-[color:var(--color-surface-2)]/70 text-[color:var(--color-text)]/60 border-[color:var(--color-border)]/90 cursor-not-allowed"
+                        : "";
+                      return (
                     <div
                       key={c.id}
                       className="grid grid-cols-1 gap-2 rounded-lg border border-[color:var(--color-border)] bg-[color:var(--color-surface)] px-3 py-2 sm:grid-cols-6 sm:items-end sm:gap-3"
                     >
                       <div>
                         <label className="text-xs font-medium text-[color:var(--color-text)]/70">Date</label>
-                        <div className="relative w-full">
-                          <input
-                            ref={(el) => {
-                              contribDateInputRefs.current[c.id] = el;
-                            }}
-                            type="date"
-                            className="input input-date h-10 w-full pr-10"
-                            value={c.effortDate}
-                            onChange={(e) => {
-                              const val = e.target.value;
-                              setFormContribs((prev) =>
-                                prev.map((item) => (item.id === c.id ? { ...item, effortDate: val } : item)),
-                              );
-                            }}
-                            onClick={() => openContribDatePicker(c.id)}
-                          />
-                          <button
-                            type="button"
-                            className="absolute right-2 top-1/2 inline-flex h-7 w-7 -translate-y-1/2 items-center justify-center rounded-md text-[color:var(--color-text)]/70 hover:bg-[color:var(--color-surface-2)]/60 hover:text-[color:var(--color-text)] focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[color:var(--color-primary)]"
-                            aria-label="Open calendar"
-                            onClick={() => openContribDatePicker(c.id)}
-                          >
-                            <svg
-                              aria-hidden="true"
-                              viewBox="0 0 24 24"
-                              fill="none"
-                              stroke="currentColor"
-                              strokeWidth="2"
-                              strokeLinecap="round"
-                              strokeLinejoin="round"
-                              className="h-4 w-4"
-                            >
-                              <path d="M8 2v4" />
-                              <path d="M16 2v4" />
-                              <path d="M3 10h18" />
-                              <path d="M5 6h14a2 2 0 0 1 2 2v12a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2z" />
-                            </svg>
-                          </button>
-                        </div>
+                        <DatePicker
+                          value={c.effortDate}
+                          onChange={(value) => {
+                            setFormContribs((prev) =>
+                              prev.map((item) =>
+                                item.id === c.id ? { ...item, effortDate: value } : item,
+                              ),
+                            );
+                          }}
+                          placeholder="dd/mm/aaaa"
+                          ariaLabel="Effort date"
+                          buttonClassName={`h-10 ${readOnlyFieldClass}`}
+                          placement="top"
+                          disabled={isReadOnlyRow}
+                        />
                       </div>
 
                       <div className="sm:col-span-2">
                         <label className="text-xs font-medium text-[color:var(--color-text)]/70">Owner</label>
-                        <select
-                          className="input h-10 w-full"
-                          value={c.personId ?? c.owner}
-                          onChange={(e) => {
-                            const val = e.target.value;
-                            const match =
-                              ownerItems.find((o) => o.personId === val) ||
-                              ownerItems.find((o) => o.label === val);
-                            const personId = match?.personId ?? null;
-                            const owner = match?.label ?? val;
-                            setFormContribs((prev) =>
-                              prev.map((item) =>
-                                item.id === c.id ? { ...item, owner, personId } : item,
-                              ),
-                            );
-                          }}
-                        >
-                          <option value="">Select owner</option>
-                          {ownerItems.map((o) => (
-                            <option key={o.personId ?? o.id} value={o.personId ?? o.label}>
-                              {o.label}
-                            </option>
-                          ))}
-                        </select>
+                        {isAdmin ? (
+                          <select
+                            className={`input h-10 w-full ${readOnlyFieldClass}`}
+                            value={c.personId ?? c.owner}
+                            disabled={isReadOnlyRow}
+                            onChange={(e) => {
+                              const val = e.target.value;
+                              const match =
+                                ownerItems.find((o) => o.personId === val) ||
+                                ownerItems.find((o) => o.label === val);
+                              const personId = match?.personId ?? null;
+                              const owner = match?.label ?? val;
+                              setFormContribs((prev) =>
+                                prev.map((item) =>
+                                  item.id === c.id ? { ...item, owner, personId } : item,
+                                ),
+                              );
+                            }}
+                          >
+                            <option value="">Select owner</option>
+                            {ownerItems.map((o) => (
+                              <option key={o.personId ?? o.id} value={o.personId ?? o.label}>
+                                {o.label}
+                              </option>
+                            ))}
+                          </select>
+                        ) : (
+                          <input
+                            className={`input h-10 w-full ${readOnlyFieldClass}`}
+                            value={
+                              isReadOnlyRow
+                                ? c.owner || "Unassigned"
+                                : defaultContributionOwner?.owner || c.owner || ""
+                            }
+                            readOnly
+                            disabled={isReadOnlyRow}
+                            aria-readonly="true"
+                            title={
+                              isReadOnlyRow
+                                ? "Read-only entry from another contributor"
+                                : "Owner is restricted to the current user for editors"
+                            }
+                          />
+                        )}
                       </div>
 
                       <div>
                         <label className="text-xs font-medium text-[color:var(--color-text)]/70">Workstream</label>
                         <select
-                          className="input h-10 w-full"
+                          className={`input h-10 w-full ${readOnlyFieldClass}`}
                           value={c.workstream}
+                          disabled={isReadOnlyRow}
                           onChange={(e) => {
                             const val = e.target.value;
                             setFormContribs((prev) =>
@@ -3898,11 +4362,12 @@ export default function CrmDataQualityView() {
                       <div>
                         <label className="text-xs font-medium text-[color:var(--color-text)]/70">Work (hrs)</label>
                         <input
-                          className="input h-10 w-full"
+                          className={`input h-10 w-full ${readOnlyFieldClass}`}
                           type="number"
                           step="0.01"
                           min="0"
                           value={c.workHours}
+                          disabled={isReadOnlyRow}
                           onChange={(e) => {
                             const val = e.target.value;
                             setFormContribs((prev) =>
@@ -3922,12 +4387,13 @@ export default function CrmDataQualityView() {
                       <div>
                         <label className="text-xs font-medium text-[color:var(--color-text)]/70">Prep (hrs)</label>
                         <input
-                          className="input h-10 w-full"
+                          className={`input h-10 w-full ${readOnlyFieldClass}`}
                           type="number"
                           step="0.01"
                           min="0"
                           value={c.prepHours}
                           placeholder="Auto 35% if blank or 0"
+                          disabled={isReadOnlyRow}
                           onChange={(e) => {
                             const val = e.target.value;
                             setFormContribs((prev) =>
@@ -3942,12 +4408,16 @@ export default function CrmDataQualityView() {
                       </div>
 
                       <div className="flex justify-end sm:col-span-6">
-                        {formContribs.length > 1 ? (
+                        {!isReadOnlyRow && formContribs.length > 1 ? (
                           <button
                             type="button"
                             className="text-xs text-[color:var(--color-accent)]"
                             onClick={() =>
-                              setFormContribs((prev) => prev.filter((item) => item.id !== c.id))
+                              setRemoveContributionDialog({
+                                id: c.id,
+                                owner: c.owner || "Unassigned",
+                                effortDate: c.effortDate || "",
+                              })
                             }
                           >
                             Remove
@@ -3955,6 +4425,8 @@ export default function CrmDataQualityView() {
                         ) : null}
                       </div>
                     </div>
+                      );
+                    })()
                   ))}
                 </div>
                 </div>
@@ -3972,24 +4444,35 @@ export default function CrmDataQualityView() {
                         handleChangeForm("reporter", e.target.value)
                       }
                       placeholder="Reporter name (optional)"
+                      disabled={jiraFieldsReadOnly}
                     />
                   </label>
                   <label className="flex flex-col gap-1 text-sm">
                     <span className="text-[color:var(--color-text)]/70">
                       Type (parent)
                     </span>
-                    <select
-                      className="input h-10"
-                      value={form.type}
-                      onChange={(e) => handleChangeForm("type", e.target.value)}
-                    >
-                      <option value="">Select type</option>
-                      {typeOptions.map((t) => (
-                        <option key={t.id} value={t.label}>
-                          {t.label}
-                        </option>
-                      ))}
-                    </select>
+                    {jiraFieldsReadOnly ? (
+                      <input
+                        className="input h-10"
+                        value={form.type}
+                        readOnly
+                        aria-readonly="true"
+                        title="Synced from JIRA (read-only)"
+                      />
+                    ) : (
+                      <select
+                        className="input h-10"
+                        value={form.type}
+                        onChange={(e) => handleChangeForm("type", e.target.value)}
+                      >
+                        <option value="">Select type</option>
+                        {typeOptions.map((t) => (
+                          <option key={t.id} value={t.label}>
+                            {t.label}
+                          </option>
+                        ))}
+                      </select>
+                    )}
                   </label>
                   <label className="flex flex-col gap-1 text-sm sm:col-span-2">
                     <span className="text-[color:var(--color-text)]/70">
@@ -3999,27 +4482,27 @@ export default function CrmDataQualityView() {
                       className="input h-10"
                       value={form.jiraUrl}
                       onChange={(e) => {
+                        if (jiraFieldsReadOnly) return;
                         const url = e.target.value;
                         handleChangeForm("jiraUrl", url);
                         const match = url.match(/browse\/([A-Z0-9-]+)$/i);
                         handleChangeForm("ticketId", match?.[1] ?? "");
                       }}
                       placeholder="https://europcarmobility.atlassian.net/browse/CRM-1234"
+                      disabled={jiraFieldsReadOnly}
                     />
                   </label>
                   <label className="flex flex-col gap-1 text-sm">
                     <span className="text-[color:var(--color-text)]/70">
                       ETA
                     </span>
-                    <input
-                      type="date"
-                      className="input input-date h-10"
+                    <DatePicker
                       value={form.etaDate}
-                      onChange={(e) =>
-                        handleChangeForm("etaDate", e.target.value)
-                      }
-                      onFocus={openDatePicker}
-                      onMouseDown={openDatePicker}
+                      onChange={(value) => handleChangeForm("etaDate", value)}
+                      placeholder="dd/mm/aaaa"
+                      ariaLabel="ETA"
+                      buttonClassName="h-10"
+                      placement="top"
                     />
                   </label>
                 </>
@@ -4039,6 +4522,47 @@ export default function CrmDataQualityView() {
                 </label>
               ) : null}
             </div>
+          </div>
+        </MiniModal>
+      ) : null}
+      {removeContributionDialog ? (
+        <MiniModal
+          onClose={() => setRemoveContributionDialog(null)}
+          title="Confirm removal"
+          widthClass="max-w-md"
+          footer={
+            <div className="flex items-center justify-end gap-2">
+              <button
+                className="btn-ghost"
+                type="button"
+                onClick={() => setRemoveContributionDialog(null)}
+              >
+                Cancel
+              </button>
+              <button
+                className="btn-danger"
+                type="button"
+                onClick={confirmRemoveContribution}
+              >
+                Remove entry
+              </button>
+            </div>
+          }
+        >
+          <div className="space-y-2 text-sm text-[color:var(--color-text)]/80">
+            <p>Remove this effort entry?</p>
+            <p>
+              Owner: <strong>{removeContributionDialog.owner}</strong>
+            </p>
+            <p>
+              Date:{" "}
+              <strong>
+                {formatDate(removeContributionDialog.effortDate) ||
+                  removeContributionDialog.effortDate ||
+                  "n/a"}
+              </strong>
+            </p>
+            <p>This action cannot be undone after saving the ticket.</p>
           </div>
         </MiniModal>
       ) : null}

@@ -172,7 +172,7 @@ export default function CommandCenterSidebar({
       key: 'team',
       title: 'Team',
       description: 'Capacity & workload',
-      items: [BtnCapacity, BtnWorklogs],
+      items: [isAdmin ? BtnCapacity : null, BtnWorklogs],
     },
     {
       key: 'admin',

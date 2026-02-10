@@ -1,4 +1,6 @@
 import { notFound, redirect } from 'next/navigation';
+import { cookies } from 'next/headers';
+import { createServerComponentClient } from '@supabase/auth-helpers-nextjs';
 import CrmDataQualityView from '@/components/crm/CrmDataQualityView';
 import CrmCampaignReportingView from '@/components/crm/CrmCampaignReportingView';
 import CrmBudgetView from '@/components/crm/CrmBudgetView';
@@ -25,6 +27,22 @@ export default async function CrmModulePage({ params }: Props) {
 
   if (!client || !moduleConfig) {
     notFound();
+  }
+  if (moduleConfig.type === 'budget' || moduleConfig.type === 'budget_execution') {
+    const cookieStore = await cookies();
+    const supabase = createServerComponentClient({ cookies: () => cookieStore });
+    const { data: authData, error: authError } = await supabase.auth.getUser();
+    if (authError || !authData?.user) {
+      redirect('/login');
+    }
+    const { data: appUser } = await supabase
+      .from('app_users')
+      .select('role,is_active')
+      .eq('user_id', authData.user.id)
+      .maybeSingle();
+    if (!appUser || appUser.is_active === false || appUser.role !== 'admin') {
+      redirect(`/crm/${clientSlug}/ticket-reporting`);
+    }
   }
 
   if (moduleConfig.type === 'data_quality') {
