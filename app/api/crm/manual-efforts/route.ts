@@ -9,6 +9,13 @@ const normalizeKey = (value?: string | null) => value?.trim().toLowerCase() ?? "
 const isUuid = (value: string) =>
   /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(value);
 
+type AuthProfile = {
+  userId: string;
+  role: "admin" | "editor";
+  displayName: string | null;
+  email: string | null;
+};
+
 const EntryZ = z.object({
   effortDate: z.string().min(1),
   personId: z.string().uuid(),
@@ -60,6 +67,68 @@ const loadPeopleMap = async (
   return map;
 };
 
+const requireAuthProfile = async (
+  supabase: ReturnType<typeof createRouteHandlerClient>,
+): Promise<{ profile: AuthProfile } | { error: NextResponse }> => {
+  const { data: userData, error: userError } = await supabase.auth.getUser();
+  if (userError || !userData?.user?.id) {
+    return { error: NextResponse.json({ error: "Not authenticated" }, { status: 401 }) };
+  }
+
+  const { data: appUser, error: appUserError } = await supabase
+    .from("app_users")
+    .select("role,is_active,display_name,email")
+    .eq("user_id", userData.user.id)
+    .maybeSingle();
+
+  if (appUserError) {
+    return { error: NextResponse.json({ error: appUserError.message }, { status: 500 }) };
+  }
+  if (!appUser || appUser.is_active === false) {
+    return { error: NextResponse.json({ error: "Forbidden" }, { status: 403 }) };
+  }
+
+  const role = String(appUser.role ?? "").toLowerCase() === "admin" ? "admin" : "editor";
+  return {
+    profile: {
+      userId: userData.user.id,
+      role,
+      displayName: appUser.display_name ? String(appUser.display_name) : null,
+      email: appUser.email ? String(appUser.email) : userData.user.email ?? null,
+    },
+  };
+};
+
+const resolveEditorPersonIds = async (
+  supabase: ReturnType<typeof createRouteHandlerClient>,
+  clientSlug: string,
+  profile: AuthProfile,
+): Promise<string[]> => {
+  const matchers = new Set(
+    [profile.displayName, profile.email].map((value) => normalizeKey(value)).filter(Boolean),
+  );
+  if (matchers.size === 0) return [];
+
+  const { data: peopleRows, error } = await supabase
+    .from("crm_people")
+    .select("id,display_name,email")
+    .eq("client_slug", clientSlug);
+
+  if (error) throw new Error(error.message);
+
+  const allowed = new Set<string>();
+  (peopleRows ?? []).forEach((row: { id?: string | null; display_name?: string | null; email?: string | null }) => {
+    const id = row?.id ? String(row.id) : "";
+    if (!id) return;
+    const displayName = normalizeKey(row.display_name);
+    const email = normalizeKey(row.email);
+    if (matchers.has(displayName) || matchers.has(email)) {
+      allowed.add(id);
+    }
+  });
+  return Array.from(allowed);
+};
+
 export async function GET(request: Request) {
   const cookieStore = await cookies();
   const supabase = createRouteHandlerClient({ cookies: () => cookieStore });
@@ -72,6 +141,18 @@ export async function GET(request: Request) {
   const workstream = searchParams.get("workstream");
 
   try {
+    const auth = await requireAuthProfile(supabase);
+    if ("error" in auth) return auth.error;
+    const profile = auth.profile;
+    const isAdmin = profile.role === "admin";
+    const allowedPersonIds = isAdmin
+      ? []
+      : await resolveEditorPersonIds(supabase, client, profile);
+
+    if (!isAdmin && personId && !allowedPersonIds.includes(personId)) {
+      return NextResponse.json({ rows: [] });
+    }
+
     const query = supabase
       .from("crm_manual_efforts")
       .select("*")
@@ -81,6 +162,10 @@ export async function GET(request: Request) {
     if (personId) query.eq("person_id", personId);
     if (owner) query.ilike("owner", owner);
     if (workstream) query.eq("workstream", workstream);
+    if (!isAdmin) {
+      if (allowedPersonIds.length > 0) query.in("person_id", allowedPersonIds);
+      else query.eq("created_by", profile.userId);
+    }
 
     const { data, error } = await query
       .order("effort_date", { ascending: false })
@@ -117,18 +202,35 @@ export async function POST(request: Request) {
   const supabase = createRouteHandlerClient({ cookies: () => cookieStore });
 
   try {
+    const auth = await requireAuthProfile(supabase);
+    if ("error" in auth) return auth.error;
+    const profile = auth.profile;
+    const isAdmin = profile.role === "admin";
+    if (!(isAdmin || profile.role === "editor")) {
+      return NextResponse.json({ error: "Forbidden" }, { status: 403 });
+    }
+
     const body = await request.json();
     const parsed = CreatePayloadZ.parse(body);
     const clientSlug = parsed.client || DEFAULT_CLIENT;
 
-    const { data: sessionData, error: sessionError } =
-      await supabase.auth.getSession();
-    if (sessionError) {
-      return NextResponse.json({ error: sessionError.message }, { status: 500 });
-    }
-    const userId = sessionData.session?.user?.id;
-    if (!userId) {
-      return NextResponse.json({ error: "Not authenticated" }, { status: 401 });
+    if (!isAdmin) {
+      const allowedPersonIds = await resolveEditorPersonIds(supabase, clientSlug, profile);
+      if (allowedPersonIds.length === 0) {
+        return NextResponse.json(
+          { error: "Unable to resolve your owner profile for this client." },
+          { status: 403 },
+        );
+      }
+      const hasInvalidOwner = parsed.entries.some(
+        (entry) => !allowedPersonIds.includes(entry.personId),
+      );
+      if (hasInvalidOwner) {
+        return NextResponse.json(
+          { error: "Editors can only create entries for their own owner." },
+          { status: 403 },
+        );
+      }
     }
 
     const personIds = Array.from(
@@ -152,7 +254,7 @@ export async function POST(request: Request) {
         input_value: entry.value,
         hours,
         comments: entry.comments ? entry.comments.trim() : null,
-        created_by: userId,
+        created_by: profile.userId,
       };
     });
 
@@ -436,19 +538,20 @@ export async function PATCH(request: Request) {
   const supabase = createRouteHandlerClient({ cookies: () => cookieStore });
 
   try {
+    const auth = await requireAuthProfile(supabase);
+    if ("error" in auth) return auth.error;
+    const profile = auth.profile;
+    const isAdmin = profile.role === "admin";
+    if (!(isAdmin || profile.role === "editor")) {
+      return NextResponse.json({ error: "Forbidden" }, { status: 403 });
+    }
+
     const body = await request.json();
     const parsed = UpdatePayloadZ.parse(body);
     const clientSlug = parsed.client || DEFAULT_CLIENT;
-
-    const { data: sessionData, error: sessionError } =
-      await supabase.auth.getSession();
-    if (sessionError) {
-      return NextResponse.json({ error: sessionError.message }, { status: 500 });
-    }
-    const userId = sessionData.session?.user?.id;
-    if (!userId) {
-      return NextResponse.json({ error: "Not authenticated" }, { status: 401 });
-    }
+    const allowedPersonIds = isAdmin
+      ? []
+      : await resolveEditorPersonIds(supabase, clientSlug, profile);
 
     const updates: Record<string, unknown> = {};
     if (parsed.effortDate) updates.effort_date = parsed.effortDate;
@@ -475,6 +578,12 @@ export async function PATCH(request: Request) {
     }
 
     if (parsed.personId) {
+      if (!isAdmin && !allowedPersonIds.includes(parsed.personId)) {
+        return NextResponse.json(
+          { error: "Editors can only assign their own owner." },
+          { status: 403 },
+        );
+      }
       const peopleMap = await loadPeopleMap(supabase, clientSlug, [parsed.personId]);
       const displayName = peopleMap.get(parsed.personId);
       if (!displayName) {
@@ -490,32 +599,52 @@ export async function PATCH(request: Request) {
 
     const { data, error } = await supabase
       .from("crm_manual_efforts")
+      .select("*")
+      .eq("id", parsed.id)
+      .eq("client_slug", clientSlug)
+      .maybeSingle();
+    if (error) {
+      return NextResponse.json({ error: error.message }, { status: 500 });
+    }
+    if (!data) {
+      return NextResponse.json({ error: "Entry not found" }, { status: 404 });
+    }
+    if (
+      !isAdmin &&
+      !allowedPersonIds.includes(String(data.person_id ?? "")) &&
+      String(data.created_by ?? "") !== profile.userId
+    ) {
+      return NextResponse.json({ error: "Forbidden" }, { status: 403 });
+    }
+
+    const { data: updated, error: updateError } = await supabase
+      .from("crm_manual_efforts")
       .update({ ...updates, updated_at: new Date().toISOString() })
       .eq("id", parsed.id)
       .eq("client_slug", clientSlug)
       .select("*")
       .single();
-    if (error || !data) {
+    if (updateError || !updated) {
       return NextResponse.json(
-        { error: error?.message || "Update failed" },
+        { error: updateError?.message || "Update failed" },
         { status: 500 },
       );
     }
 
     return NextResponse.json({
       row: {
-        id: data.id as string,
-        clientSlug: data.client_slug as string,
-        effortDate: data.effort_date as string,
-        personId: data.person_id as string,
-        owner: data.owner as string,
-        workstream: data.workstream as string,
-        inputUnit: data.input_unit as "hours" | "days",
-        inputValue: Number(data.input_value ?? 0),
-        hours: Number(data.hours ?? 0),
-        comments: (data.comments as string | null) ?? null,
-        createdAt: data.created_at as string,
-        updatedAt: data.updated_at as string,
+        id: updated.id as string,
+        clientSlug: updated.client_slug as string,
+        effortDate: updated.effort_date as string,
+        personId: updated.person_id as string,
+        owner: updated.owner as string,
+        workstream: updated.workstream as string,
+        inputUnit: updated.input_unit as "hours" | "days",
+        inputValue: Number(updated.input_value ?? 0),
+        hours: Number(updated.hours ?? 0),
+        comments: (updated.comments as string | null) ?? null,
+        createdAt: updated.created_at as string,
+        updatedAt: updated.updated_at as string,
       },
     });
   } catch (err) {
@@ -537,14 +666,10 @@ export async function DELETE(request: Request) {
   }
 
   try {
-    const { data: sessionData, error: sessionError } =
-      await supabase.auth.getSession();
-    if (sessionError) {
-      return NextResponse.json({ error: sessionError.message }, { status: 500 });
-    }
-    const userId = sessionData.session?.user?.id;
-    if (!userId) {
-      return NextResponse.json({ error: "Not authenticated" }, { status: 401 });
+    const auth = await requireAuthProfile(supabase);
+    if ("error" in auth) return auth.error;
+    if (auth.profile.role !== "admin") {
+      return NextResponse.json({ error: "Forbidden" }, { status: 403 });
     }
 
     const { error } = await supabase

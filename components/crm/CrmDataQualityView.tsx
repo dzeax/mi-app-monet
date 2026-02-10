@@ -4267,12 +4267,14 @@ export default function CrmDataQualityView() {
                       const isReadOnlyRow =
                         isEditor && !isAdmin && !isContributionOwnedByEditor(c);
                       const readOnlyFieldClass = isReadOnlyRow
-                        ? "bg-[color:var(--color-surface-2)]/70 text-[color:var(--color-text)]/60 border-[color:var(--color-border)]/90 cursor-not-allowed"
+                        ? "bg-[color:var(--color-surface-2)]/70 text-[color:var(--color-text)]/55 border-[color:var(--color-border)]/90 cursor-not-allowed disabled:opacity-100"
                         : "";
                       return (
                     <div
                       key={c.id}
-                      className="grid grid-cols-1 gap-2 rounded-lg border border-[color:var(--color-border)] bg-[color:var(--color-surface)] px-3 py-2 sm:grid-cols-6 sm:items-end sm:gap-3"
+                      className={`grid grid-cols-1 gap-2 rounded-lg border border-[color:var(--color-border)] bg-[color:var(--color-surface)] px-3 py-2 sm:grid-cols-6 sm:items-end sm:gap-3 ${
+                        isReadOnlyRow ? "opacity-50" : ""
+                      }`}
                     >
                       <div>
                         <label className="text-xs font-medium text-[color:var(--color-text)]/70">Date</label>
@@ -4343,25 +4345,35 @@ export default function CrmDataQualityView() {
 
                       <div>
                         <label className="text-xs font-medium text-[color:var(--color-text)]/70">Workstream</label>
-                        <select
-                          className={`input h-10 w-full ${readOnlyFieldClass}`}
-                          value={c.workstream}
-                          disabled={isReadOnlyRow}
-                          onChange={(e) => {
-                            const val = e.target.value;
-                            setFormContribs((prev) =>
-                              prev.map((item) =>
-                                item.id === c.id ? { ...item, workstream: val } : item,
-                              ),
-                            );
-                          }}
-                        >
-                          {options.workstream.map((stream) => (
-                            <option key={stream} value={stream}>
-                              {stream}
-                            </option>
-                          ))}
-                        </select>
+                        {isReadOnlyRow ? (
+                          <input
+                            className={`input h-10 w-full ${readOnlyFieldClass}`}
+                            value={c.workstream || "n/a"}
+                            readOnly
+                            disabled
+                            aria-readonly="true"
+                            title="Read-only entry from another contributor"
+                          />
+                        ) : (
+                          <select
+                            className="input h-10 w-full"
+                            value={c.workstream}
+                            onChange={(e) => {
+                              const val = e.target.value;
+                              setFormContribs((prev) =>
+                                prev.map((item) =>
+                                  item.id === c.id ? { ...item, workstream: val } : item,
+                                ),
+                              );
+                            }}
+                          >
+                            {options.workstream.map((stream) => (
+                              <option key={stream} value={stream}>
+                                {stream}
+                              </option>
+                            ))}
+                          </select>
+                        )}
                       </div>
 
                       <div>
@@ -4555,7 +4567,7 @@ export default function CrmDataQualityView() {
           }
         >
           <div className="space-y-2 text-sm text-[color:var(--color-text)]/80">
-            <p>Remove this effort entry?</p>
+            <p>Are you sure you want to remove this effort entry?</p>
             <p>
               Owner: <strong>{removeContributionDialog.owner}</strong>
             </p>
