@@ -1102,9 +1102,9 @@ export default function CrmManualEffortsView() {
         <div className="relative z-10 space-y-6">
           <div className="flex flex-wrap items-center justify-between gap-4">
             <div>
-              <h1 className="text-2xl font-bold tracking-tight text-[var(--color-text)]">Manual Efforts</h1>
+              <h1 className="text-2xl font-bold tracking-tight text-[var(--color-text)]">Manual Efforts · EMG</h1>
               <p className="mt-1 text-sm text-[var(--color-muted)]">
-                Register non-ticket effort entries for reporting.
+                Log EMG-only effort not tied to tickets, for reporting and budget tracking.
               </p>
             </div>
 
