@@ -1,10 +1,27 @@
 "use client";
 
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
+import { createPortal } from "react-dom";
 import { usePathname } from "next/navigation";
 import { DayPicker } from "react-day-picker";
 import type { DateRange } from "react-day-picker";
 import { endOfMonth, format, parseISO, startOfMonth, startOfYear } from "date-fns";
+import {
+  Calendar,
+  Clock,
+  Edit2,
+  Euro,
+  FileDown,
+  Filter,
+  List,
+  Plus,
+  RefreshCw,
+  Search,
+  Trash2,
+  Upload,
+  User,
+  X,
+} from "lucide-react";
 import CrmManualEffortsImportModal from "@/components/crm/CrmManualEffortsImportModal";
 import DatePicker from "@/components/ui/DatePicker";
 import MiniModal from "@/components/ui/MiniModal";
@@ -54,7 +71,7 @@ type DraftEntry = {
   comments: string;
 };
 
-type Option = { label: string; value: string };
+type Option = { label: string; value: string; count?: number };
 
 function MultiSelect({
   label,
@@ -62,14 +79,27 @@ function MultiSelect({
   values,
   onChange,
   placeholder = "All",
+  hideLabel = false,
+  containerClassName,
+  triggerClassName,
+  panelClassName,
 }: {
   label: string;
   options: Option[];
   values: string[];
   onChange: (vals: string[]) => void;
   placeholder?: string;
+  hideLabel?: boolean;
+  containerClassName?: string;
+  triggerClassName?: string;
+  panelClassName?: string;
 }) {
   const [open, setOpen] = useState(false);
+  const wrapRef = useRef<HTMLDivElement | null>(null);
+  const triggerRef = useRef<HTMLButtonElement | null>(null);
+  const panelRef = useRef<HTMLDivElement | null>(null);
+  const rafRef = useRef<number | null>(null);
+  const [panelStyle, setPanelStyle] = useState<React.CSSProperties>({});
 
   const toggle = useCallback(
     (val: string) => {
@@ -85,14 +115,73 @@ function MultiSelect({
       : values.length === 1
         ? options.find((o) => o.value === values[0])?.label || values[0]
         : `${values.length} selected`;
+  const hasOptions = options.length > 0;
+
+  const updatePanelPosition = useCallback(() => {
+    if (!open) return;
+    const trigger = triggerRef.current;
+    if (!trigger) return;
+
+    const EDGE_GAP = 8;
+    const FLOAT_GAP = 6;
+    const rect = trigger.getBoundingClientRect();
+    const width = rect.width;
+    const panelHeight = panelRef.current?.getBoundingClientRect().height ?? 280;
+
+    let left = rect.left;
+    const maxLeft = Math.max(EDGE_GAP, window.innerWidth - width - EDGE_GAP);
+    left = Math.min(Math.max(EDGE_GAP, left), maxLeft);
+
+    const spaceBelow = window.innerHeight - rect.bottom;
+    const shouldOpenUp = spaceBelow < panelHeight + FLOAT_GAP + EDGE_GAP && rect.top > spaceBelow;
+    let top = shouldOpenUp ? rect.top - panelHeight - FLOAT_GAP : rect.bottom + FLOAT_GAP;
+    const maxTop = Math.max(EDGE_GAP, window.innerHeight - panelHeight - EDGE_GAP);
+    top = Math.min(Math.max(EDGE_GAP, top), maxTop);
+
+    setPanelStyle((prev) => {
+      const next: React.CSSProperties = {
+        position: "fixed",
+        top,
+        left,
+        width,
+      };
+      if (
+        prev.position === next.position &&
+        prev.top === next.top &&
+        prev.left === next.left &&
+        prev.width === next.width
+      ) {
+        return prev;
+      }
+      return next;
+    });
+  }, [open]);
+
+  const scheduleReposition = useCallback(() => {
+    if (rafRef.current !== null) {
+      cancelAnimationFrame(rafRef.current);
+    }
+    rafRef.current = requestAnimationFrame(() => {
+      updatePanelPosition();
+      rafRef.current = requestAnimationFrame(() => {
+        updatePanelPosition();
+      });
+    });
+  }, [updatePanelPosition]);
+
+  useLayoutEffect(() => {
+    if (!open) return;
+    updatePanelPosition();
+  }, [open, updatePanelPosition, options.length, values.length]);
 
   useEffect(() => {
+    if (!open) return;
     const handler = (e: MouseEvent | TouchEvent) => {
-      const target = e.target as HTMLElement | null;
+      const target = e.target as Node | null;
       if (!target) return;
-      if (!target.closest(`[data-ms="manual-efforts-${label}"]`)) {
-        setOpen(false);
-      }
+      if (wrapRef.current?.contains(target)) return;
+      if (panelRef.current?.contains(target)) return;
+      setOpen(false);
     };
     document.addEventListener("mousedown", handler);
     document.addEventListener("touchstart", handler);
@@ -100,44 +189,79 @@ function MultiSelect({
       document.removeEventListener("mousedown", handler);
       document.removeEventListener("touchstart", handler);
     };
-  }, [label]);
+  }, [open]);
+
+  useEffect(() => {
+    if (!open) return;
+    scheduleReposition();
+    const handleReposition = () => scheduleReposition();
+    window.addEventListener("resize", handleReposition);
+    window.addEventListener("scroll", handleReposition, true);
+    return () => {
+      window.removeEventListener("resize", handleReposition);
+      window.removeEventListener("scroll", handleReposition, true);
+      if (rafRef.current !== null) {
+        cancelAnimationFrame(rafRef.current);
+        rafRef.current = null;
+      }
+    };
+  }, [open, scheduleReposition]);
 
   return (
-    <div className="relative" data-ms={`manual-efforts-${label}`}>
-      <label className="text-xs font-medium text-[color:var(--color-text)]/70">{label}</label>
+    <div className={`relative ${containerClassName ?? ""}`} data-ms={`manual-efforts-${label}`} ref={wrapRef}>
+      {!hideLabel ? <label className="text-xs font-medium text-[color:var(--color-text)]/70">{label}</label> : null}
       <button
+        ref={triggerRef}
         type="button"
-        className="input h-10 w-full flex items-center justify-between gap-2"
+        className={[
+          "w-full flex items-center justify-between gap-2",
+          hideLabel
+            ? "h-9 rounded-lg border border-transparent bg-[var(--color-surface-2)]/50 px-3 text-sm"
+            : "input h-10",
+          triggerClassName ?? "",
+        ].join(" ")}
         onClick={() => setOpen((v) => !v)}
       >
         <span className="truncate">{display}</span>
         <span className="text-[color:var(--color-text)]/60">{open ? "^" : "v"}</span>
       </button>
-      {open ? (
-        <div className="absolute z-30 mt-1 w-full rounded-lg border border-[color:var(--color-border)] bg-[color:var(--color-surface)] shadow-lg">
-          <button
-            className="block w-full px-3 py-2 text-left text-sm hover:bg-[color:var(--color-surface-2)]"
-            onClick={() => {
-              if (values.length === 0) onChange(options.map((o) => o.value));
-              else onChange([]);
-              setOpen(false);
-            }}
+      {open && typeof document !== "undefined"
+        ? createPortal(
+          <div
+            ref={panelRef}
+            className={`z-[140] rounded-lg border border-[color:var(--color-border)] bg-[color:var(--color-surface)] shadow-lg ${panelClassName ?? ""}`}
+            style={panelStyle}
           >
-            {values.length === 0 ? "Select all" : "Clear all"}
-          </button>
-          <div className="max-h-56 overflow-auto">
-            {options.map((opt) => (
-              <label
-                key={opt.value}
-                className="flex cursor-pointer items-center gap-2 px-3 py-2 text-sm hover:bg-[color:var(--color-surface-2)]"
-              >
-                <input type="checkbox" checked={values.includes(opt.value)} onChange={() => toggle(opt.value)} />
-                <span className="flex-1">{opt.label}</span>
-              </label>
-            ))}
-          </div>
-        </div>
-      ) : null}
+            <button
+              className="block w-full px-3 py-2 text-left text-sm hover:bg-[color:var(--color-surface-2)]"
+              disabled={!hasOptions}
+              onClick={() => {
+                if (!hasOptions) return;
+                if (values.length === 0) onChange(options.map((o) => o.value));
+                else onChange([]);
+                setOpen(false);
+              }}
+            >
+              {!hasOptions ? "No options" : values.length === 0 ? "Select all" : "Clear all"}
+            </button>
+            <div className="max-h-56 overflow-auto">
+              {options.map((opt) => (
+                <label
+                  key={opt.value}
+                  className="flex cursor-pointer items-center gap-2 px-3 py-2 text-sm hover:bg-[color:var(--color-surface-2)]"
+                >
+                  <input type="checkbox" checked={values.includes(opt.value)} onChange={() => toggle(opt.value)} />
+                  <span className="flex-1">{opt.label}</span>
+                  {opt.count != null ? (
+                    <span className="text-xs text-[var(--color-muted)]">{opt.count}</span>
+                  ) : null}
+                </label>
+              ))}
+            </div>
+          </div>,
+          document.body,
+        )
+        : null}
     </div>
   );
 }
@@ -158,6 +282,7 @@ function DateRangeField({
   onChangeFrom,
   onChangeTo,
   onClear,
+  compact = false,
 }: {
   label: string;
   from: string;
@@ -165,6 +290,7 @@ function DateRangeField({
   onChangeFrom: (value: string) => void;
   onChangeTo: (value: string) => void;
   onClear: () => void;
+  compact?: boolean;
 }) {
   const [open, setOpen] = useState(false);
   const [openUp, setOpenUp] = useState(false);
@@ -252,17 +378,24 @@ function DateRangeField({
   }, [open, updatePosition]);
 
   return (
-    <div className="relative flex flex-col gap-1" ref={wrapRef}>
-      <label className="text-xs font-medium text-[color:var(--color-text)]/70">
-        {label}
-      </label>
+    <div className={compact ? "relative" : "relative flex flex-col gap-1"} ref={wrapRef}>
+      {!compact ? (
+        <label className="text-xs font-medium text-[color:var(--color-text)]/70">
+          {label}
+        </label>
+      ) : null}
       <div className="relative">
         <button
           type="button"
-          className="input h-10 w-full text-left"
+          className={
+            compact
+              ? "flex h-9 min-w-[180px] items-center gap-2 rounded-lg border border-transparent bg-[var(--color-surface-2)]/50 px-3 text-left text-xs font-medium"
+              : "input h-10 w-full text-left"
+          }
           ref={triggerRef}
           onClick={() => setOpen((v) => !v)}
         >
+          {compact ? <Calendar className="h-3.5 w-3.5 text-[var(--color-muted)]" /> : null}
           <span
             className={
               hasRange
@@ -407,6 +540,22 @@ const parseYearFromDate = (value?: string | null) => {
 
 const buildKey = () => `draft-${Date.now()}-${Math.random().toString(16).slice(2)}`;
 
+const getBadgeColor = (text: string) => {
+  const colors = [
+    "bg-blue-50 text-blue-700 border-blue-100",
+    "bg-purple-50 text-purple-700 border-purple-100",
+    "bg-emerald-50 text-emerald-700 border-emerald-100",
+    "bg-amber-50 text-amber-700 border-amber-100",
+    "bg-rose-50 text-rose-700 border-rose-100",
+    "bg-indigo-50 text-indigo-700 border-indigo-100",
+  ];
+  let hash = 0;
+  for (let index = 0; index < text.length; index += 1) {
+    hash = text.charCodeAt(index) + ((hash << 5) - hash);
+  }
+  return colors[Math.abs(hash) % colors.length];
+};
+
 export default function CrmManualEffortsView() {
   const pathname = usePathname();
   const segments = pathname?.split("/").filter(Boolean) ?? [];
@@ -433,7 +582,9 @@ export default function CrmManualEffortsView() {
   const [editRow, setEditRow] = useState<ManualEffortRow | null>(null);
   const [draftEntries, setDraftEntries] = useState<DraftEntry[]>([]);
   const [removeDraftDialogId, setRemoveDraftDialogId] = useState<string | null>(null);
+  const [deleteDialogRow, setDeleteDialogRow] = useState<ManualEffortRow | null>(null);
   const [saving, setSaving] = useState(false);
+  const [deletingEntry, setDeletingEntry] = useState(false);
 
   const [showWorkstreamInput, setShowWorkstreamInput] = useState(false);
   const [newWorkstream, setNewWorkstream] = useState("");
@@ -584,10 +735,6 @@ export default function CrmManualEffortsView() {
     () => scopedPeople.map((p) => ({ label: p.label, value: p.value })),
     [scopedPeople],
   );
-  const workstreamOptions = useMemo(
-    () => workstreams.map((label) => ({ label, value: label })),
-    [workstreams],
-  );
 
   const defaultDraftPersonId = useMemo(() => {
     if (isAdmin) return "";
@@ -653,6 +800,35 @@ export default function CrmManualEffortsView() {
       return true;
     });
   }, [computedRows, fromDate, ownerFilters, search, toDate, workstreamFilters]);
+
+  const rowsForWorkstreamOptions = useMemo(() => {
+    const term = search.trim().toLowerCase();
+    return computedRows.filter((row) => {
+      if (term) {
+        const hay = `${row.owner} ${row.workstream} ${row.comments || ""}`.toLowerCase();
+        if (!hay.includes(term)) return false;
+      }
+      if (ownerFilters.length > 0 && !ownerFilters.includes(row.personId)) return false;
+      if (fromDate && row.effortDate < fromDate) return false;
+      if (toDate && row.effortDate > toDate) return false;
+      return true;
+    });
+  }, [computedRows, fromDate, ownerFilters, search, toDate]);
+
+  const workstreamOptions = useMemo(() => {
+    const byWorkstream = new Map<string, number>();
+    rowsForWorkstreamOptions.forEach((row) => {
+      byWorkstream.set(row.workstream, (byWorkstream.get(row.workstream) ?? 0) + 1);
+    });
+    return Array.from(byWorkstream.entries())
+      .sort((a, b) => a[0].localeCompare(b[0]))
+      .map(([label, count]) => ({ label, value: label, count }));
+  }, [rowsForWorkstreamOptions]);
+
+  useEffect(() => {
+    const allowed = new Set(workstreamOptions.map((option) => option.value));
+    setWorkstreamFilters((prev) => prev.filter((value) => allowed.has(value)));
+  }, [workstreamOptions]);
 
   const totals = useMemo(() => {
     return filteredRows.reduce(
@@ -806,7 +982,7 @@ export default function CrmManualEffortsView() {
     }
   };
 
-  const handleDelete = async (row: ManualEffortRow) => {
+  const handleDelete = (row: ManualEffortRow) => {
     if (!(isAdmin || isEditor)) return;
     if (isEditor && Array.isArray(scope?.allowedPersonIds) && scope.allowedPersonIds.length > 0) {
       if (!scope.allowedPersonIds.includes(row.personId)) {
@@ -814,9 +990,13 @@ export default function CrmManualEffortsView() {
         return;
       }
     }
-    if (!window.confirm(`Delete entry for ${row.owner} on ${formatEffortDate(row.effortDate)}?`)) {
-      return;
-    }
+    setDeleteDialogRow(row);
+  };
+
+  const confirmDeleteEntry = async () => {
+    if (deletingEntry || !deleteDialogRow) return;
+    const row = deleteDialogRow;
+    setDeletingEntry(true);
     try {
       const res = await fetch(
         `/api/crm/manual-efforts?id=${encodeURIComponent(row.id)}&client=${encodeURIComponent(clientSlug)}`,
@@ -827,10 +1007,13 @@ export default function CrmManualEffortsView() {
         throw new Error(body?.error || "Failed to delete entry");
       }
       showSuccess("Entry deleted");
+      setDeleteDialogRow(null);
       await loadRows();
     } catch (err) {
       const message = err instanceof Error ? err.message : "Unable to delete entry";
       showError(message);
+    } finally {
+      setDeletingEntry(false);
     }
   };
 
@@ -859,98 +1042,222 @@ export default function CrmManualEffortsView() {
     setFromDate(`${currentYear}-01-01`);
     setToDate(`${currentYear}-12-31`);
   };
+  const hasActiveFilters =
+    search.trim().length > 0 ||
+    ownerFilters.length > 0 ||
+    workstreamFilters.length > 0 ||
+    fromDate !== `${currentYear}-01-01` ||
+    toDate !== `${currentYear}-12-31`;
+
+  const handleExportCsv = () => {
+    if (filteredRows.length === 0) return;
+
+    const escapeCsv = (value: string) => {
+      if (/[",\n]/.test(value)) return `"${value.replace(/"/g, "\"\"")}"`;
+      return value;
+    };
+
+    const headers = [
+      "Date",
+      "Owner",
+      "Workstream",
+      "Input unit",
+      "Input value",
+      "Hours",
+      "Days",
+      "Budget EUR",
+      "Comments",
+    ];
+
+    const dataRows = filteredRows.map((row) => [
+      row.effortDate,
+      row.owner,
+      row.workstream,
+      row.inputUnit,
+      String(row.inputValue),
+      String(row.hours),
+      String(row.days),
+      String(row.budget),
+      row.comments ?? "",
+    ]);
+
+    const csv = [headers, ...dataRows]
+      .map((line) => line.map((value) => escapeCsv(String(value))).join(","))
+      .join("\n");
+    const blob = new Blob([`\uFEFF${csv}`], { type: "text/csv;charset=utf-8;" });
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement("a");
+    link.href = url;
+    link.download = `${clientSlug}-manual-efforts-${format(new Date(), "yyyyMMdd-HHmm")}.csv`;
+    document.body.appendChild(link);
+    link.click();
+    link.remove();
+    URL.revokeObjectURL(url);
+  };
 
   return (
     <div className="space-y-6" data-page="crm-manual-efforts">
       <header className="relative overflow-hidden rounded-3xl border border-[color:var(--color-border)] bg-[color:var(--color-surface)] px-6 py-6 shadow-sm">
         <div className="pointer-events-none absolute inset-0 bg-[radial-gradient(120%_120%_at_0%_0%,rgba(14,165,233,0.18),transparent_60%),radial-gradient(120%_120%_at_80%_0%,rgba(99,102,241,0.16),transparent_55%)]" />
-        <div className="relative z-10 flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
-          <div>
-            <p className="text-xs uppercase tracking-[0.3em] text-[color:var(--color-text)]/65">CRM</p>
-            <h1 className="mt-2 text-2xl font-semibold text-[color:var(--color-text)]">Manual Efforts</h1>
-            <p className="mt-2 text-sm text-[color:var(--color-text)]/70">
-              Register non-ticket effort entries for {clientSlug.toUpperCase()}.
-            </p>
-          </div>
-          <div className="flex flex-wrap items-center gap-2">
-            {isEditor || isAdmin ? (
-              <button className="btn-primary h-10 px-4" onClick={openAddModal}>
-                Add entries
-              </button>
-            ) : null}
-            {isEditor || isAdmin ? (
-              <button className="btn-ghost h-10 px-4" onClick={() => setOpenImport(true)}>
-                Import CSV
-              </button>
-            ) : null}
-            <button className="btn-ghost h-10 px-4" onClick={loadRows}>
-              Refresh
-            </button>
-          </div>
-        </div>
-
-        {error ? (
-          <div className="relative z-10 mt-4 rounded-2xl border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">
-            {error}
-          </div>
-        ) : null}
-
-        {totals.missingRates > 0 ? (
-          <div className="relative z-10 mt-3 rounded-2xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-700">
-            {totals.missingRates} entries have no rate mapping. Add rates in Manage rates.
-          </div>
-        ) : null}
-
-        <div className="mt-6 grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
-          {[
-            { label: "Entries", value: totals.entries.toLocaleString("es-ES"), helper: "Current filters" },
-            { label: "Hours", value: formatNumber(totals.hours), helper: "Logged effort" },
-            { label: "Days", value: formatNumber(totals.days), helper: "Hours / 7" },
-            { label: "Budget (EUR)", value: formatCurrency(totals.budget), helper: "Using yearly rates" },
-          ].map((item) => (
-            <div key={item.label} className="kpi-frame flex items-center gap-4">
-              <div className="flex h-11 w-11 items-center justify-center rounded-full bg-[color:var(--color-surface-2)] text-[color:var(--color-primary)]">
-                <span className="text-sm font-semibold">{item.label.slice(0, 1)}</span>
-              </div>
-              <div>
-                <div className="text-xs font-semibold uppercase tracking-[0.2em] text-[color:var(--color-text)]/55">
-                  {item.label}
-                </div>
-                <div className="mt-1 text-2xl font-semibold text-[color:var(--color-text)]">
-                  {item.value}
-                </div>
-                <div className="mt-1 text-xs text-[color:var(--color-text)]/60">{item.helper}</div>
-              </div>
+        <div className="relative z-10 space-y-6">
+          <div className="flex flex-wrap items-center justify-between gap-4">
+            <div>
+              <h1 className="text-2xl font-bold tracking-tight text-[var(--color-text)]">Manual Efforts</h1>
+              <p className="mt-1 text-sm text-[var(--color-muted)]">
+                Register non-ticket effort entries for reporting.
+              </p>
             </div>
-          ))}
+
+            <div className="flex flex-wrap items-center gap-2 rounded-xl border border-[var(--color-border)] bg-[var(--color-surface)] p-1.5 shadow-sm">
+              {isAdmin ? (
+                <button
+                  className="btn-ghost flex h-8 items-center gap-2 px-3 text-xs"
+                  onClick={() => setOpenImport(true)}
+                >
+                  <Upload size={14} />
+                  Import CSV
+                </button>
+              ) : null}
+              <button
+                className="btn-ghost flex h-8 items-center gap-2 px-3 text-xs"
+                onClick={loadRows}
+              >
+                <RefreshCw size={14} className={loading ? "animate-spin" : undefined} />
+                Refresh
+              </button>
+              {isAdmin ? (
+                <button
+                  className="btn-ghost flex h-8 items-center gap-2 px-3 text-xs"
+                  onClick={handleExportCsv}
+                  disabled={filteredRows.length === 0}
+                >
+                  <FileDown size={14} />
+                  Export CSV
+                </button>
+              ) : null}
+              {isEditor || isAdmin ? <div className="mx-1 h-5 w-px bg-[var(--color-border)]" /> : null}
+              {isEditor || isAdmin ? (
+                <button className="btn-primary flex h-8 items-center gap-2 px-4 text-xs shadow-sm" onClick={openAddModal}>
+                  <Plus size={14} />
+                  Add entries
+                </button>
+              ) : null}
+            </div>
+          </div>
+
+          {error ? (
+            <div className="rounded-2xl border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">
+              {error}
+            </div>
+          ) : null}
+
+          {totals.missingRates > 0 ? (
+            <div className="rounded-2xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-700">
+              {totals.missingRates} entries have no rate mapping. Add rates in Manage rates.
+            </div>
+          ) : null}
+
+          <div className="mt-6 grid gap-4 md:grid-cols-2 lg:grid-cols-4">
+            {[
+              {
+                label: "Total Entries",
+                primary: totals.entries.toLocaleString("es-ES"),
+                secondary: null,
+                icon: List,
+                valueClassName: "tabular-nums",
+              },
+              {
+                label: "Total Hours",
+                primary: `${formatNumber(totals.hours)} h`,
+                secondary: `(${formatNumber(totals.days, 1)} d)`,
+                icon: Clock,
+                valueClassName: "tabular-nums",
+              },
+              {
+                label: "Total Days",
+                primary: `${formatNumber(totals.days)} d`,
+                secondary: null,
+                icon: Calendar,
+                valueClassName: "tabular-nums",
+              },
+              {
+                label: "Total Budget",
+                primary: formatCurrency(totals.budget),
+                secondary: null,
+                icon: Euro,
+                valueClassName: "font-mono tabular-nums",
+              },
+            ].map((item) => {
+              const Icon = item.icon;
+              return (
+                <div key={item.label} className="kpi-frame p-5">
+                  <div className="flex items-center gap-4">
+                    <div className="flex h-12 w-12 shrink-0 items-center justify-center rounded-xl bg-[var(--color-surface-2)] text-[var(--color-primary)]">
+                      <Icon size={24} />
+                    </div>
+                    <div>
+                      <p className="text-[11px] font-bold uppercase tracking-widest text-[var(--color-muted)]">
+                        {item.label}
+                      </p>
+                      <div className="mt-0.5 flex items-baseline gap-2">
+                        <span className={`text-2xl font-bold tracking-tight text-[var(--color-text)] ${item.valueClassName}`}>
+                          {item.primary}
+                        </span>
+                        {item.secondary ? (
+                          <span className="text-xs text-[var(--color-muted)]">
+                            {item.secondary}
+                          </span>
+                        ) : null}
+                      </div>
+                    </div>
+                  </div>
+                </div>
+              );
+            })}
+          </div>
         </div>
       </header>
-
-      <section className="card px-6 py-5">
-        <div className="grid gap-4 lg:grid-cols-[1.2fr_1fr_1fr_1.4fr]">
-          <div>
-            <label className="text-xs font-medium text-[color:var(--color-text)]/70">Search</label>
+      
+      <section>
+        <div className="mt-6 flex flex-wrap items-center gap-2 rounded-2xl border border-[var(--color-border)] bg-[var(--color-surface)] p-1.5 shadow-sm">
+          <div className="relative min-w-[200px] flex-1">
+            <Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-[var(--color-muted)]" />
             <input
-              className="input h-10 w-full"
-              placeholder="Owner, workstream, comment..."
+              className="h-10 w-full rounded-xl border-none bg-transparent pl-9 pr-4 text-sm placeholder:text-[var(--color-muted)] focus:ring-0"
+              placeholder="Search comments..."
               value={search}
               onChange={(e) => setSearch(e.target.value)}
             />
           </div>
-          <MultiSelect
-            label="Owner"
-            options={ownerOptions}
-            values={ownerFilters}
-            onChange={setOwnerFilters}
-            placeholder="All owners"
-          />
-          <MultiSelect
-            label="Workstream"
-            options={workstreamOptions}
-            values={workstreamFilters}
-            onChange={setWorkstreamFilters}
-            placeholder="All workstreams"
-          />
+
+          <div className="hidden h-6 w-px bg-[var(--color-border)] md:block" />
+
+          <div className="flex items-center gap-2 rounded-lg bg-[var(--color-surface-2)]/35 px-2 py-1">
+            <Filter className="h-3.5 w-3.5 text-[var(--color-muted)]" />
+            <MultiSelect
+              label="Owner"
+              options={ownerOptions}
+              values={ownerFilters}
+              onChange={setOwnerFilters}
+              placeholder="All owners"
+              hideLabel
+              containerClassName="min-w-[160px]"
+              triggerClassName="h-8 border-transparent bg-[var(--color-surface-2)]/50 text-xs"
+            />
+            <MultiSelect
+              label="Workstream"
+              options={workstreamOptions}
+              values={workstreamFilters}
+              onChange={setWorkstreamFilters}
+              placeholder="All workstreams"
+              hideLabel
+              containerClassName="min-w-[175px]"
+              triggerClassName="h-8 border-transparent bg-[var(--color-surface-2)]/50 text-xs"
+            />
+          </div>
+
+          <div className="hidden h-6 w-px bg-[var(--color-border)] lg:block" />
+
           <DateRangeField
             label="Date range"
             from={fromDate}
@@ -961,12 +1268,19 @@ export default function CrmManualEffortsView() {
               setFromDate("");
               setToDate("");
             }}
+            compact
           />
-        </div>
-        <div className="mt-4 flex flex-wrap items-center gap-2">
-          <button className="btn-ghost h-9 px-3 text-xs" type="button" onClick={clearFilters}>
-            Clear filters
-          </button>
+
+          {hasActiveFilters ? (
+            <button
+              type="button"
+              onClick={clearFilters}
+              className="rounded-full p-2 text-[var(--color-muted)] transition-colors hover:bg-[var(--color-surface-2)] hover:text-[var(--color-text)]"
+              title="Clear filters"
+            >
+              <X size={16} />
+            </button>
+          ) : null}
         </div>
       </section>
 
@@ -977,31 +1291,37 @@ export default function CrmManualEffortsView() {
             <span className="text-xs text-[color:var(--color-text)]/60">Loading...</span>
           ) : null}
         </div>
-        <div className="mt-4 overflow-auto">
-          <table className="min-w-[980px] w-full text-sm">
+        <div className="table-wrap mt-6">
+          <table className="table min-w-[980px] w-full table-fixed text-sm font-sans">
+            <colgroup>
+              <col className="w-[110px]" />
+              <col className="w-[240px]" />
+              <col className="w-[160px]" />
+              <col className="w-[170px]" />
+              <col className="w-[130px]" />
+              <col />
+              <col className="w-[96px]" />
+            </colgroup>
             <thead>
-              <tr className="text-left text-xs uppercase tracking-[0.2em] text-[color:var(--color-text)]/60">
-                <th className="px-3 py-2">Date</th>
-                <th className="px-3 py-2">Owner</th>
-                <th className="px-3 py-2">Workstream</th>
-                <th className="px-3 py-2 text-right">Logged</th>
-                <th className="px-3 py-2 text-right">Hours</th>
-                <th className="px-3 py-2 text-right">Days</th>
-                <th className="px-3 py-2 text-right">Budget (EUR)</th>
-                <th className="px-3 py-2">Comments</th>
-                <th className="px-3 py-2 text-right">Actions</th>
+              <tr className="bg-[var(--color-surface-2)] text-xs font-semibold uppercase tracking-wider text-[var(--color-muted)]">
+                <th className="px-3 py-2 text-left">Date</th>
+                <th className="px-3 py-2 text-left">Owner</th>
+                <th className="px-3 py-2 text-left">Workstream</th>
+                <th className="px-3 py-2 text-right">Hours / Days</th>
+                <th className="px-3 py-2 text-right">Budget</th>
+                <th className="px-3 py-2 text-left">Comment</th>
+                <th className="px-3 py-2 text-right"></th>
               </tr>
             </thead>
             <tbody>
               {filteredRows.length === 0 ? (
                 <tr>
-                  <td className="px-3 py-6 text-center text-sm text-[color:var(--color-text)]/60" colSpan={9}>
-                    No entries match the current filters.
+                  <td className="py-12 text-center text-sm text-[var(--color-muted)] font-sans" colSpan={7}>
+                    No effort entries found
                   </td>
                 </tr>
               ) : (
                 filteredRows.map((row) => {
-                  const loggedLabel = `${formatNumber(row.inputValue, 2)} ${row.inputUnit === "days" ? "d" : "h"}`;
                   const budgetMissing = row.rate <= 0 && row.hours > 0;
                   const canManageRow =
                     isAdmin ||
@@ -1009,13 +1329,16 @@ export default function CrmManualEffortsView() {
                       (Array.isArray(scope?.allowedPersonIds) && scope.allowedPersonIds.length > 0
                         ? scope.allowedPersonIds.includes(row.personId)
                         : true));
+                  const initials = getInitials(row.owner);
                   return (
-                    <tr key={row.id} className="border-t border-[color:var(--color-border)]">
-                      <td className="px-3 py-3 whitespace-nowrap">{formatEffortDate(row.effortDate)}</td>
-                      <td className="px-3 py-3 whitespace-nowrap">
+                    <tr key={row.id} className="group transition-colors hover:bg-[var(--color-surface-2)]/50">
+                      <td className="whitespace-nowrap px-3 py-3 text-[var(--color-muted)] font-sans">
+                        {formatEffortDate(row.effortDate)}
+                      </td>
+                      <td className="px-3 py-3 whitespace-nowrap font-sans">
                         <div className="flex items-center gap-2">
                           <div
-                            className="h-8 w-8 shrink-0 overflow-hidden rounded-full border border-[color:var(--color-border)] bg-[color:var(--color-surface-2)]"
+                            className="h-7 w-7 shrink-0 overflow-hidden rounded-full border border-[color:var(--color-border)] bg-[color:var(--color-surface-2)]"
                             title={row.owner}
                           >
                             {row.ownerAvatarUrl ? (
@@ -1026,42 +1349,52 @@ export default function CrmManualEffortsView() {
                                 referrerPolicy="no-referrer"
                               />
                             ) : (
-                              <div className="flex h-full w-full items-center justify-center text-[11px] font-semibold text-[color:var(--color-text)]/70">
-                                {getInitials(row.owner)}
+                              <div className="flex h-full w-full items-center justify-center text-[10px] font-semibold text-[color:var(--color-text)]/70">
+                                {initials || <User size={13} />}
                               </div>
                             )}
                           </div>
-                          <span>{row.owner}</span>
+                          <span className="font-medium text-[var(--color-text)]">{row.owner}</span>
                         </div>
                       </td>
-                      <td className="px-3 py-3 whitespace-nowrap">{row.workstream}</td>
-                      <td className="px-3 py-3 text-right">{loggedLabel}</td>
-                      <td className="px-3 py-3 text-right">{formatNumber(row.hours)}</td>
-                      <td className="px-3 py-3 text-right">{formatNumber(row.days)}</td>
-                      <td className="px-3 py-3 text-right" title={budgetMissing ? "Missing rate" : undefined}>
+                      <td className="px-3 py-3 whitespace-nowrap font-sans">
+                        <span className={`inline-flex items-center rounded-md border px-2.5 py-0.5 text-xs font-medium ${getBadgeColor(row.workstream)}`}>
+                          {row.workstream}
+                        </span>
+                      </td>
+                      <td className="whitespace-nowrap px-3 py-3 text-right font-sans">
+                        <span className="font-semibold text-[var(--color-text)] font-sans">{formatNumber(row.hours)} h</span>
+                        <span className="ml-1.5 text-xs text-[var(--color-muted)] font-normal font-sans">({formatNumber(row.days, 1)} d)</span>
+                      </td>
+                      <td
+                        className="px-3 py-3 text-right text-[var(--color-text)] font-sans"
+                        title={budgetMissing ? "Missing rate" : undefined}
+                      >
                         {budgetMissing ? "--" : formatCurrency(row.budget)}
                       </td>
-                      <td className="px-3 py-3 max-w-[260px] truncate" title={row.comments || ""}>
+                      <td className="truncate px-3 py-3 text-[color:var(--color-text)]/80 font-sans" title={row.comments || ""}>
                         {row.comments || "--"}
                       </td>
-                      <td className="px-3 py-3">
+                      <td className="px-3 py-3 font-sans">
                         <div className="flex items-center justify-end gap-2">
                           {canManageRow ? (
                             <button
-                              className="btn-ghost h-8 px-2 text-xs"
+                              className="btn-ghost p-1.5 hover:text-blue-600"
                               type="button"
                               onClick={() => openEditModal(row)}
+                              title="Edit"
                             >
-                              Edit
+                              <Edit2 size={14} />
                             </button>
                           ) : null}
                           {canManageRow ? (
                             <button
-                              className="h-8 rounded-lg border border-red-200 bg-red-50/60 px-2 text-xs font-medium text-red-600 transition hover:bg-red-100"
+                              className="btn-ghost p-1.5 hover:text-red-600"
                               type="button"
                               onClick={() => void handleDelete(row)}
+                              title="Remove"
                             >
-                              Remove
+                              <Trash2 size={14} />
                             </button>
                           ) : null}
                         </div>
@@ -1305,8 +1638,42 @@ export default function CrmManualEffortsView() {
           </div>
         </MiniModal>
       ) : null}
+      {deleteDialogRow ? (
+        <MiniModal
+          onClose={() => {
+            if (deletingEntry) return;
+            setDeleteDialogRow(null);
+          }}
+          title="Confirm deletion"
+          widthClass="max-w-md"
+          footer={
+            <div className="flex items-center justify-end gap-2">
+              <button
+                type="button"
+                className="btn-ghost"
+                disabled={deletingEntry}
+                onClick={() => setDeleteDialogRow(null)}
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                className="btn-danger"
+                disabled={deletingEntry}
+                onClick={() => void confirmDeleteEntry()}
+              >
+                {deletingEntry ? "Removing..." : "Remove"}
+              </button>
+            </div>
+          }
+        >
+          <div className="text-sm text-[color:var(--color-text)]/80">
+            Delete entry for {deleteDialogRow.owner} on {formatEffortDate(deleteDialogRow.effortDate)}?
+          </div>
+        </MiniModal>
+      ) : null}
 
-      {openImport ? (
+      {isAdmin && openImport ? (
         <CrmManualEffortsImportModal
           clientSlug={clientSlug}
           onClose={() => setOpenImport(false)}

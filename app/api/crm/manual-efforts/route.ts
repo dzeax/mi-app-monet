@@ -5,7 +5,14 @@ import { z } from "zod";
 import { parse } from "csv-parse/sync";
 
 const DEFAULT_CLIENT = "emg";
-const normalizeKey = (value?: string | null) => value?.trim().toLowerCase() ?? "";
+const normalizeKey = (value?: string | null) => {
+  const trimmed = value?.trim().toLowerCase() ?? "";
+  if (!trimmed) return "";
+  return trimmed
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .replace(/\s+/g, " ");
+};
 const isUuid = (value: string) =>
   /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(value);
 
@@ -81,6 +88,25 @@ const loadAvatarByPerson = async (
     .in("id", personIds);
   if (peopleError) throw new Error(peopleError.message);
 
+  const { data: aliasRows, error: aliasError } = await supabase
+    .from("crm_people_aliases")
+    .select("person_id,alias")
+    .eq("client_slug", clientSlug)
+    .in("person_id", personIds);
+  if (aliasError) throw new Error(aliasError.message);
+
+  const aliasesByPersonId = new Map<string, string[]>();
+  (aliasRows ?? []).forEach((row: { person_id?: string | null; alias?: string | null }) => {
+    const personId = row?.person_id ? String(row.person_id) : "";
+    const alias = row?.alias ? String(row.alias) : "";
+    if (!personId || !alias) return;
+    const normalizedAlias = normalizeKey(alias);
+    if (!normalizedAlias) return;
+    const list = aliasesByPersonId.get(personId) ?? [];
+    list.push(normalizedAlias);
+    aliasesByPersonId.set(personId, list);
+  });
+
   const { data: appUsersRows, error: appUsersError } = await supabase
     .from("app_users")
     .select("display_name,email,avatar_url")
@@ -103,12 +129,23 @@ const loadAvatarByPerson = async (
   (peopleRows ?? []).forEach((row: { id?: string | null; display_name?: string | null; email?: string | null }) => {
     const id = row?.id ? String(row.id) : "";
     if (!id) return;
+    const matchers = new Set<string>();
     const displayNameKey = normalizeKey(row?.display_name);
     const emailKey = normalizeKey(row?.email);
-    const avatar =
-      (emailKey ? avatarByMatcher.get(emailKey) : null) ??
-      (displayNameKey ? avatarByMatcher.get(displayNameKey) : null) ??
-      "";
+    if (emailKey) matchers.add(emailKey);
+    if (displayNameKey) matchers.add(displayNameKey);
+    (aliasesByPersonId.get(id) ?? []).forEach((aliasKey) => {
+      if (aliasKey) matchers.add(aliasKey);
+    });
+
+    let avatar = "";
+    for (const matcher of matchers) {
+      const found = avatarByMatcher.get(matcher);
+      if (found) {
+        avatar = found;
+        break;
+      }
+    }
     if (avatar) avatarByPersonId.set(id, avatar);
   });
   return avatarByPersonId;

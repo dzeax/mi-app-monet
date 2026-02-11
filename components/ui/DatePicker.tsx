@@ -1,6 +1,6 @@
 'use client';
 
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react';
 import { DayPicker } from 'react-day-picker';
 import { format, parseISO } from 'date-fns';
 
@@ -45,7 +45,7 @@ export default function DatePicker({
   const popoverRef = useRef<HTMLDivElement | null>(null);
   const buttonElRef = useRef<HTMLButtonElement | null>(null);
   const rafRef = useRef<number | null>(null);
-  const [popoverStyle, setPopoverStyle] = useState<Record<string, string | number>>({});
+  const [popoverStyle, setPopoverStyle] = useState<React.CSSProperties>({});
   const selectedDate = value && isIsoDate(value) ? parseISO(value) : undefined;
   const display = formatPickerDate(value, displayFormat) ?? placeholder;
   const hasValue = Boolean(selectedDate);
@@ -53,6 +53,11 @@ export default function DatePicker({
   const POP_WIDTH = 280;
   const EDGE_GAP = 8;
   const FLOAT_GAP = 6;
+  const isPopoverPositioned =
+    popoverStyle.position === 'fixed' && popoverStyle.top != null && popoverStyle.left != null;
+  const popoverComputedStyle: React.CSSProperties = isPopoverPositioned
+    ? popoverStyle
+    : { position: 'fixed', top: 0, left: 0, width: POP_WIDTH, opacity: 0, pointerEvents: 'none' };
 
   const setButtonRef = useCallback(
     (node: HTMLButtonElement | null) => {
@@ -97,11 +102,17 @@ export default function DatePicker({
     const maxLeft = Math.max(EDGE_GAP, window.innerWidth - POP_WIDTH - EDGE_GAP);
     left = Math.min(Math.max(EDGE_GAP, left), maxLeft);
 
-    setPopoverStyle({
-      position: 'fixed',
-      top,
-      left,
-      width: POP_WIDTH,
+    setPopoverStyle((prev) => {
+      const next: React.CSSProperties = { position: 'fixed', top, left, width: POP_WIDTH };
+      if (
+        prev.position === next.position &&
+        prev.top === next.top &&
+        prev.left === next.left &&
+        prev.width === next.width
+      ) {
+        return prev;
+      }
+      return next;
     });
   }, [placement]);
 
@@ -120,12 +131,15 @@ export default function DatePicker({
   const setPopoverNodeRef = useCallback(
     (node: HTMLDivElement | null) => {
       popoverRef.current = node;
-      if (node && open) {
-        scheduleReposition();
-      }
     },
-    [open, scheduleReposition],
+    [],
   );
+
+  // Posicionar antes del primer paint para evitar "salto" al abrir.
+  useLayoutEffect(() => {
+    if (!open) return;
+    updatePopoverPosition();
+  }, [open, updatePopoverPosition]);
 
   // Cierre al hacer click fuera
   useEffect(() => {
@@ -142,7 +156,6 @@ export default function DatePicker({
 
   useEffect(() => {
     if (!open) return;
-    scheduleReposition();
     const handleReposition = () => scheduleReposition();
     window.addEventListener('resize', handleReposition);
     window.addEventListener('scroll', handleReposition, true);
@@ -202,7 +215,7 @@ export default function DatePicker({
           className={[
             'z-[1200] rounded-xl border border-[color:var(--color-border)] bg-[color:var(--color-surface)] p-3 shadow-xl ring-1 ring-black/5',
           ].join(' ')}
-          style={popoverStyle}
+          style={popoverComputedStyle}
         >
           <div className="rounded-lg border border-[color:var(--color-border)] bg-white/60 p-2">
             <DayPicker
