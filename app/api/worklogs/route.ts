@@ -70,18 +70,21 @@ async function loadUserMap(
   supabase: ReturnType<typeof createRouteHandlerClient>,
   userIds: string[],
 ) {
-  if (userIds.length === 0) return new Map<string, { display_name?: string | null; email?: string | null }>();
+  if (userIds.length === 0) {
+    return new Map<string, { display_name?: string | null; email?: string | null; avatar_url?: string | null }>();
+  }
   const { data, error } = await supabase
     .from("app_users")
-    .select("user_id,display_name,email")
+    .select("user_id,display_name,email,avatar_url")
     .in("user_id", userIds);
   if (error) throw new Error(error.message);
-  const map = new Map<string, { display_name?: string | null; email?: string | null }>();
+  const map = new Map<string, { display_name?: string | null; email?: string | null; avatar_url?: string | null }>();
   (data ?? []).forEach((row) => {
     if (!row?.user_id) return;
     map.set(String(row.user_id), {
       display_name: row.display_name,
       email: row.email,
+      avatar_url: row.avatar_url,
     });
   });
   return map;
@@ -133,6 +136,11 @@ export async function GET(request: Request) {
 
     if (error) return NextResponse.json({ error: error.message }, { status: 500 });
 
+    const userIds = Array.from(
+      new Set((data ?? []).map((row) => String(row?.user_id ?? "")).filter(Boolean)),
+    );
+    const userMap = await loadUserMap(supabase, userIds);
+
     const rows =
       data?.map((row) => ({
         id: row.id as string,
@@ -140,6 +148,10 @@ export async function GET(request: Request) {
         effortDate: row.effort_date as string,
         userId: row.user_id as string | null,
         owner: row.owner as string,
+        ownerAvatarUrl:
+          row.user_id && userMap.get(String(row.user_id))
+            ? (userMap.get(String(row.user_id))?.avatar_url as string | null) ?? null
+            : null,
         workstream: row.workstream as string,
         inputUnit: row.input_unit as "hours" | "days",
         inputValue: Number(row.input_value ?? 0),

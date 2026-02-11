@@ -1,7 +1,9 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
+import { createPortal } from "react-dom";
 import { useRouter, useSearchParams } from "next/navigation";
+import { Calendar, Clock, Edit2, Filter, List, Plus, RefreshCw, Search, Trash2, User, X } from "lucide-react";
 import DatePicker from "@/components/ui/DatePicker";
 import MiniModal from "@/components/ui/MiniModal";
 import { useAuth } from "@/context/AuthContext";
@@ -15,6 +17,7 @@ type WorklogRow = {
   effortDate: string;
   userId: string | null;
   owner: string;
+  ownerAvatarUrl?: string | null;
   workstream: string;
   inputUnit: "hours" | "days";
   inputValue: number;
@@ -28,6 +31,7 @@ type UserOption = {
   value: string;
   label: string;
   isActive: boolean;
+  avatarUrl: string | null;
 };
 
 type DraftEntry = {
@@ -53,14 +57,27 @@ function MultiSelect({
   values,
   onChange,
   placeholder = "All",
+  hideLabel = false,
+  containerClassName,
+  triggerClassName,
+  panelClassName,
 }: {
   label: string;
   options: Option[];
   values: string[];
   onChange: (vals: string[]) => void;
   placeholder?: string;
+  hideLabel?: boolean;
+  containerClassName?: string;
+  triggerClassName?: string;
+  panelClassName?: string;
 }) {
   const [open, setOpen] = useState(false);
+  const wrapRef = useRef<HTMLDivElement | null>(null);
+  const triggerRef = useRef<HTMLButtonElement | null>(null);
+  const panelRef = useRef<HTMLDivElement | null>(null);
+  const rafRef = useRef<number | null>(null);
+  const [panelStyle, setPanelStyle] = useState<React.CSSProperties>({});
 
   const toggle = useCallback(
     (val: string) => {
@@ -76,14 +93,73 @@ function MultiSelect({
       : values.length === 1
         ? options.find((o) => o.value === values[0])?.label || values[0]
         : `${values.length} selected`;
+  const hasOptions = options.length > 0;
+
+  const updatePanelPosition = useCallback(() => {
+    if (!open) return;
+    const trigger = triggerRef.current;
+    if (!trigger) return;
+
+    const EDGE_GAP = 8;
+    const FLOAT_GAP = 6;
+    const rect = trigger.getBoundingClientRect();
+    const width = rect.width;
+    const panelHeight = panelRef.current?.getBoundingClientRect().height ?? 280;
+
+    let left = rect.left;
+    const maxLeft = Math.max(EDGE_GAP, window.innerWidth - width - EDGE_GAP);
+    left = Math.min(Math.max(EDGE_GAP, left), maxLeft);
+
+    const spaceBelow = window.innerHeight - rect.bottom;
+    const shouldOpenUp = spaceBelow < panelHeight + FLOAT_GAP + EDGE_GAP && rect.top > spaceBelow;
+    let top = shouldOpenUp ? rect.top - panelHeight - FLOAT_GAP : rect.bottom + FLOAT_GAP;
+    const maxTop = Math.max(EDGE_GAP, window.innerHeight - panelHeight - EDGE_GAP);
+    top = Math.min(Math.max(EDGE_GAP, top), maxTop);
+
+    setPanelStyle((prev) => {
+      const next: React.CSSProperties = {
+        position: "fixed",
+        top,
+        left,
+        width,
+      };
+      if (
+        prev.position === next.position &&
+        prev.top === next.top &&
+        prev.left === next.left &&
+        prev.width === next.width
+      ) {
+        return prev;
+      }
+      return next;
+    });
+  }, [open]);
+
+  const scheduleReposition = useCallback(() => {
+    if (rafRef.current !== null) {
+      cancelAnimationFrame(rafRef.current);
+    }
+    rafRef.current = requestAnimationFrame(() => {
+      updatePanelPosition();
+      rafRef.current = requestAnimationFrame(() => {
+        updatePanelPosition();
+      });
+    });
+  }, [updatePanelPosition]);
+
+  useLayoutEffect(() => {
+    if (!open) return;
+    updatePanelPosition();
+  }, [open, updatePanelPosition, options.length, values.length]);
 
   useEffect(() => {
+    if (!open) return;
     const handler = (e: MouseEvent | TouchEvent) => {
-      const target = e.target as HTMLElement | null;
+      const target = e.target as Node | null;
       if (!target) return;
-      if (!target.closest(`[data-ms="worklogs-${label}"]`)) {
-        setOpen(false);
-      }
+      if (wrapRef.current?.contains(target)) return;
+      if (panelRef.current?.contains(target)) return;
+      setOpen(false);
     };
     document.addEventListener("mousedown", handler);
     document.addEventListener("touchstart", handler);
@@ -91,30 +167,60 @@ function MultiSelect({
       document.removeEventListener("mousedown", handler);
       document.removeEventListener("touchstart", handler);
     };
-  }, [label]);
+  }, [open]);
+
+  useEffect(() => {
+    if (!open) return;
+    scheduleReposition();
+    const handleReposition = () => scheduleReposition();
+    window.addEventListener("resize", handleReposition);
+    window.addEventListener("scroll", handleReposition, true);
+    return () => {
+      window.removeEventListener("resize", handleReposition);
+      window.removeEventListener("scroll", handleReposition, true);
+      if (rafRef.current !== null) {
+        cancelAnimationFrame(rafRef.current);
+        rafRef.current = null;
+      }
+    };
+  }, [open, scheduleReposition]);
 
   return (
-    <div className="relative" data-ms={`worklogs-${label}`}>
-      <label className="text-xs font-medium text-[color:var(--color-text)]/70">{label}</label>
+    <div className={`relative ${containerClassName ?? ""}`} data-ms={`worklogs-${label}`} ref={wrapRef}>
+      {!hideLabel ? <label className="text-xs font-medium text-[color:var(--color-text)]/70">{label}</label> : null}
       <button
+        ref={triggerRef}
         type="button"
-        className="input h-10 w-full flex items-center justify-between gap-2"
+        className={[
+          "w-full flex items-center justify-between gap-2",
+          hideLabel
+            ? "h-8 rounded-lg border border-transparent bg-[var(--color-surface-2)]/50 px-3 text-xs"
+            : "input h-10",
+          triggerClassName ?? "",
+        ].join(" ")}
         onClick={() => setOpen((v) => !v)}
       >
         <span className="truncate">{display}</span>
         <span className="text-[color:var(--color-text)]/60">{open ? "^" : "v"}</span>
       </button>
-      {open ? (
-        <div className="absolute z-30 mt-1 w-full rounded-lg border border-[color:var(--color-border)] bg-[color:var(--color-surface)] shadow-lg">
+      {open && typeof document !== "undefined"
+        ? createPortal(
+          <div
+            ref={panelRef}
+            className={`z-[140] rounded-lg border border-[color:var(--color-border)] bg-[color:var(--color-surface)] shadow-lg ${panelClassName ?? ""}`}
+            style={panelStyle}
+          >
           <button
             className="block w-full px-3 py-2 text-left text-sm hover:bg-[color:var(--color-surface-2)]"
+              disabled={!hasOptions}
             onClick={() => {
-              if (values.length === 0) onChange(options.map((o) => o.value));
+                if (!hasOptions) return;
+                if (values.length === 0) onChange(options.map((o) => o.value));
               else onChange([]);
               setOpen(false);
             }}
           >
-            {values.length === 0 ? "Select all" : "Clear all"}
+              {!hasOptions ? "No options" : values.length === 0 ? "Select all" : "Clear all"}
           </button>
           <div className="max-h-56 overflow-auto">
             {options.map((opt) => (
@@ -127,8 +233,10 @@ function MultiSelect({
               </label>
             ))}
           </div>
-        </div>
-      ) : null}
+          </div>,
+          document.body,
+        )
+        : null}
     </div>
   );
 }
@@ -144,6 +252,38 @@ const defaultWorkstreamForScope: Record<WorklogScope, string> = {
   monetization: "Monetization",
   internal: "Internal",
 };
+
+const getInitials = (name: string) =>
+  name
+    .trim()
+    .split(/\s+/)
+    .filter(Boolean)
+    .slice(0, 2)
+    .map((part) => part[0]?.toUpperCase() ?? "")
+    .join("");
+
+const normalizeText = (value: string) =>
+  value
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .trim()
+    .toLowerCase();
+
+const formatEffortDate = (value: string) => {
+  if (!value) return "--";
+  const [year, month, day] = value.split("-");
+  if (!year || !month || !day) return value;
+  return `${day}-${month}-${year}`;
+};
+
+const WORKSTREAM_BADGE_COLORS = [
+  "bg-blue-50 text-blue-700 border-blue-100",
+  "bg-purple-50 text-purple-700 border-purple-100",
+  "bg-emerald-50 text-emerald-700 border-emerald-100",
+  "bg-amber-50 text-amber-700 border-amber-100",
+  "bg-rose-50 text-rose-700 border-rose-100",
+  "bg-indigo-50 text-indigo-700 border-indigo-100",
+];
 
 export default function WorklogView() {
   const router = useRouter();
@@ -175,6 +315,8 @@ export default function WorklogView() {
   const [showWorkstreamInput, setShowWorkstreamInput] = useState(false);
   const [newWorkstream, setNewWorkstream] = useState("");
   const [workstreamSubmitting, setWorkstreamSubmitting] = useState(false);
+  const [deleteDialogRow, setDeleteDialogRow] = useState<WorklogRow | null>(null);
+  const [deleting, setDeleting] = useState(false);
 
   const loadUsers = useCallback(async () => {
     const res = await fetch("/api/worklogs/users");
@@ -188,6 +330,7 @@ export default function WorklogView() {
             value: String(user.value),
             label: String(user.label ?? ""),
             isActive: user.isActive !== false,
+            avatarUrl: typeof user.avatarUrl === "string" && user.avatarUrl.trim() ? user.avatarUrl.trim() : null,
           }))
         : [];
     list.sort((a: UserOption, b: UserOption) => a.label.localeCompare(b.label));
@@ -267,6 +410,17 @@ export default function WorklogView() {
       .map((ws) => ({ value: ws, label: ws }));
   }, [rows, workstreams]);
 
+  const workstreamBadgeColorByLabel = useMemo(() => {
+    const uniqueLabels = Array.from(
+      new Set(rows.map((row) => row.workstream.trim()).filter(Boolean)),
+    ).sort((a, b) => a.localeCompare(b));
+    const map = new Map<string, string>();
+    uniqueLabels.forEach((label, index) => {
+      map.set(label, WORKSTREAM_BADGE_COLORS[index % WORKSTREAM_BADGE_COLORS.length]);
+    });
+    return map;
+  }, [rows]);
+
   const filteredRows = useMemo(() => {
     const term = search.trim().toLowerCase();
     return rows.filter((row) => {
@@ -289,6 +443,40 @@ export default function WorklogView() {
       days,
     };
   }, [filteredRows]);
+
+  const ownerMetaById = useMemo(() => {
+    const map = new Map<string, UserOption>();
+    users.forEach((entry) => {
+      if (!entry.value) return;
+      map.set(entry.value, entry);
+    });
+    return map;
+  }, [users]);
+
+  const ownerMetaByName = useMemo(() => {
+    const map = new Map<string, UserOption>();
+    users.forEach((entry) => {
+      const normalized = normalizeText(entry.label);
+      if (!normalized) return;
+      map.set(normalized, entry);
+    });
+    return map;
+  }, [users]);
+
+  const clearFilters = useCallback(() => {
+    setSearch("");
+    setOwnerFilters([]);
+    setWorkstreamFilters([]);
+    setFromDate("");
+    setToDate("");
+  }, []);
+
+  const hasActiveFilters =
+    search.trim().length > 0 ||
+    ownerFilters.length > 0 ||
+    workstreamFilters.length > 0 ||
+    Boolean(fromDate) ||
+    Boolean(toDate);
 
   const openAddModal = () => {
     setEditRow(null);
@@ -420,17 +608,21 @@ export default function WorklogView() {
     }
   };
 
-  const handleDelete = async (row: WorklogRow) => {
-    if (!isAdmin) return;
+  const handleDelete = async () => {
+    if (!isAdmin || !deleteDialogRow) return;
+    setDeleting(true);
     try {
-      const res = await fetch(`/api/worklogs?id=${row.id}`, { method: "DELETE" });
+      const res = await fetch(`/api/worklogs?id=${deleteDialogRow.id}`, { method: "DELETE" });
       const body = await res.json().catch(() => null);
       if (!res.ok) throw new Error(body?.error || "Failed to delete entry");
       showSuccess("Entry deleted");
+      setDeleteDialogRow(null);
       await loadRows();
     } catch (err) {
       const msg = err instanceof Error ? err.message : "Unable to delete entry";
       showError(msg);
+    } finally {
+      setDeleting(false);
     }
   };
 
@@ -446,193 +638,297 @@ export default function WorklogView() {
     <div className="space-y-6" data-page="worklogs">
       <header className="relative overflow-hidden rounded-3xl border border-[color:var(--color-border)] bg-[color:var(--color-surface)] px-6 py-6 shadow-sm">
         <div className="pointer-events-none absolute inset-0 bg-[radial-gradient(120%_120%_at_0%_0%,rgba(14,165,233,0.18),transparent_60%),radial-gradient(120%_120%_at_80%_0%,rgba(99,102,241,0.16),transparent_55%)]" />
-        <div className="relative z-10 flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
-          <div>
-            <p className="text-xs uppercase tracking-[0.3em] text-[color:var(--color-text)]/65">
-              Command Center
-            </p>
-            <h1 className="mt-2 text-2xl font-semibold text-[color:var(--color-text)]">
-              Worklogs
-            </h1>
-            <p className="mt-2 text-sm text-[color:var(--color-text)]/70">
-              Track monetization and internal efforts to complete team capacity visibility.
-            </p>
-          </div>
-          <div className="flex flex-wrap items-center gap-2">
-            {isEditor || isAdmin ? (
-              <button className="btn-primary h-10 px-4" onClick={openAddModal}>
-                Add entries
-              </button>
-            ) : null}
-            <button className="btn-ghost h-10 px-4" onClick={loadRows}>
-              Refresh
-            </button>
-          </div>
-        </div>
-
-        {error ? (
-          <div className="relative z-10 mt-4 rounded-2xl border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">
-            {error}
-          </div>
-        ) : null}
-
-        <div className="mt-4 flex flex-wrap items-center gap-2">
-          {(["monetization", "internal"] as WorklogScope[]).map((value) => (
-            <button
-              key={value}
-              type="button"
-              className={`h-9 px-4 text-xs rounded-full border transition ${
-                scope === value
-                  ? value === "monetization"
-                    ? "border-emerald-400/70 bg-emerald-500/15 text-emerald-700"
-                    : "border-slate-400/70 bg-slate-400/20 text-slate-700"
-                  : "border-[color:var(--color-border)] bg-transparent text-[color:var(--color-text)]/70 hover:bg-[color:var(--color-surface-2)]"
-              }`}
-              onClick={() => onScopeChange(value)}
-            >
-              {value === "monetization" ? "Monetization" : "Internal"}
-            </button>
-          ))}
-        </div>
-
-        <div className="mt-6 grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
-          {[
-            { label: "Entries", value: totals.entries.toLocaleString("es-ES"), helper: "Current filters" },
-            { label: "Hours", value: formatNumber(totals.hours), helper: "Logged effort" },
-            { label: "Days", value: formatNumber(totals.days), helper: "Hours / 7" },
-          ].map((item) => (
-            <div key={item.label} className="kpi-frame flex items-center gap-4">
-              <div className="flex h-11 w-11 items-center justify-center rounded-full bg-[color:var(--color-surface-2)] text-[color:var(--color-primary)]">
-                <span className="text-sm font-semibold">{item.label.slice(0, 1)}</span>
-              </div>
-              <div>
-                <div className="text-xs font-semibold uppercase tracking-[0.2em] text-[color:var(--color-text)]/55">
-                  {item.label}
-                </div>
-                <div className="mt-1 text-2xl font-semibold text-[color:var(--color-text)]">
-                  {item.value}
-                </div>
-                <div className="mt-1 text-xs text-[color:var(--color-text)]/60">{item.helper}</div>
-              </div>
+        <div className="relative z-10 space-y-6">
+          <div className="flex flex-wrap items-start justify-between gap-4">
+            <div>
+              <p className="text-xs uppercase tracking-[0.3em] text-[color:var(--color-text)]/65">
+                Command Center
+              </p>
+              <h1 className="mt-2 text-2xl font-semibold text-[color:var(--color-text)]">
+                Worklogs
+              </h1>
+              <p className="mt-2 text-sm text-[color:var(--color-text)]/70">
+                Track monetization and internal efforts to complete team capacity visibility.
+              </p>
             </div>
-          ))}
+            <div className="flex flex-wrap items-center gap-2 rounded-xl border border-[var(--color-border)] bg-[var(--color-surface)] p-1.5 shadow-sm">
+              <button className="btn-ghost flex h-8 items-center gap-2 px-3 text-xs" onClick={loadRows}>
+                <RefreshCw size={14} className={loading ? "animate-spin" : undefined} />
+                Refresh
+              </button>
+              {isEditor || isAdmin ? (
+                <>
+                  <div className="mx-1 h-5 w-px bg-[var(--color-border)]" />
+                  <button className="btn-primary flex h-8 items-center gap-2 px-4 text-xs shadow-sm" onClick={openAddModal}>
+                    <Plus size={14} />
+                    Add entries
+                  </button>
+                </>
+              ) : null}
+            </div>
+          </div>
+
+          {error ? (
+            <div className="rounded-2xl border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">
+              {error}
+            </div>
+          ) : null}
+
+          <div className="flex flex-wrap items-center gap-2">
+            {(["monetization", "internal"] as WorklogScope[]).map((value) => (
+              <button
+                key={value}
+                type="button"
+                className={`h-9 rounded-full border px-4 text-xs transition ${
+                  scope === value
+                    ? value === "monetization"
+                      ? "border-emerald-400/70 bg-emerald-500/15 text-emerald-700"
+                      : "border-slate-400/70 bg-slate-400/20 text-slate-700"
+                    : "border-[color:var(--color-border)] bg-transparent text-[color:var(--color-text)]/70 hover:bg-[color:var(--color-surface-2)]"
+                }`}
+                onClick={() => onScopeChange(value)}
+              >
+                {value === "monetization" ? "Monetization" : "Internal"}
+              </button>
+            ))}
+          </div>
+
+          <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-3">
+          {[
+            {
+              label: "Entries",
+              primary: totals.entries.toLocaleString("es-ES"),
+              secondary: "Current filters",
+              icon: List,
+            },
+            {
+              label: "Hours",
+              primary: `${formatNumber(totals.hours)} h`,
+              secondary: `(${formatNumber(totals.days, 1)} d)`,
+              icon: Clock,
+            },
+            {
+              label: "Days",
+              primary: `${formatNumber(totals.days)} d`,
+              secondary: "Hours / 7",
+              icon: Calendar,
+            },
+          ].map((item) => {
+            const Icon = item.icon;
+            return (
+              <div key={item.label} className="kpi-frame p-5">
+                <div className="flex items-center gap-4">
+                  <div className="flex h-12 w-12 shrink-0 items-center justify-center rounded-xl bg-[var(--color-surface-2)] text-[var(--color-primary)]">
+                    <Icon size={24} />
+                  </div>
+                  <div>
+                    <p className="text-[11px] font-bold uppercase tracking-widest text-[var(--color-muted)]">
+                      {item.label}
+                    </p>
+                    <div className="mt-0.5 flex items-baseline gap-2">
+                      <span className="text-2xl font-bold tracking-tight text-[var(--color-text)] tabular-nums">
+                        {item.primary}
+                      </span>
+                      {item.secondary ? (
+                        <span className="text-xs text-[var(--color-muted)]">
+                          {item.secondary}
+                        </span>
+                      ) : null}
+                    </div>
+                  </div>
+                </div>
+              </div>
+            );
+          })}
+          </div>
         </div>
       </header>
 
-      <section className="card px-6 py-5">
-        <div className="grid gap-4 lg:grid-cols-[1.4fr_1fr_1fr_1fr_1fr]">
-          <div>
-            <label className="text-xs font-medium text-[color:var(--color-text)]/70">Search</label>
+      <section>
+        <div className="mt-6 flex flex-wrap items-center gap-2 rounded-2xl border border-[var(--color-border)] bg-[var(--color-surface)] p-1.5 shadow-sm">
+          <div className="relative min-w-[220px] flex-1">
+            <Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-[var(--color-muted)]" />
             <input
-              className="input h-10 w-full"
-              placeholder="Owner, workstream, comment..."
+              className="h-10 w-full rounded-xl border-none bg-transparent pl-9 pr-4 text-sm placeholder:text-[var(--color-muted)] focus:ring-0"
+              placeholder="Search comments..."
               value={search}
               onChange={(e) => setSearch(e.target.value)}
             />
           </div>
-          <MultiSelect
-            label="Owner"
-            options={ownerOptions}
-            values={ownerFilters}
-            onChange={setOwnerFilters}
-            placeholder="All owners"
-          />
-          <div className="space-y-2">
+
+          <div className="hidden h-6 w-px bg-[var(--color-border)] md:block" />
+
+          <div className="flex items-center gap-2 rounded-lg bg-[var(--color-surface-2)]/35 px-2 py-1">
+            <Filter className="h-3.5 w-3.5 text-[var(--color-muted)]" />
+            <MultiSelect
+              label="Owner"
+              options={ownerOptions}
+              values={ownerFilters}
+              onChange={setOwnerFilters}
+              placeholder="All owners"
+              hideLabel
+              containerClassName="min-w-[160px]"
+              triggerClassName="h-8 border-transparent bg-[var(--color-surface-2)]/50 text-xs"
+            />
             <MultiSelect
               label="Workstream"
               options={workstreamOptions}
               values={workstreamFilters}
               onChange={setWorkstreamFilters}
               placeholder="All workstreams"
+              hideLabel
+              containerClassName="min-w-[175px]"
+              triggerClassName="h-8 border-transparent bg-[var(--color-surface-2)]/50 text-xs"
             />
           </div>
-          <div>
-            <label className="text-xs font-medium text-[color:var(--color-text)]/70">From</label>
-            <DatePicker value={fromDate} onChange={setFromDate} ariaLabel="From date" />
+
+          <div className="hidden h-6 w-px bg-[var(--color-border)] lg:block" />
+
+          <div className="flex items-center gap-2 rounded-lg bg-[var(--color-surface-2)]/50 px-2 py-1">
+            <Calendar className="h-3.5 w-3.5 text-[var(--color-muted)]" />
+            <div className="min-w-[126px]">
+              <DatePicker
+                value={fromDate}
+                onChange={setFromDate}
+                placeholder="From"
+                ariaLabel="From date"
+                displayFormat="dd/MM/yy"
+                buttonClassName="h-8 border-transparent bg-[var(--color-surface-2)]/50 px-3 text-xs"
+              />
+            </div>
+            <span className="text-[11px] text-[var(--color-muted)]">to</span>
+            <div className="min-w-[126px]">
+              <DatePicker
+                value={toDate}
+                onChange={setToDate}
+                placeholder="To"
+                ariaLabel="To date"
+                displayFormat="dd/MM/yy"
+                buttonClassName="h-8 border-transparent bg-[var(--color-surface-2)]/50 px-3 text-xs"
+              />
+            </div>
           </div>
-          <div>
-            <label className="text-xs font-medium text-[color:var(--color-text)]/70">To</label>
-            <DatePicker value={toDate} onChange={setToDate} ariaLabel="To date" />
-          </div>
-        </div>
-        <div className="mt-4 flex flex-wrap items-center gap-2">
-          <button
-            className="btn-ghost h-9 px-3 text-xs"
-            type="button"
-            onClick={() => {
-              setSearch("");
-              setOwnerFilters([]);
-              setWorkstreamFilters([]);
-              setFromDate("");
-              setToDate("");
-            }}
-          >
-            Clear filters
-          </button>
+
+          {hasActiveFilters ? (
+            <button
+              className="rounded-full p-2 text-[var(--color-muted)] transition-colors hover:bg-[var(--color-surface-2)] hover:text-[var(--color-text)]"
+              type="button"
+              onClick={clearFilters}
+              title="Clear filters"
+            >
+              <X size={16} />
+            </button>
+          ) : null}
         </div>
       </section>
 
-      <section className="card px-6 py-5">
+      <section className="card px-6 py-3">
         <div className="flex items-center justify-between">
           <h3 className="text-lg font-semibold text-[color:var(--color-text)]">Entries</h3>
           {loading ? (
             <span className="text-xs text-[color:var(--color-text)]/60">Loading...</span>
           ) : null}
         </div>
-        <div className="mt-4 overflow-auto">
-          <table className="min-w-[960px] w-full text-sm">
+        <div className="table-wrap mt-1">
+          <table className="table min-w-[940px] w-full table-fixed text-sm font-sans">
+            <colgroup>
+              <col className="w-[110px]" />
+              <col className="w-[230px]" />
+              <col className="w-[180px]" />
+              <col className="w-[180px]" />
+              <col />
+              <col className="w-[96px]" />
+            </colgroup>
             <thead>
-              <tr className="text-left text-xs uppercase tracking-[0.2em] text-[color:var(--color-text)]/60">
-                <th className="px-3 py-2">Date</th>
-                <th className="px-3 py-2">Owner</th>
-                <th className="px-3 py-2">Workstream</th>
-                <th className="px-3 py-2 text-right">Logged</th>
-                <th className="px-3 py-2 text-right">Hours</th>
-                <th className="px-3 py-2 text-right">Days</th>
-                <th className="px-3 py-2">Comments</th>
-                <th className="px-3 py-2 text-right">Actions</th>
+              <tr className="bg-[var(--color-surface-2)] text-xs font-semibold uppercase tracking-wider text-[var(--color-muted)]">
+                <th className="px-3 py-2 text-left">Date</th>
+                <th className="px-3 py-2 text-left">Owner</th>
+                <th className="px-3 py-2 text-left">Workstream</th>
+                <th className="px-3 py-2 text-right">Hours / Days</th>
+                <th className="px-3 py-2 text-left">Comments</th>
+                <th className="px-3 py-2 text-right"></th>
               </tr>
             </thead>
             <tbody>
               {filteredRows.length === 0 ? (
                 <tr>
-                  <td className="px-3 py-6 text-center text-sm text-[color:var(--color-text)]/60" colSpan={8}>
+                  <td className="py-12 text-center text-sm text-[var(--color-muted)] font-sans" colSpan={6}>
                     No entries match the current filters.
                   </td>
                 </tr>
               ) : (
                 filteredRows.map((row) => {
-                  const loggedLabel = `${formatNumber(row.inputValue, 2)} ${row.inputUnit === "days" ? "d" : "h"}`;
+                  const ownerMeta =
+                    (row.userId ? ownerMetaById.get(row.userId) : undefined) ??
+                    ownerMetaByName.get(normalizeText(row.owner));
+                  const ownerAvatarUrl = row.ownerAvatarUrl ?? ownerMeta?.avatarUrl ?? null;
+                  const initials = getInitials(row.owner);
                   return (
-                    <tr key={row.id} className="border-t border-[color:var(--color-border)]">
-                      <td className="px-3 py-3 whitespace-nowrap">{row.effortDate}</td>
-                      <td className="px-3 py-3 whitespace-nowrap">{row.owner}</td>
-                      <td className="px-3 py-3 whitespace-nowrap">{row.workstream}</td>
-                      <td className="px-3 py-3 text-right">{loggedLabel}</td>
-                      <td className="px-3 py-3 text-right">{formatNumber(row.hours)}</td>
-                      <td className="px-3 py-3 text-right">{formatNumber(row.hours / 7)}</td>
-                      <td className="px-3 py-3 max-w-[260px] truncate" title={row.comments || ""}>
+                    <tr key={row.id} className="group transition-colors hover:bg-[var(--color-surface-2)]/50">
+                      <td className="whitespace-nowrap px-3 py-3 text-[var(--color-muted)] font-sans">
+                        {formatEffortDate(row.effortDate)}
+                      </td>
+                      <td className="px-3 py-3 whitespace-nowrap font-sans">
+                        <div className="flex items-center gap-2">
+                          <div
+                            className="h-7 w-7 shrink-0 overflow-hidden rounded-full border border-[color:var(--color-border)] bg-[color:var(--color-surface-2)]"
+                            title={row.owner}
+                          >
+                            {ownerAvatarUrl ? (
+                              <img
+                                src={ownerAvatarUrl}
+                                alt={row.owner}
+                                className="h-full w-full object-cover"
+                                referrerPolicy="no-referrer"
+                              />
+                            ) : (
+                              <div className="flex h-full w-full items-center justify-center text-[10px] font-semibold text-[color:var(--color-text)]/70">
+                                {initials || <User size={13} />}
+                              </div>
+                            )}
+                          </div>
+                          <span className="font-medium text-[var(--color-text)]">{row.owner}</span>
+                        </div>
+                      </td>
+                      <td className="px-3 py-3 whitespace-nowrap font-sans">
+                        <span className={`inline-flex items-center rounded-md border px-2.5 py-0.5 text-xs font-medium ${workstreamBadgeColorByLabel.get(row.workstream) ?? WORKSTREAM_BADGE_COLORS[0]}`}>
+                          {row.workstream}
+                        </span>
+                      </td>
+                      <td className="whitespace-nowrap px-3 py-3 text-right font-sans">
+                        <span className="font-semibold text-[var(--color-text)] font-sans">
+                          {formatNumber(row.hours)} h
+                        </span>
+                        <span className="ml-1.5 text-xs text-[var(--color-muted)] font-normal font-sans">
+                          ({formatNumber(row.hours / 7, 1)} d)
+                        </span>
+                      </td>
+                      <td className="max-w-[260px] truncate px-3 py-3 text-[color:var(--color-text)]/80 font-sans" title={row.comments || ""}>
                         {row.comments || "--"}
                       </td>
-                      <td className="px-3 py-3 text-right">
-                        {isEditor || isAdmin ? (
-                          <button
-                            className="btn-ghost h-8 px-2 text-xs"
-                            type="button"
-                            onClick={() => openEditModal(row)}
-                          >
-                            Edit
-                          </button>
-                        ) : null}
-                        {isAdmin ? (
-                          <button
-                            className="btn-ghost h-8 px-2 text-xs text-red-500"
-                            type="button"
-                            onClick={() => void handleDelete(row)}
-                          >
-                            Delete
-                          </button>
-                        ) : null}
+                      <td className="px-3 py-3 font-sans">
+                        <div className="flex items-center justify-end gap-2">
+                          {isEditor || isAdmin ? (
+                            <button
+                              className="btn-ghost p-1.5 hover:text-blue-600"
+                              type="button"
+                              onClick={() => openEditModal(row)}
+                              title="Edit"
+                            >
+                              <Edit2 size={14} />
+                            </button>
+                          ) : null}
+                          {isAdmin ? (
+                            <button
+                              className="btn-ghost p-1.5 hover:text-red-600"
+                              type="button"
+                              onClick={() => setDeleteDialogRow(row)}
+                              title="Delete"
+                            >
+                              <Trash2 size={14} />
+                            </button>
+                          ) : null}
+                        </div>
                       </td>
                     </tr>
                   );
@@ -841,6 +1137,40 @@ export default function WorklogView() {
             </button>
             <button className="btn-primary h-9 px-4 text-xs" onClick={handleSave} disabled={saving}>
               {saving ? "Saving..." : editRow ? "Save changes" : "Save entries"}
+            </button>
+          </div>
+        </MiniModal>
+      ) : null}
+
+      {deleteDialogRow ? (
+        <MiniModal
+          onClose={() => {
+            if (deleting) return;
+            setDeleteDialogRow(null);
+          }}
+          title="Delete entry?"
+          widthClass="max-w-md"
+          bodyClassName="space-y-4"
+        >
+          <p className="text-sm text-[color:var(--color-text)]/75">
+            Delete entry for {deleteDialogRow.owner} on {formatEffortDate(deleteDialogRow.effortDate)}?
+          </p>
+          <div className="flex justify-end gap-2">
+            <button
+              type="button"
+              className="btn-ghost h-9 px-3 text-xs"
+              onClick={() => setDeleteDialogRow(null)}
+              disabled={deleting}
+            >
+              Cancel
+            </button>
+            <button
+              type="button"
+              className="btn-primary h-9 px-3 text-xs"
+              onClick={() => void handleDelete()}
+              disabled={deleting}
+            >
+              {deleting ? "Deleting..." : "Delete"}
             </button>
           </div>
         </MiniModal>

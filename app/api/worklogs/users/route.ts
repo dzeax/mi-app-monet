@@ -15,7 +15,7 @@ export async function GET() {
 
   const { data: currentUser, error: currentUserError } = await supabase
     .from("app_users")
-    .select("user_id,role,is_active,display_name,email")
+    .select("user_id,role,is_active,display_name,email,avatar_url")
     .eq("user_id", userData.user.id)
     .maybeSingle();
 
@@ -41,6 +41,7 @@ export async function GET() {
           label,
           email: (currentUser.email as string | null) ?? (userData.user.email ?? null),
           isActive: true,
+          avatarUrl: (currentUser.avatar_url as string | null) ?? null,
         },
       ],
     });
@@ -48,7 +49,7 @@ export async function GET() {
 
   const { data, error } = await supabase
     .from("app_users")
-    .select("user_id,display_name,email,is_active,in_team_capacity")
+    .select("user_id,display_name,email,is_active,in_team_capacity,avatar_url")
     .eq("in_team_capacity", true)
     .eq("is_active", true)
     .order("display_name", { ascending: true, nullsFirst: false });
@@ -63,6 +64,7 @@ export async function GET() {
       label: String(row.display_name ?? row.email ?? "Unknown").trim(),
       email: row.email as string | null,
       isActive: Boolean(row.is_active),
+      avatarUrl: (row.avatar_url as string | null) ?? null,
     })) ?? [];
 
   return NextResponse.json({ users });
