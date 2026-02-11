@@ -24,6 +24,8 @@ export type CrmClient = {
   modules: CrmModule[];
 };
 
+export type CrmWorkspaceRole = 'admin' | 'editor' | 'viewer';
+
 export const CRM_CLIENTS: CrmClient[] = [
   {
     slug: 'emg',
@@ -204,4 +206,31 @@ export function getCrmClient(slug?: string | null) {
 export function getCrmModule(client: CrmClient | null, moduleSlug?: string | null) {
   if (!client || !moduleSlug) return null;
   return client.modules.find((m) => m.slug === moduleSlug) ?? null;
+}
+
+const WORKSPACE_PRIORITY: string[] = [
+  'ticket-reporting',
+  'manual-efforts',
+  'dq-tickets',
+  'campaigns',
+  'budget',
+  'budget-execution',
+];
+
+export function getCrmWorkspaceHref(client: CrmClient | null, role: CrmWorkspaceRole = 'viewer') {
+  if (!client) return null;
+
+  const accessibleModules =
+    role === 'admin'
+      ? client.modules
+      : client.modules.filter((module) => module.type !== 'budget' && module.type !== 'budget_execution');
+
+  const candidates = accessibleModules.length > 0 ? accessibleModules : client.modules;
+  if (!candidates.length) return null;
+
+  const prioritized =
+    WORKSPACE_PRIORITY.map((slug) => candidates.find((module) => module.slug === slug)).find(Boolean) ??
+    candidates[0];
+
+  return prioritized ? `/crm/${client.slug}/${prioritized.slug}` : null;
 }

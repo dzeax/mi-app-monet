@@ -3,6 +3,8 @@
 
 import { useEffect, useMemo, useState } from "react";
 import Link from "next/link";
+import { useAuth } from "@/context/AuthContext";
+import { getCrmClient, getCrmWorkspaceHref } from "@/lib/crm/clients";
 
 type CrmClientCard = {
   name: string;
@@ -100,6 +102,7 @@ const formatPercent = (value: number) => {
 };
 
 export default function CrmOperationsOverview() {
+  const { isAdmin } = useAuth();
   const nowYear = new Date().getFullYear();
   const [year, setYear] = useState(nowYear);
   const [metricsByClient, setMetricsByClient] = useState<Record<string, ClientMetrics>>({});
@@ -202,6 +205,8 @@ export default function CrmOperationsOverview() {
     };
   }, [metricsByClient]);
 
+  const workspaceRole = isAdmin ? "admin" : "editor";
+
   return (
     <div className="space-y-8" data-page="crm-operations-overview">
       <header className="relative overflow-hidden rounded-3xl border border-[color:var(--color-border)] bg-[color:var(--color-surface)] px-6 py-5 shadow-sm">
@@ -292,6 +297,9 @@ export default function CrmOperationsOverview() {
           const utilizationValue = metrics
             ? formatPercent(metrics.utilizationTotal)
             : placeholder;
+          const workspaceHref =
+            getCrmWorkspaceHref(getCrmClient(client.slug), workspaceRole) ??
+            `/crm/${client.slug}/manual-efforts`;
 
           return (
             <article
@@ -364,7 +372,7 @@ export default function CrmOperationsOverview() {
                 <span className="text-xs text-[color:var(--color-text)]/50">
                   Snapshot · {year}
                 </span>
-                <Link href={`/crm/${client.slug}/budget`} className="btn-primary">
+                <Link href={workspaceHref} className="btn-primary">
                   {client.ctaLabel}
                 </Link>
               </div>

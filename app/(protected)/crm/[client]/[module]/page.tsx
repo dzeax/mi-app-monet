@@ -8,7 +8,7 @@ import CrmBudgetExecutionView from '@/components/crm/CrmBudgetExecutionView';
 import CrmDqTicketsAnalyticsView from '@/components/crm/CrmDqTicketsAnalyticsView';
 import CrmManualEffortsView from '@/components/crm/CrmManualEffortsView';
 import CrmOperationsOverview from '@/components/crm/CrmOperationsOverview';
-import { getCrmClient, getCrmModule } from '@/lib/crm/clients';
+import { getCrmClient, getCrmModule, getCrmWorkspaceHref } from '@/lib/crm/clients';
 
 type Props = {
   params: Promise<{
@@ -19,13 +19,19 @@ type Props = {
 
 export default async function CrmModulePage({ params }: Props) {
   const { client: clientSlug, module: moduleSlug } = await params;
-  if (moduleSlug === 'data-quality') {
-    redirect(`/crm/${clientSlug}/ticket-reporting`);
-  }
   const client = getCrmClient(clientSlug);
+
+  if (!client) {
+    notFound();
+  }
+
+  if (moduleSlug === 'data-quality') {
+    redirect(getCrmWorkspaceHref(client, 'editor') ?? '/crm/operations');
+  }
+
   const moduleConfig = getCrmModule(client, moduleSlug);
 
-  if (!client || !moduleConfig) {
+  if (!moduleConfig) {
     notFound();
   }
   if (moduleConfig.type === 'budget' || moduleConfig.type === 'budget_execution') {
@@ -41,7 +47,8 @@ export default async function CrmModulePage({ params }: Props) {
       .eq('user_id', authData.user.id)
       .maybeSingle();
     if (!appUser || appUser.is_active === false || appUser.role !== 'admin') {
-      redirect(`/crm/${clientSlug}/ticket-reporting`);
+      const fallbackRole = appUser?.role === 'viewer' ? 'viewer' : 'editor';
+      redirect(getCrmWorkspaceHref(client, fallbackRole) ?? '/crm/operations');
     }
   }
 
