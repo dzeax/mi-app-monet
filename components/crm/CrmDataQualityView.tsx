@@ -22,6 +22,20 @@ import {
   startOfMonth,
   startOfYear,
 } from "date-fns";
+import {
+  Activity,
+  Calendar,
+  ChevronDown,
+  ChevronUp,
+  Clock,
+  Coins,
+  Plus,
+  RefreshCw,
+  Search,
+  Settings2,
+  Ticket,
+  X,
+} from "lucide-react";
 import type {
   CrmOwnerRate,
   DataQualityTicket,
@@ -202,6 +216,9 @@ function MultiSelect({
   onChange,
   counts,
   placeholder = "All",
+  hideLabel = false,
+  containerClassName,
+  triggerClassName,
 }: {
   label: string;
   options: Option[];
@@ -209,6 +226,9 @@ function MultiSelect({
   onChange: (vals: string[]) => void;
   counts?: Record<string, number>;
   placeholder?: string;
+  hideLabel?: boolean;
+  containerClassName?: string;
+  triggerClassName?: string;
 }) {
   const [open, setOpen] = useState(false);
   const ref = useRef<HTMLDivElement | null>(null);
@@ -232,6 +252,16 @@ function MultiSelect({
       : values.length === 1
         ? options.find((o) => o.value === values[0])?.label || values[0]
         : `${values.length} selected`;
+  const triggerClasses = [
+    hideLabel
+      ? "flex h-9 w-full items-center justify-between gap-2 rounded-lg border-none bg-[var(--color-surface-2)]/50 px-3 text-left text-sm font-medium text-[var(--color-text)] transition hover:bg-[var(--color-surface-2)] focus:ring-2 focus:ring-[var(--color-primary)]/20"
+      : "input flex h-10 w-full items-center justify-between gap-2 text-left truncate",
+    hideLabel ? "" : values.length > 0 ? "ring-1 ring-[color:var(--color-accent)]" : "",
+    hideLabel ? "focus:outline-none" : "focus:outline-none focus:ring-2 focus:ring-[color:var(--color-accent)]",
+    triggerClassName || "",
+  ]
+    .filter(Boolean)
+    .join(" ");
 
   useEffect(() => {
     const handler = (e: MouseEvent | TouchEvent) => {
@@ -282,17 +312,20 @@ function MultiSelect({
   }, [open, options, activeIdx, toggle]);
 
   return (
-    <div className="relative" ref={ref}>
-      <label className="text-xs font-medium text-[color:var(--color-text)]/70">
-        {label}
-      </label>
+    <div className={["relative", containerClassName].filter(Boolean).join(" ")} ref={ref}>
+      {!hideLabel ? (
+        <label className="text-xs font-medium text-[color:var(--color-text)]/70">
+          {label}
+        </label>
+      ) : null}
       <button
         type="button"
-        className={`input h-10 w-full text-left truncate ${values.length > 0 ? "ring-1 ring-[color:var(--color-accent)]" : ""} focus:outline-none focus:ring-2 focus:ring-[color:var(--color-accent)]`}
+        className={triggerClasses}
         onClick={() => setOpen((v) => !v)}
         title={display}
       >
-        {display}
+        <span className="truncate">{display}</span>
+        <ChevronDown className="ml-auto h-4 w-4 shrink-0 opacity-50" />
       </button>
       {open ? (
         <div className="absolute z-30 mt-1 w-full rounded-lg border border-[color:var(--color-border)] bg-[color:var(--color-surface)] shadow-lg">
@@ -339,6 +372,7 @@ function DateRangeField({
   onChangeFrom,
   onChangeTo,
   onClear,
+  hideLabel = false,
 }: {
   label: string;
   from: string;
@@ -346,6 +380,7 @@ function DateRangeField({
   onChangeFrom: (value: string) => void;
   onChangeTo: (value: string) => void;
   onClear: () => void;
+  hideLabel?: boolean;
 }) {
   const [open, setOpen] = useState(false);
   const wrapRef = useRef<HTMLDivElement | null>(null);
@@ -358,11 +393,14 @@ function DateRangeField({
     if (fromLabel && toLabel) return `${fromLabel} - ${toLabel}`;
     if (fromLabel) return `Since ${fromLabel}`;
     if (toLabel) return `Until ${toLabel}`;
-    return "All time";
+    return hideLabel ? label : "All time";
   })();
   const selectedRange: DateRange | undefined = hasRange
     ? { from: fromDate, to: toDate }
     : undefined;
+  const triggerClassName = hideLabel
+    ? "flex h-9 w-full items-center justify-between gap-2 rounded-lg border-none bg-[var(--color-surface-2)]/50 px-3 text-left text-sm font-medium text-[var(--color-text)] transition hover:bg-[var(--color-surface-2)] focus:outline-none focus:ring-2 focus:ring-[var(--color-primary)]/20"
+    : "input flex h-10 w-full items-center justify-between gap-2 text-left";
   const today = new Date();
   const toIso = (date: Date) => format(date, "yyyy-MM-dd");
   const applyRange = (range?: DateRange) => {
@@ -396,29 +434,32 @@ function DateRangeField({
 
   return (
     <div className="relative flex flex-col gap-1" ref={wrapRef}>
-      <label className="text-xs font-medium text-[color:var(--color-text)]/70">
-        {label}
-      </label>
+      {!hideLabel ? (
+        <label className="text-xs font-medium text-[color:var(--color-text)]/70">
+          {label}
+        </label>
+      ) : null}
       <div className="relative">
         <button
           type="button"
-          className="input h-10 w-full text-left"
+          className={triggerClassName}
           onClick={() => setOpen((v) => !v)}
         >
           <span
             className={
-              hasRange
+              `${hasRange
                 ? "text-[color:var(--color-text)]"
-                : "text-[color:var(--color-text)]/50"
+                : "text-[color:var(--color-text)]/50"} truncate`
             }
           >
             {display}
           </span>
+          <ChevronDown className="ml-auto h-4 w-4 shrink-0 opacity-50" />
         </button>
         {hasRange ? (
           <button
             type="button"
-            className="absolute right-2 top-1/2 -translate-y-1/2 text-xs text-[color:var(--color-text)]/50 hover:text-[color:var(--color-text)]"
+            className="absolute right-8 top-1/2 -translate-y-1/2 text-xs text-[color:var(--color-text)]/50 hover:text-[color:var(--color-text)]"
             onClick={(e) => {
               e.stopPropagation();
               onClear();
@@ -2593,299 +2634,212 @@ export default function CrmDataQualityView() {
 
   return (
     <div className="space-y-6">
-      <header className="flex flex-col gap-3 rounded-3xl border border-[color:var(--color-border)] bg-[color:var(--color-surface)] px-5 py-6 shadow-sm">
-        <div className="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
-          <div className="space-y-1">
-            <div className="flex items-center gap-3">
-              <p className="text-xs uppercase tracking-[0.3em] text-[color:var(--color-text)]/65">
-                Ticket Reporting
-              </p>
-              <span className="rounded-full bg-[color:var(--color-surface-2)] px-3 py-1 text-xs font-semibold text-[color:var(--color-text)]/80">
-                {clientSlug?.toUpperCase()} - CRM Ops
-              </span>
-            </div>
+      <header className="relative overflow-hidden rounded-3xl border border-[color:var(--color-border)] bg-[color:var(--color-surface)] px-6 py-6 shadow-sm">
+        <div className="pointer-events-none absolute inset-0 bg-[radial-gradient(120%_120%_at_0%_0%,rgba(14,165,233,0.18),transparent_60%),radial-gradient(120%_120%_at_80%_0%,rgba(99,102,241,0.14),transparent_55%)]" />
+        <div className="relative z-10 flex flex-wrap items-start justify-between gap-4">
+          <div className="space-y-2">
+            <p className="text-xs uppercase tracking-[0.28em] text-[color:var(--color-text)]/65">
+              Ticket Reporting
+            </p>
             <h1
               className="text-2xl font-semibold text-[color:var(--color-text)]"
               title="JIRA tickets for this client. Track workload, SLAs and priorities in one place."
             >
               Ticket Reporting
             </h1>
+            <span className="inline-flex items-center rounded-full bg-[color:var(--color-surface-2)] px-3 py-1 text-xs font-semibold text-[color:var(--color-text)]/80">
+              {clientSlug?.toUpperCase()} - CRM Ops
+            </span>
           </div>
-          <div className="grid grid-cols-2 gap-x-4 gap-y-2 text-sm text-[color:var(--color-text)] lg:grid-cols-4">
-            <div>
-              <span className="text-xs uppercase text-[color:var(--color-text)]/60">
-                Tickets
+          <div className="flex flex-wrap items-center gap-2 rounded-xl border border-[var(--color-border)] bg-[var(--color-surface)] p-1.5 shadow-sm">
+            <div
+              className={[
+                "inline-flex items-center gap-2 rounded-lg border px-2.5 py-1.5 text-xs font-medium",
+                syncStatus?.isRunning
+                  ? "border-amber-200 bg-amber-50 text-amber-900"
+                  : "border-[color:var(--color-border)] bg-[color:var(--color-surface-2)]/60 text-[color:var(--color-text)]/75",
+              ].join(" ")}
+              title={
+                formatSyncTimestamp(syncStatus?.lastSuccessAt)
+                  ? `Last sync: ${formatSyncTimestamp(syncStatus?.lastSuccessAt)}${
+                      syncStatus?.lastError ? ` | Last error: ${syncStatus.lastError}` : ""
+                    }`
+                  : "JIRA sync has not completed yet"
+              }
+            >
+              <Activity
+                size={14}
+                className={syncStatus?.isRunning ? "animate-pulse text-amber-500" : "text-emerald-500"}
+              />
+              <span>
+                {syncStatus?.isRunning
+                  ? "Syncing JIRA..."
+                  : syncStatus?.lastSuccessAt
+                    ? `Synced ${formatSyncAgo(syncStatus.lastSuccessAt) ?? "recently"}`
+                    : "Not synced yet"}
               </span>
-              <div className="text-lg font-semibold text-[color:var(--color-text)]">
-                {filtered.length}
-              </div>
             </div>
-            <div>
-              <span className="text-xs uppercase text-[color:var(--color-text)]/60">
-                Hours
-              </span>
-              <div className="text-lg font-semibold text-[color:var(--color-text)]">
-                {totals.totalHours.toFixed(2)}
-              </div>
-            </div>
-            <div>
-              <span className="text-xs uppercase text-[color:var(--color-text)]/60">
-                Days
-              </span>
-              <div className="text-lg font-semibold text-[color:var(--color-text)]">
-                {totals.totalDays.toFixed(2)}
-              </div>
-            </div>
-            <div>
-              <span className="text-xs uppercase text-[color:var(--color-text)]/60">
-                Budget (€)
-              </span>
-              <div className="text-lg font-semibold text-[color:var(--color-text)]">
-                {formatCurrency(totals.totalBudget, "EUR")}
-              </div>
-            </div>
+            {isEditor || isAdmin ? (
+              <button
+                className="btn-primary flex h-8 items-center gap-2 px-3 text-xs shadow-sm"
+                onClick={() => {
+                  void triggerJiraSync();
+                }}
+                disabled={syncingJira}
+              >
+                <RefreshCw size={14} className={syncingJira ? "animate-spin" : undefined} />
+                {syncingJira ? "Syncing..." : "Sync JIRA now"}
+              </button>
+            ) : null}
+            {isEditor || isAdmin ? (
+              <div className="mx-1 h-5 w-px bg-[var(--color-border)]" />
+            ) : null}
+            {isEditor || isAdmin ? (
+              <button
+                className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium text-[var(--color-text)]/60 transition-colors hover:text-[var(--color-primary)]"
+                type="button"
+                onClick={openAddModal}
+              >
+                <Plus size={14} />
+                Add ticket
+              </button>
+            ) : null}
           </div>
         </div>
       </header>
 
-      <div className="rounded-2xl border border-[color:var(--color-border)] bg-[color:var(--color-surface-2)]/60 px-4 py-3">
-        <div className="flex flex-col gap-3">
-          <div className="flex flex-wrap items-end gap-3">
-            <div className="flex min-w-[260px] flex-[2] flex-col gap-1">
-              <label className="text-xs font-medium text-[color:var(--color-text)]/70">
-                Search
-              </label>
-              <input
-                value={searchInput}
-                onChange={(e) => setSearchInput(e.target.value)}
-                className="input h-10 w-full"
-                placeholder="Ticket ID or title"
-              />
+      <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-4">
+        <div className="kpi-frame px-5 py-4">
+          <div className="flex items-center gap-4">
+            <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-[var(--color-surface-2)] text-[var(--color-primary)]">
+              <Ticket size={20} />
             </div>
-            <div className="min-w-[180px] flex-1">
-              <MultiSelect
-                label="Status"
-                options={STATUS_OPTIONS.map((s) => ({ label: s, value: s }))}
-                values={filters.status}
-                counts={options.statusCounts}
-                onChange={(vals) => handleChange("status", vals)}
-              />
-            </div>
-            <div className="min-w-[180px] flex-1">
-              <MultiSelect
-                label="Assignee (JIRA)"
-                options={options.assignee}
-                values={filters.assignee}
-                counts={options.assigneeCounts}
-                onChange={(vals) => handleChange("assignee", vals)}
-              />
-            </div>
-            <div className="min-w-[180px] flex-1">
-              <MultiSelect
-                label="Contributors"
-                options={options.owner}
-                values={filters.owner}
-                counts={options.ownerCounts}
-                onChange={(vals) => handleChange("owner", vals)}
-              />
-            </div>
-            <div className="ml-auto flex flex-wrap items-center gap-2">
-              <button
-                className={`btn-ghost h-10 w-10 ${openAdvanced ? "bg-[color:var(--color-surface)]/70" : ""}`}
-                style={{ padding: 0 }}
-                type="button"
-                onClick={() => setOpenAdvanced((v) => !v)}
-                aria-label="More filters"
-                title={openAdvanced ? "Hide filters" : "More filters"}
-              >
-                {/* eslint-disable-next-line @next/next/no-img-element */}
-                <img
-                  src="/icons/ui/settings-sliders.svg"
-                  alt=""
-                  className="h-6 w-6 shrink-0 object-contain opacity-70"
-                />
-                {filters.daysBucket ||
-                filters.assignedFrom ||
-                filters.assignedTo ||
-                filters.dueFrom ||
-                filters.dueTo ? (
-                  <span
-                    className="absolute -right-1 -top-1 h-2.5 w-2.5 rounded-full bg-[color:var(--color-primary)]"
-                    aria-hidden="true"
-                  />
-                ) : null}
-              </button>
-              <button
-                type="button"
-                className={[
-                  "inline-flex items-center gap-2 rounded-full border px-3 py-1.5 text-xs font-semibold transition",
-                  filters.needsEffort
-                    ? "border-amber-300 bg-amber-50 text-amber-900"
-                    : "border-[color:var(--color-border)] bg-[color:var(--color-surface)] text-[color:var(--color-text)]/70",
-                  needsEffortCount === 0
-                    ? "cursor-not-allowed opacity-50"
-                    : "hover:bg-[color:var(--color-surface-2)]/80",
-                ].join(" ")}
-                onClick={() => handleChange("needsEffort", !filters.needsEffort)}
-                disabled={needsEffortCount === 0}
-                aria-pressed={filters.needsEffort}
-                title="Show tickets moved to Validation/Done in the last sync without effort"
-              >
-                Needs effort: {needsEffortCount}
-              </button>
-              <button
-                type="button"
-                className={[
-                  "inline-flex items-center gap-2 rounded-full border px-3 py-1.5 text-xs font-semibold transition",
-                  filters.hasWork
-                    ? "border-[color:var(--color-primary)] bg-[color:var(--color-primary)]/10 text-[color:var(--color-primary)]"
-                    : "border-[color:var(--color-border)] bg-[color:var(--color-surface)] text-[color:var(--color-text)]/70",
-                  hasWorkCount === 0
-                    ? "cursor-not-allowed opacity-50"
-                    : "hover:bg-[color:var(--color-surface-2)]/80",
-                ].join(" ")}
-                onClick={() => handleChange("hasWork", !filters.hasWork)}
-                disabled={hasWorkCount === 0}
-                aria-pressed={filters.hasWork}
-                title="Show tickets with work hours logged"
-              >
-                Work logged: {hasWorkCount}
-              </button>
-              <div
-                className={[
-                  "inline-flex items-center gap-2 rounded-full border px-3 py-1.5 text-xs font-medium",
-                  syncStatus?.isRunning
-                    ? "border-amber-200 bg-amber-50 text-amber-900"
-                    : "border-[color:var(--color-border)] bg-[color:var(--color-surface)] text-[color:var(--color-text)]/75",
-                ].join(" ")}
-                title={
-                  formatSyncTimestamp(syncStatus?.lastSuccessAt)
-                    ? `Last sync: ${formatSyncTimestamp(syncStatus?.lastSuccessAt)}${
-                        syncStatus?.lastError ? ` | Last error: ${syncStatus.lastError}` : ""
-                      }`
-                    : "JIRA sync has not completed yet"
-                }
-              >
-                <span
-                  className={[
-                    "h-2 w-2 rounded-full",
-                    syncStatus?.isRunning ? "animate-pulse bg-amber-500" : "bg-emerald-500",
-                  ].join(" ")}
-                  aria-hidden="true"
-                />
-                <span>
-                  {syncStatus?.isRunning
-                    ? "Syncing JIRA..."
-                    : syncStatus?.lastSuccessAt
-                      ? `Synced ${formatSyncAgo(syncStatus.lastSuccessAt) ?? "recently"}`
-                      : "Not synced yet"}
-                </span>
-              </div>
-              <div className="relative">
-                <button
-                  id="actions-btn-dq-actions"
-                  ref={dqActionsButtonRef}
-                  className="btn-ghost h-10 w-10"
-                  style={{ padding: 0 }}
-                  type="button"
-                  onClick={() =>
-                    setOpenMenuId((prev) =>
-                      prev === "dq-actions" ? null : "dq-actions",
-                    )
-                  }
-                  aria-label="Actions"
-                  title="Actions"
-                >
-                  {/* eslint-disable-next-line @next/next/no-img-element */}
-                  <img
-                    src="/icons/ui/menu-dots-vertical.svg"
-                    alt=""
-                    className="h-5 w-5 shrink-0 object-contain opacity-70"
-                  />
-                </button>
-                {openMenuId === "dq-actions" ? (
-                  <div
-                    id="actions-menu-dq-actions"
-                    ref={dqActionsMenuRef}
-                    className="absolute right-0 top-11 z-50 w-56 rounded-lg border border-[color:var(--color-border)] bg-[color:var(--color-surface)] shadow-xl ring-1 ring-black/5"
-                  >
-                    <div className="px-3 pt-2 text-[10px] font-semibold uppercase tracking-wide text-[color:var(--color-text)]/60">
-                      Display
-                    </div>
-                    <label className="flex items-center justify-between gap-3 px-3 py-2 text-sm font-medium hover:bg-[color:var(--color-surface-2)]">
-                      <span>Compact view</span>
-                      <input
-                        type="checkbox"
-                        checked={compact}
-                        onChange={(e) => setCompact(e.target.checked)}
-                        className="h-4 w-4 accent-[color:var(--color-primary)]"
-                      />
-                    </label>
-                    <div
-                      className="my-1 h-px bg-[color:var(--color-border)]/70"
-                      aria-hidden="true"
-                    />
-                    <button
-                      className="flex w-full items-center gap-2 px-3 py-2 text-left text-sm font-medium hover:bg-[color:var(--color-surface-2)]"
-                      onClick={() => {
-                        setOpenMenuId(null);
-                        setShowColumnPicker(true);
-                      }}
-                    >
-                      <svg
-                        aria-hidden="true"
-                        viewBox="0 0 20 20"
-                        fill="currentColor"
-                        className="h-4 w-4 text-[color:var(--color-text)]/70"
-                      >
-                        <path d="M4 6.5A1.5 1.5 0 0 1 5.5 5h9a1.5 1.5 0 1 1 0 3h-9A1.5 1.5 0 0 1 4 6.5Zm0 7A1.5 1.5 0 0 1 5.5 12h5a1.5 1.5 0 1 1 0 3h-5A1.5 1.5 0 0 1 4 13.5Zm8-1.75a.75.75 0 0 1 1.06 0l2.72 2.72a.75.75 0 1 1-1.06 1.06l-.47-.47-.72.72a.75.75 0 0 1-1.06-1.06l.72-.72-.47-.47a.75.75 0 0 1 0-1.06Z" />
-                      </svg>
-                      Customize columns
-                    </button>
-                    {isEditor || isAdmin ? (
-                      <>
-                        <div
-                          className="my-1 h-px bg-[color:var(--color-border)]/70"
-                          aria-hidden="true"
-                        />
-                        <button
-                          className="flex w-full items-center justify-between gap-2 px-3 py-2 text-left text-sm font-medium hover:bg-[color:var(--color-surface-2)] disabled:cursor-not-allowed disabled:opacity-60"
-                          onClick={async () => {
-                            setOpenMenuId(null);
-                            await triggerJiraSync();
-                          }}
-                          disabled={syncingJira}
-                        >
-                          <span>Sync JIRA now</span>
-                          {syncingJira ? (
-                            <span className="text-xs text-[color:var(--color-text)]/60">
-                              Running...
-                            </span>
-                          ) : null}
-                        </button>
-                        <button
-                          className="block w-full px-3 py-2 text-left text-sm hover:bg-[color:var(--color-surface-2)]"
-                          onClick={() => {
-                            setOpenMenuId(null);
-                            openAddModal();
-                          }}
-                        >
-                          Add ticket (manual)
-                        </button>
-                      </>
-                    ) : null}
-                  </div>
-                ) : null}
-              </div>
+            <div>
+              <p className="text-[10px] font-bold uppercase tracking-widest text-[var(--color-muted)]">Tickets</p>
+              <p className="text-xl font-bold leading-tight tracking-tight text-[var(--color-text)]">
+                {filtered.length}
+              </p>
             </div>
           </div>
         </div>
-        {openAdvanced ? (
-          <div className="mt-3 space-y-2">
-            <div className="flex items-center gap-3 text-[10px] uppercase tracking-[0.18em] text-[color:var(--color-text)]/60">
-              <span>Advanced filters</span>
-              <div className="h-px flex-1 bg-[color:var(--color-border)]/60" aria-hidden="true" />
+        <div className="kpi-frame px-5 py-4">
+          <div className="flex items-center gap-4">
+            <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-[var(--color-surface-2)] text-[var(--color-primary)]">
+              <Clock size={20} />
             </div>
+            <div>
+              <p className="text-[10px] font-bold uppercase tracking-widest text-[var(--color-muted)]">Total Work</p>
+              <p className="text-xl font-bold leading-tight tracking-tight text-[var(--color-text)]">
+                {totals.totalHours.toFixed(1)} h
+              </p>
+            </div>
+          </div>
+        </div>
+        <div className="kpi-frame px-5 py-4">
+          <div className="flex items-center gap-4">
+            <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-[var(--color-surface-2)] text-[var(--color-primary)]">
+              <Calendar size={20} />
+            </div>
+            <div>
+              <p className="text-[10px] font-bold uppercase tracking-widest text-[var(--color-muted)]">Total Days</p>
+              <p className="text-xl font-bold leading-tight tracking-tight text-[var(--color-text)]">
+                {totals.totalDays.toFixed(1)} d
+              </p>
+            </div>
+          </div>
+        </div>
+        <div className="kpi-frame px-5 py-4">
+          <div className="flex items-center gap-4">
+            <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-[var(--color-surface-2)] text-[var(--color-primary)]">
+              <Coins size={20} />
+            </div>
+            <div>
+              <p className="text-[10px] font-bold uppercase tracking-widest text-[var(--color-muted)]">Budget</p>
+              <p className="text-xl font-bold leading-tight tracking-tight text-[var(--color-text)]">
+                {formatCurrency(totals.totalBudget, "EUR")}
+              </p>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <div
+        className={`mt-6 rounded-2xl border border-[var(--color-border)] bg-[var(--color-surface)] p-1.5 shadow-sm ${openAdvanced ? "pb-2" : ""}`}
+      >
+        <div className="flex flex-wrap items-center gap-2">
+          <div className="relative min-w-[220px] flex-1">
+            <Search
+              size={15}
+              className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-[color:var(--color-text)]/45"
+            />
+            <input
+              value={searchInput}
+              onChange={(e) => setSearchInput(e.target.value)}
+              className="h-10 w-full rounded-xl border border-transparent bg-transparent pl-9 pr-3 text-sm text-[color:var(--color-text)] placeholder:text-[color:var(--color-text)]/45 focus:border-[var(--color-border)] focus:outline-none focus:ring-0"
+              placeholder="Search ticket ID or title..."
+            />
+          </div>
+          <div className="h-6 w-px bg-[var(--color-border)]" />
+          <MultiSelect
+            label="Status"
+            options={STATUS_OPTIONS.map((s) => ({ label: s, value: s }))}
+            values={filters.status}
+            counts={options.statusCounts}
+            onChange={(vals) => handleChange("status", vals)}
+            placeholder="All status"
+            hideLabel
+            containerClassName="min-w-[160px] flex-1 md:flex-none"
+          />
+          <MultiSelect
+            label="Assignee (JIRA)"
+            options={options.assignee}
+            values={filters.assignee}
+            counts={options.assigneeCounts}
+            onChange={(vals) => handleChange("assignee", vals)}
+            placeholder="All assignees"
+            hideLabel
+            containerClassName="min-w-[170px] flex-1 md:flex-none"
+          />
+          <MultiSelect
+            label="Contributors"
+            options={options.owner}
+            values={filters.owner}
+            counts={options.ownerCounts}
+            onChange={(vals) => handleChange("owner", vals)}
+            placeholder="All contributors"
+            hideLabel
+            containerClassName="min-w-[170px] flex-1 md:flex-none"
+          />
+          <div className="h-6 w-px bg-[var(--color-border)]" />
+          <button
+            className={`btn-ghost relative h-9 w-9 rounded-lg ${openAdvanced ? "bg-[var(--color-surface-2)] text-[var(--color-primary)]" : "text-[var(--color-text)]/60"}`}
+            style={{ padding: 0 }}
+            type="button"
+            onClick={() => setOpenAdvanced((v) => !v)}
+            aria-label="More filters"
+            title={openAdvanced ? "Hide filters" : "More filters"}
+          >
+            {openAdvanced ? (
+              <ChevronUp size={18} />
+            ) : (
+              <ChevronDown size={18} />
+            )}
+            {filters.daysBucket ||
+            filters.assignedFrom ||
+            filters.assignedTo ||
+            filters.dueFrom ||
+            filters.dueTo ? (
+              <span
+                className="absolute -right-1 -top-1 h-2.5 w-2.5 rounded-full bg-[color:var(--color-primary)]"
+                aria-hidden="true"
+              />
+            ) : null}
+          </button>
+        </div>
+
+        {openAdvanced ? (
+          <div className="w-full px-1 pb-2">
+            <hr className="my-2 border-[var(--color-border)]/60" />
             <div className="grid grid-cols-[repeat(auto-fit,minmax(200px,1fr))] gap-3">
               <MultiSelect
                 label="Priority"
@@ -2893,6 +2847,8 @@ export default function CrmDataQualityView() {
                 values={filters.priority}
                 counts={options.priorityCounts}
                 onChange={(vals) => handleChange("priority", vals)}
+                placeholder="Priority"
+                hideLabel
               />
               <MultiSelect
                 label="Type"
@@ -2900,6 +2856,8 @@ export default function CrmDataQualityView() {
                 values={filters.type}
                 counts={options.typeCounts}
                 onChange={(vals) => handleChange("type", vals)}
+                placeholder="Type"
+                hideLabel
               />
               <MultiSelect
                 label="Workstream"
@@ -2907,6 +2865,8 @@ export default function CrmDataQualityView() {
                 values={filters.workstream}
                 counts={options.workstreamCounts}
                 onChange={(vals) => handleChange("workstream", vals)}
+                placeholder="Workstream"
+                hideLabel
               />
               <DateRangeField
                 label="Created date"
@@ -2918,6 +2878,7 @@ export default function CrmDataQualityView() {
                   handleChange("assignedFrom", "");
                   handleChange("assignedTo", "");
                 }}
+                hideLabel
               />
               <DateRangeField
                 label="Due date"
@@ -2929,30 +2890,27 @@ export default function CrmDataQualityView() {
                   handleChange("dueFrom", "");
                   handleChange("dueTo", "");
                 }}
+                hideLabel
               />
-              <div className="flex flex-col gap-1">
-                <label className="text-xs font-medium text-[color:var(--color-text)]/70">
-                  Days to due
-                </label>
-                <select
-                  value={filters.daysBucket}
-                  onChange={(e) => handleChange("daysBucket", e.target.value)}
-                  className="input h-10"
-                >
-                  <option value="">All</option>
-                  <option value="overdue">Overdue</option>
-                  <option value="today">Today</option>
-                  <option value="next7">Next 7 days</option>
-                  <option value="next30">Next 30 days</option>
-                  <option value="no-due">No due date</option>
-                </select>
-              </div>
+              <select
+                value={filters.daysBucket}
+                onChange={(e) => handleChange("daysBucket", e.target.value)}
+                className="h-9 w-full rounded-lg border-none bg-[var(--color-surface-2)]/50 px-3 text-sm font-medium text-[var(--color-text)] transition hover:bg-[var(--color-surface-2)] focus:outline-none focus:ring-2 focus:ring-[var(--color-primary)]/20"
+              >
+                <option value="">Days to due</option>
+                <option value="overdue">Overdue</option>
+                <option value="today">Today</option>
+                <option value="next7">Next 7 days</option>
+                <option value="next30">Next 30 days</option>
+                <option value="no-due">No due date</option>
+              </select>
             </div>
-        </div>
+          </div>
         ) : null}
       </div>
+
         {activeChips.length > 0 ? (
-          <div className="flex flex-wrap items-center gap-2 text-xs sm:text-sm text-[color:var(--color-text)]/80">
+          <div className="mt-3 flex flex-wrap items-center gap-2 text-xs sm:text-sm text-[color:var(--color-text)]/80">
             {activeChips.map((chip, idx) => (
               <span
                 key={idx}
@@ -2960,19 +2918,20 @@ export default function CrmDataQualityView() {
               >
                 {chip.label}
                 <button
-                  className="text-[color:var(--color-accent)]"
+                  className="rounded-full p-0.5 text-[color:var(--color-accent)] hover:bg-[color:var(--color-surface)]"
                   onClick={chip.onClear}
                   aria-label="Clear filter"
                 >
-                  x
+                  <X size={12} />
                 </button>
               </span>
             ))}
             <button
-              className="text-xs font-medium text-[color:var(--color-text)]/70 hover:text-[color:var(--color-text)]"
+              className="inline-flex items-center gap-1.5 text-xs font-medium text-[color:var(--color-text)]/70 hover:text-[color:var(--color-text)]"
               type="button"
               onClick={clearFilters}
             >
+              <X size={12} />
               Clear all
             </button>
           </div>
@@ -3016,8 +2975,106 @@ export default function CrmDataQualityView() {
             {error}
           </div>
         ) : null}
-        <div className="flex justify-end px-4 py-2 text-sm text-[color:var(--color-text)]/80">
-          {totalTickets} tickets
+        <div className="flex items-center justify-between border-b border-[var(--color-border)]/60 bg-[var(--color-surface)] px-4 py-1.5">
+          <div className="flex flex-wrap items-center gap-3">
+            <span className="text-sm font-semibold text-[var(--color-text)]">{totalTickets} tickets</span>
+            <div className="h-4 w-px bg-[var(--color-border)]" />
+            <button
+              type="button"
+              className={[
+                "inline-flex h-7 items-center gap-1.5 rounded-full border px-2.5 text-xs font-semibold transition",
+                filters.needsEffort
+                  ? "border-amber-300 bg-amber-50 text-amber-900"
+                  : "border-[color:var(--color-border)] bg-[color:var(--color-surface)] text-[color:var(--color-text)]/70",
+                needsEffortCount === 0
+                  ? "cursor-not-allowed opacity-50"
+                  : "hover:bg-[color:var(--color-surface-2)]/80",
+              ].join(" ")}
+              onClick={() => handleChange("needsEffort", !filters.needsEffort)}
+              disabled={needsEffortCount === 0}
+              aria-pressed={filters.needsEffort}
+              title="Show tickets moved to Validation/Done in the last sync without effort"
+            >
+              Needs effort: {needsEffortCount}
+            </button>
+            <button
+              type="button"
+              className={[
+                "inline-flex h-7 items-center gap-1.5 rounded-full border px-2.5 text-xs font-semibold transition",
+                filters.hasWork
+                  ? "border-[color:var(--color-primary)] bg-[color:var(--color-primary)]/10 text-[color:var(--color-primary)]"
+                  : "border-[color:var(--color-border)] bg-[color:var(--color-surface)] text-[color:var(--color-text)]/70",
+                hasWorkCount === 0
+                  ? "cursor-not-allowed opacity-50"
+                  : "hover:bg-[color:var(--color-surface-2)]/80",
+              ].join(" ")}
+              onClick={() => handleChange("hasWork", !filters.hasWork)}
+              disabled={hasWorkCount === 0}
+              aria-pressed={filters.hasWork}
+              title="Show tickets with work hours logged"
+            >
+              Work logged: {hasWorkCount}
+            </button>
+          </div>
+
+          <div className="flex items-center gap-2">
+            <div className="relative">
+              <button
+                id="actions-btn-dq-actions"
+                ref={dqActionsButtonRef}
+                className="btn-ghost h-8 w-8 p-0 text-[var(--color-text)]/70 hover:bg-[var(--color-surface-2)] hover:text-[var(--color-text)]"
+                type="button"
+                onClick={() =>
+                  setOpenMenuId((prev) => (prev === "dq-actions" ? null : "dq-actions"))
+                }
+                aria-label="Actions"
+                title="Actions"
+              >
+                <Settings2 size={16} />
+              </button>
+              {openMenuId === "dq-actions" ? (
+                <div
+                  id="actions-menu-dq-actions"
+                  ref={dqActionsMenuRef}
+                  className="absolute right-0 top-10 z-50 w-56 rounded-lg border border-[color:var(--color-border)] bg-[color:var(--color-surface)] shadow-xl ring-1 ring-black/5"
+                >
+                  <div className="px-3 pt-2 text-[10px] font-semibold uppercase tracking-wide text-[color:var(--color-text)]/60">
+                    Display
+                  </div>
+                  <label className="flex items-center justify-between gap-3 px-3 py-2 text-sm font-medium hover:bg-[color:var(--color-surface-2)]">
+                    <span>Compact view</span>
+                    <input
+                      type="checkbox"
+                      checked={compact}
+                      onChange={(e) => setCompact(e.target.checked)}
+                      className="h-4 w-4 accent-[color:var(--color-primary)]"
+                    />
+                  </label>
+                  <div
+                    className="my-1 h-px bg-[color:var(--color-border)]/70"
+                    aria-hidden="true"
+                  />
+                  <button
+                    className="flex w-full items-center gap-2 px-3 py-2 text-left text-sm font-medium hover:bg-[color:var(--color-surface-2)]"
+                    onClick={() => {
+                      setOpenMenuId(null);
+                      setShowColumnPicker(true);
+                    }}
+                  >
+                    <svg
+                      aria-hidden="true"
+                      viewBox="0 0 20 20"
+                      fill="currentColor"
+                      className="h-4 w-4 text-[color:var(--color-text)]/70"
+                    >
+                      <path d="M4 6.5A1.5 1.5 0 0 1 5.5 5h9a1.5 1.5 0 1 1 0 3h-9A1.5 1.5 0 0 1 4 6.5Zm0 7A1.5 1.5 0 0 1 5.5 12h5a1.5 1.5 0 1 1 0 3h-5A1.5 1.5 0 0 1 4 13.5Zm8-1.75a.75.75 0 0 1 1.06 0l2.72 2.72a.75.75 0 1 1-1.06 1.06l-.47-.47-.72.72a.75.75 0 0 1-1.06-1.06l.72-.72-.47-.47a.75.75 0 0 1 0-1.06Z" />
+                    </svg>
+                    Customize columns
+                  </button>
+                </div>
+              ) : null}
+            </div>
+          </div>
         </div>
         <div className="relative overflow-x-auto overflow-y-visible">
           <table className={`min-w-full text-sm ${tableDensityClass}`}>
