@@ -68,7 +68,7 @@ export default async function CrmModulePage({ params }: Props) {
     return <CrmDqTicketsAnalyticsView />;
   }
   if (moduleConfig.type === 'manual_efforts') {
-    return <CrmManualEffortsView />;
+    return <CrmManualEffortsView clientSlug={client.slug} clientLabel={client.label ?? client.name} />;
   }
   // Temporary placeholders for modules not yet implemented
   if (moduleConfig.comingSoon) {

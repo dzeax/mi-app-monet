@@ -2,7 +2,6 @@
 
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { createPortal } from "react-dom";
-import { usePathname } from "next/navigation";
 import { DayPicker } from "react-day-picker";
 import type { DateRange } from "react-day-picker";
 import { endOfMonth, format, parseISO, startOfMonth, startOfYear } from "date-fns";
@@ -72,6 +71,10 @@ type DraftEntry = {
 };
 
 type Option = { label: string; value: string; count?: number };
+type CrmManualEffortsViewProps = {
+  clientSlug: string;
+  clientLabel?: string;
+};
 
 function MultiSelect({
   label,
@@ -539,6 +542,15 @@ const parseYearFromDate = (value?: string | null) => {
 };
 
 const buildKey = () => `draft-${Date.now()}-${Math.random().toString(16).slice(2)}`;
+const getClientDisplayName = (clientLabel?: string, clientSlug?: string) => {
+  if (clientLabel?.trim()) return clientLabel.trim();
+  if (!clientSlug?.trim()) return "Client";
+  return clientSlug
+    .split("-")
+    .filter(Boolean)
+    .map((part) => part.charAt(0).toUpperCase() + part.slice(1))
+    .join(" ");
+};
 
 const getBadgeColor = (text: string) => {
   const colors = [
@@ -556,10 +568,11 @@ const getBadgeColor = (text: string) => {
   return colors[Math.abs(hash) % colors.length];
 };
 
-export default function CrmManualEffortsView() {
-  const pathname = usePathname();
-  const segments = pathname?.split("/").filter(Boolean) ?? [];
-  const clientSlug = segments[1] || "emg";
+export default function CrmManualEffortsView({ clientSlug, clientLabel }: CrmManualEffortsViewProps) {
+  const clientDisplayName = useMemo(
+    () => getClientDisplayName(clientLabel, clientSlug),
+    [clientLabel, clientSlug],
+  );
   const { isAdmin, isEditor, user } = useAuth();
   const currentYear = new Date().getFullYear();
 
@@ -1102,9 +1115,11 @@ export default function CrmManualEffortsView() {
         <div className="relative z-10 space-y-6">
           <div className="flex flex-wrap items-center justify-between gap-4">
             <div>
-              <h1 className="text-2xl font-bold tracking-tight text-[var(--color-text)]">Manual Efforts · EMG</h1>
+              <h1 className="text-2xl font-bold tracking-tight text-[var(--color-text)]">
+                {`Manual Efforts · ${clientDisplayName}`}
+              </h1>
               <p className="mt-1 text-sm text-[var(--color-muted)]">
-                Log EMG-only effort not tied to tickets, for reporting and budget tracking.
+                {`Log effort for ${clientDisplayName} not tied to tickets, for reporting and budget tracking.`}
               </p>
             </div>
 
