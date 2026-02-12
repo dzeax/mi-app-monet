@@ -132,22 +132,71 @@ const aggregateTotals = (contributions: Contribution[]) => {
   );
 };
 
-const normalizeAlias = (value: string) => value.trim().toLowerCase();
+const stripDiacritics = (value: string) =>
+  value.normalize("NFKD").replace(/[\u0300-\u036f]/g, "");
 
-const loadAliasMap = async (
+const normalizeAlias = (value: string) =>
+  stripDiacritics(value)
+    .trim()
+    .toLowerCase()
+    .replace(/\s+/g, " ");
+
+type PeopleLookup = {
+  aliasToPersonId: Map<string, string>;
+  personNameById: Map<string, string>;
+};
+
+const loadPeopleLookup = async (
   admin: ReturnType<typeof supabaseAdmin>,
   clientSlug: string,
 ) => {
-  const { data } = await admin
-    .from("crm_people_aliases")
-    .select("alias, person_id")
-    .eq("client_slug", clientSlug);
-  const map = new Map<string, string>();
-  (data ?? []).forEach((row: { alias?: string | null; person_id?: string | null }) => {
-    if (!row.alias || !row.person_id) return;
-    map.set(normalizeAlias(row.alias), row.person_id);
+  const [{ data: aliasRows }, { data: peopleRows }] = await Promise.all([
+    admin
+      .from("crm_people_aliases")
+      .select("alias, person_id")
+      .eq("client_slug", clientSlug),
+    admin
+      .from("crm_people")
+      .select("id, display_name")
+      .eq("client_slug", clientSlug),
+  ]);
+
+  const aliasToPersonId = new Map<string, string>();
+  const personNameById = new Map<string, string>();
+
+  (peopleRows ?? []).forEach((row: { id?: string | null; display_name?: string | null }) => {
+    if (!row.id || !row.display_name) return;
+    const displayName = row.display_name.trim();
+    if (!displayName) return;
+    personNameById.set(row.id, displayName);
+    aliasToPersonId.set(normalizeAlias(displayName), row.id);
   });
-  return map;
+
+  (aliasRows ?? []).forEach((row: { alias?: string | null; person_id?: string | null }) => {
+    if (!row.alias || !row.person_id) return;
+    aliasToPersonId.set(normalizeAlias(row.alias), row.person_id);
+  });
+
+  return { aliasToPersonId, personNameById } as PeopleLookup;
+};
+
+const resolveContributionIdentity = (
+  contribution: Contribution,
+  lookup: PeopleLookup,
+): Contribution => {
+  const owner = String(contribution.owner || "").trim();
+  const personId =
+    contribution.personId ??
+    (owner ? lookup.aliasToPersonId.get(normalizeAlias(owner)) ?? null : null);
+  const canonicalOwner = personId
+    ? lookup.personNameById.get(personId) ?? owner
+    : owner;
+
+  return {
+    ...contribution,
+    owner: canonicalOwner || owner,
+    personId,
+  };
 };
 
 export async function GET(request: Request) {
@@ -164,6 +213,16 @@ export async function GET(request: Request) {
   const client = searchParams.get("client") || DEFAULT_CLIENT;
 
   try {
+    let peopleLookup: PeopleLookup = {
+      aliasToPersonId: new Map<string, string>(),
+      personNameById: new Map<string, string>(),
+    };
+    try {
+      peopleLookup = await loadPeopleLookup(admin, client);
+    } catch (err) {
+      console.warn("[crm:data-quality] people lookup unavailable", err);
+    }
+
     const { data, error } = await admin
       .from("crm_data_quality_tickets")
       .select("*")
@@ -237,15 +296,20 @@ export async function GET(request: Request) {
           const ticketId = c.ticket_id || "";
           if (!ticketId) return;
           const arr = map.get(ticketId) || [];
-          arr.push({
-            owner: c.owner || "",
-            personId: c.person_id ?? null,
-            effortDate: c.effort_date ?? null,
-            workHours: Number(c.work_hours ?? 0),
-            prepHours: c.prep_hours != null ? Number(c.prep_hours) : null,
-            workstream: c.workstream || DEFAULT_WORKSTREAM,
-            notes: c.notes ?? null,
-          });
+          arr.push(
+            resolveContributionIdentity(
+              {
+                owner: c.owner || "",
+                personId: c.person_id ?? null,
+                effortDate: c.effort_date ?? null,
+                workHours: Number(c.work_hours ?? 0),
+                prepHours: c.prep_hours != null ? Number(c.prep_hours) : null,
+                workstream: c.workstream || DEFAULT_WORKSTREAM,
+                notes: c.notes ?? null,
+              },
+              peopleLookup,
+            ),
+          );
           map.set(ticketId, arr);
         });
         tickets.forEach((t) => {
@@ -326,7 +390,7 @@ export async function POST(request: Request) {
       return NextResponse.json({ error: "Not authenticated" }, { status: 401 });
     }
     const admin = supabaseAdmin();
-    const aliasMap = await loadAliasMap(admin, clientSlug);
+    const peopleLookup = await loadPeopleLookup(admin, clientSlug);
 
     const fallbackEffortDate = defaultEffortDateForAssignedDate(parsed.assignedDate);
     const contributions = normalizeContributions(
@@ -335,10 +399,7 @@ export async function POST(request: Request) {
       parsed.workHours,
       parsed.prepHours ?? null,
       fallbackEffortDate,
-    ).map((c) => ({
-      ...c,
-      personId: c.personId ?? aliasMap.get(normalizeAlias(c.owner)) ?? null,
-    }));
+    ).map((c) => resolveContributionIdentity(c, peopleLookup));
     if (contributions.length === 0) {
       return NextResponse.json({ error: "At least one contribution is required" }, { status: 400 });
     }
@@ -578,7 +639,7 @@ export async function PATCH(request: Request) {
     const userId = sessionData.session?.user?.id;
     if (!userId) return NextResponse.json({ error: "Not authenticated" }, { status: 401 });
     const admin = supabaseAdmin();
-    const aliasMap = await loadAliasMap(admin, clientSlug);
+    const peopleLookup = await loadPeopleLookup(admin, clientSlug);
 
     const fallbackEffortDate = defaultEffortDateForAssignedDate(parsed.assignedDate);
     const contributions = normalizeContributions(
@@ -587,10 +648,7 @@ export async function PATCH(request: Request) {
       parsed.workHours,
       parsed.prepHours ?? null,
       fallbackEffortDate,
-    ).map((c) => ({
-      ...c,
-      personId: c.personId ?? aliasMap.get(normalizeAlias(c.owner)) ?? null,
-    }));
+    ).map((c) => resolveContributionIdentity(c, peopleLookup));
     if (contributions.length === 0) {
       return NextResponse.json({ error: "At least one contribution is required" }, { status: 400 });
     }

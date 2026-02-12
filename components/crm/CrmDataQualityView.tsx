@@ -41,6 +41,7 @@ import type {
   NeedsEffortDismissReason,
 } from "@/types/crm";
 import { DEFAULT_WORKSTREAM, WORKSTREAM_DEFAULTS } from "@/lib/crm/workstreams";
+import { normalizeStr } from "@/lib/strings";
 import { useAuth } from "@/context/AuthContext";
 import MiniModal from "@/components/ui/MiniModal";
 import ColumnPicker from "@/components/ui/ColumnPicker";
@@ -680,8 +681,7 @@ const normalizeWorkstream = (value?: string | null) => {
   return WORKSTREAM_ALIASES[key] ?? trimmed;
 };
 
-const normalizePersonKey = (value?: string | null) =>
-  value?.trim().toLowerCase() ?? "";
+const normalizePersonKey = (value?: string | null) => normalizeStr(value);
 
 const parseYearFromDate = (value?: string | null) => {
   if (!value || value.length < 4) return null;
@@ -2170,16 +2170,32 @@ export default function CrmDataQualityView() {
       etaDate: row.etaDate || "",
       comments: row.comments || "",
     });
+    const resolveContributionIdentity = (
+      ownerValue?: string | null,
+      personIdValue?: string | null,
+    ) => {
+      const ownerRaw = String(ownerValue ?? "").trim();
+      const inferredPersonId =
+        personIdValue ??
+        (ownerRaw ? aliasToPersonId.get(normalizePersonKey(ownerRaw)) ?? null : null);
+      const canonicalOwner = inferredPersonId
+        ? (peopleById.get(inferredPersonId) ?? ownerRaw)
+        : ownerRaw;
+      return {
+        owner: canonicalOwner || ownerRaw,
+        personId: inferredPersonId,
+      };
+    };
+
     const contribs =
       row.contributions && row.contributions.length > 0
         ? row.contributions.map((c, idx) => ({
+            ...resolveContributionIdentity(c.owner, c.personId ?? null),
             id: `c-${row.ticketId}-${idx}`,
             effortDate:
               c.effortDate && isIsoDate(c.effortDate)
                 ? c.effortDate
                 : defaultEffortDateForAssignedDate(row.assignedDate || todaysIsoDate()),
-            owner: c.owner,
-            personId: c.personId ?? null,
             workHours: String(c.workHours ?? ""),
             prepHours:
               c.prepHours != null ? String(c.prepHours) : computePrepHours(String(c.workHours ?? "")),
@@ -2188,10 +2204,9 @@ export default function CrmDataQualityView() {
           }))
         : [
             {
+              ...resolveContributionIdentity(row.owner, null),
               id: `c-${row.ticketId}-0`,
               effortDate: defaultEffortDateForAssignedDate(row.assignedDate || todaysIsoDate()),
-              owner: row.owner,
-              personId: null,
               workHours: String(row.workHours ?? ""),
               prepHours:
                 row.prepHours != null ? String(row.prepHours) : computePrepHours(String(row.workHours ?? "")),
