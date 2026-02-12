@@ -52,7 +52,8 @@ export default function CrmImportModal({ clientSlug, onClose, onImported }: Prop
       });
       const body = await res.json().catch(() => null);
       if (!res.ok) throw new Error(body?.error || `Import failed (${res.status})`);
-      setResult(`Imported ${body?.imported ?? 0} rows.`);
+      const entityLabel = target === "campaigns" ? "units" : "rows";
+      setResult(`Imported ${body?.imported ?? 0} ${entityLabel}.`);
       setStatus("Done");
       showSuccess("CSV imported");
       if (typeof window !== "undefined") {

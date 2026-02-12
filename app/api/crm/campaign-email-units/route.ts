@@ -7,6 +7,14 @@ import { computeHoursForUnit } from "@/lib/crm/timeProfiles";
 
 const DEFAULT_CLIENT = "emg";
 export const runtime = "nodejs";
+const REQUIRED_UNITS_CSV_COLUMNS = [
+  "send_date",
+  "jira_ticket",
+  "campaign_name",
+  "brand",
+  "market",
+  "owner",
+] as const;
 
 const normalizeAlias = (value: string) => value.trim().toLowerCase();
 
@@ -222,7 +230,7 @@ export async function GET(request: Request) {
       if (offset > 10000) break;
     }
 
-    const rows = all.map((r) => ({
+    const units = all.map((r) => ({
       id: r.id,
       clientSlug: r.client_slug,
       week: r.week,
@@ -253,7 +261,7 @@ export async function GET(request: Request) {
       updatedAt: r.updated_at,
     }));
 
-    return NextResponse.json({ rows });
+    return NextResponse.json({ units });
   } catch (err) {
     const msg = err instanceof Error ? err.message : "Unexpected error";
     return NextResponse.json({ error: msg }, { status: 500 });
@@ -359,7 +367,7 @@ export async function POST(request: Request) {
       return matched.length ? matched[0] : null;
     };
 
-    const rows: CampaignUnitInsert[] = [];
+    const units: CampaignUnitInsert[] = [];
     const seen = new Set<string>();
 
     markets.forEach((market) => {
@@ -392,7 +400,7 @@ export async function POST(request: Request) {
                     hours_prep: matchedRule.hours_prep ?? 0,
                   }
                 : computeHoursForUnit(parsed.profileKey, touchpoint, variant || "A");
-            rows.push({
+            units.push({
               client_slug: clientSlug,
               week: null,
               year: Number(resolvedDate.slice(0, 4)),
@@ -422,17 +430,17 @@ export async function POST(request: Request) {
       });
     });
 
-    if (!rows.length) {
+    if (!units.length) {
       return NextResponse.json(
-        { error: "No rows to generate" },
+        { error: "No units to generate" },
         { status: 400 },
       );
     }
 
     const chunkSize = 500;
     let imported = 0;
-    for (let i = 0; i < rows.length; i += chunkSize) {
-      const batch = rows.slice(i, i + chunkSize);
+    for (let i = 0; i < units.length; i += chunkSize) {
+      const batch = units.slice(i, i + chunkSize);
       const { error } = await supabase
         .from("campaign_email_units")
         .upsert(batch, {
@@ -482,18 +490,37 @@ export async function PUT(request: Request) {
       delimiter,
     });
 
+    if (!records.length) {
+      return NextResponse.json({ error: "CSV has no data rows" }, { status: 400 });
+    }
+
+    const presentColumns = new Set(
+      Object.keys(records[0] ?? {}).map((column) => normalizeAlias(column)),
+    );
+    const missingColumns = REQUIRED_UNITS_CSV_COLUMNS.filter(
+      (column) => !presentColumns.has(column),
+    );
+    if (missingColumns.length) {
+      return NextResponse.json(
+        {
+          error: `Missing required CSV columns: ${missingColumns.join(", ")}`,
+        },
+        { status: 400 },
+      );
+    }
+
     const normalized = records.map((r) => {
-      const sendDate = normalizeDate(r.send_date || r.sending_date || r.date);
+      const sendDate = normalizeDate(r.send_date);
       const week = toInt(r.week);
       const year = toInt(r.year) || (sendDate ? Number(sendDate.slice(0, 4)) : null);
-      const owner = String(r.owner || r.in_charge || "").trim();
-      const jira = String(r.jira_ticket || r.ticket || r.jira || "").trim();
-      const brand = String(r.brand || "").trim();
-      const market = String(r.market || "").trim();
-      const campaignName = String(
-        r.campaign_name || r.campaign || r.title || ""
-      ).trim();
-      const variant = String(r.variant || r.test || r.ab_group || "").trim();
+      const owner = String(r.owner ?? "").trim();
+      const jira = String(r.jira_ticket ?? "").trim();
+      const brand = String(r.brand ?? "").trim();
+      const market = String(r.market ?? "").trim();
+      const campaignName = String(r.campaign_name ?? "").trim();
+      const variant = String(r.variant ?? "").trim();
+      const touchpoint = String(r.touchpoint ?? "").trim();
+      const scope = String(r.scope ?? "Global").trim() || "Global";
       return {
         client_slug: clientSlug,
         week,
@@ -502,23 +529,20 @@ export async function PUT(request: Request) {
         brand,
         send_date: sendDate,
         market,
-        scope: (r.scope || r.level || "Global").toString().trim() || "Global",
+        scope,
         segment: r.segment ? String(r.segment).trim() : null,
-        touchpoint: r.touchpoint ? String(r.touchpoint).trim() : null,
+        touchpoint: touchpoint || null,
         variant,
         owner,
         jira_ticket: jira,
-        status: (r.status || "Planned").toString().trim() || "Planned",
-        hours_master_template: parseNum(r.hours_master_template ?? r.time_master_template, 0),
-        hours_translations: parseNum(r.hours_translations ?? r.time_translations, 0),
-        hours_copywriting: parseNum(r.hours_copywriting ?? r.time_copywriting, 0),
-        hours_assets: parseNum(r.hours_assets ?? r.time_image_resize ?? r.time_assets, 0),
-        hours_revisions: parseNum(r.hours_revisions ?? r.time_revisions, 0),
-        hours_build: parseNum(r.hours_build ?? r.time_de_jb ?? r.time_build, 0),
-        hours_prep: parseNum(
-          r.hours_prep ?? r.hours_meetings ?? r.time_meetings,
-          0
-        ),
+        status: String(r.status ?? "Planned").trim() || "Planned",
+        hours_master_template: parseNum(r.hours_master_template, 0),
+        hours_translations: parseNum(r.hours_translations, 0),
+        hours_copywriting: parseNum(r.hours_copywriting, 0),
+        hours_assets: parseNum(r.hours_assets, 0),
+        hours_revisions: parseNum(r.hours_revisions, 0),
+        hours_build: parseNum(r.hours_build, 0),
+        hours_prep: parseNum(r.hours_prep, 0),
       };
     });
 
@@ -531,7 +555,7 @@ export async function PUT(request: Request) {
         row.market,
     );
 
-    // Deduplicate rows by the natural key to avoid "ON CONFLICT ... cannot affect row a second time"
+    // Deduplicate units by the natural key to avoid "ON CONFLICT ... cannot affect row a second time"
     const byKey = new Map<string, CampaignUnitInsert>();
     for (const row of cleaned) {
       const key = [
@@ -550,7 +574,7 @@ export async function PUT(request: Request) {
     const deduped = Array.from(byKey.values());
 
     if (deduped.length === 0) {
-      return NextResponse.json({ error: "No valid rows found" }, { status: 400 });
+      return NextResponse.json({ error: "No valid units found" }, { status: 400 });
     }
 
     const { data: sessionData, error: sessionError } = await supabase.auth.getSession();

@@ -1,10 +1,26 @@
-﻿/* eslint-disable @typescript-eslint/no-explicit-any */
+/* eslint-disable @typescript-eslint/no-explicit-any */
 "use client";
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { usePathname } from "next/navigation";
 import Link from "next/link";
+import {
+  Calendar,
+  ChevronDown,
+  ChevronUp,
+  Clock,
+  Coins,
+  FileDown,
+  Layers,
+  MoreHorizontal,
+  Plus,
+  RefreshCw,
+  Search,
+  Upload,
+  X,
+} from "lucide-react";
 import ColumnPicker from "@/components/ui/ColumnPicker";
+import DatePicker from "@/components/ui/DatePicker";
 import GeoFlag from "@/components/GeoFlag";
 import MiniModal from "@/components/ui/MiniModal";
 import CrmGenerateUnitsModal from "@/components/crm/CrmGenerateUnitsModal";
@@ -13,7 +29,7 @@ import CrmBulkEditUnitsModal, {
 } from "@/components/crm/CrmBulkEditUnitsModal";
 import { showError, showSuccess } from "@/utils/toast";
 
-type Row = {
+type Unit = {
   id: string;
   clientSlug: string;
   week: number | null;
@@ -30,6 +46,13 @@ type Row = {
   personId?: string | null;
   jiraTicket: string;
   status: string;
+  hoursMasterTemplate: number;
+  hoursTranslations: number;
+  hoursCopywriting: number;
+  hoursAssets: number;
+  hoursRevisions: number;
+  hoursBuild: number;
+  hoursPrep: number;
   hoursTotal: number;
   daysTotal: number;
   budgetEur: number | null;
@@ -46,7 +69,7 @@ type Filters = {
   status: string[];
 };
 
-type ComputedRow = Row & { budgetValue: number };
+type ComputedUnit = Unit & { budgetValue: number };
 
 type SortKey = "sendDate" | "hoursTotal" | "daysTotal" | "budgetValue";
 type SortDir = "asc" | "desc";
@@ -106,6 +129,9 @@ function MultiSelect({
   onChange,
   counts,
   placeholder = "All",
+  hideLabel = false,
+  containerClassName,
+  triggerClassName,
 }: {
   label: string;
   options: Option[];
@@ -113,6 +139,9 @@ function MultiSelect({
   onChange: (vals: string[]) => void;
   counts?: Record<string, number>;
   placeholder?: string;
+  hideLabel?: boolean;
+  containerClassName?: string;
+  triggerClassName?: string;
 }) {
   const [open, setOpen] = useState(false);
   const ref = useRef<HTMLDivElement | null>(null);
@@ -136,6 +165,16 @@ function MultiSelect({
       : values.length === 1
         ? options.find((o) => o.value === values[0])?.label || values[0]
         : `${values.length} selected`;
+  const triggerClasses = [
+    hideLabel
+      ? "flex h-9 w-full items-center justify-between gap-2 rounded-lg border-none bg-[var(--color-surface-2)]/50 px-3 text-left text-sm font-medium text-[var(--color-text)] transition hover:bg-[var(--color-surface-2)] focus:outline-none focus:ring-2 focus:ring-[var(--color-primary)]/20"
+      : "input flex h-10 w-full items-center justify-between gap-2 text-left truncate",
+    !hideLabel && values.length > 0 ? "ring-1 ring-[color:var(--color-accent)]" : "",
+    hideLabel ? "" : "focus:outline-none focus:ring-2 focus:ring-[color:var(--color-accent)]",
+    triggerClassName || "",
+  ]
+    .filter(Boolean)
+    .join(" ");
 
   useEffect(() => {
     const handler = (e: MouseEvent | TouchEvent) => {
@@ -186,17 +225,20 @@ function MultiSelect({
   }, [open, options, activeIdx, toggle]);
 
   return (
-    <div className="relative" ref={ref}>
-      <label className="text-xs font-medium text-[color:var(--color-text)]/70">
-        {label}
-      </label>
+    <div className={["relative", containerClassName].filter(Boolean).join(" ")} ref={ref}>
+      {!hideLabel ? (
+        <label className="text-xs font-medium text-[color:var(--color-text)]/70">
+          {label}
+        </label>
+      ) : null}
       <button
         type="button"
-        className={`input h-10 w-full text-left truncate ${values.length > 0 ? "ring-1 ring-[color:var(--color-accent)]" : ""} focus:outline-none focus:ring-2 focus:ring-[color:var(--color-accent)]`}
+        className={triggerClasses}
         onClick={() => setOpen((v) => !v)}
         title={display}
       >
-        {display}
+        <span className="truncate">{display}</span>
+        <ChevronDown className="ml-auto h-4 w-4 shrink-0 opacity-50" />
       </button>
       {open ? (
         <div className="absolute z-30 mt-1 w-full rounded-lg border border-[color:var(--color-border)] bg-[color:var(--color-surface)] shadow-lg">
@@ -246,17 +288,18 @@ export default function CrmCampaignReportingView() {
   const segments = pathname?.split("/").filter(Boolean) ?? [];
   const clientSlug = segments[1] || "emg";
   const currentYear = new Date().getFullYear();
-  const currentYearStart = `${currentYear}-01-01`;
 
-  const [rows, setRows] = useState<Row[]>([]);
+  const [units, setUnits] = useState<Unit[]>([]);
   const [ratesByYear, setRatesByYear] = useState<
     Record<number, { byOwner: Record<string, number>; byPerson: Record<string, number> }>
   >({});
   const [peopleDirectory, setPeopleDirectory] = useState<PersonDirectoryItem[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const [importing, setImporting] = useState(false);
   const [exporting, setExporting] = useState(false);
   const [deleting, setDeleting] = useState(false);
+  const [refreshTick, setRefreshTick] = useState(0);
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
   const [openBulkEdit, setOpenBulkEdit] = useState(false);
   const [bulkEditIds, setBulkEditIds] = useState<string[]>([]);
@@ -275,7 +318,7 @@ export default function CrmCampaignReportingView() {
   const endOfThisMonth = formatLocalDate(new Date(today.getFullYear(), today.getMonth() + 1, 0));
   const [dateFrom, setDateFrom] = useState(startOfThisMonth);
   const [dateTo, setDateTo] = useState<string>(endOfThisMonth);
-  const [datePreset, setDatePreset] = useState<"this-week" | "last-week" | "this-month" | "last-month" | "this-quarter" | "last-quarter" | "this-year" | "last-year" | "">("this-month");
+  const [datePreset, setDatePreset] = useState<"this-week" | "last-week" | "this-month" | "last-month" | "this-quarter" | "last-quarter" | "this-year" | "last-year" | "all-time" | "">("this-month");
   const [page, setPage] = useState(0);
   const [pageSize, setPageSize] = useState(50);
   const [sortKey, setSortKey] = useState<SortKey>("sendDate");
@@ -304,13 +347,13 @@ export default function CrmCampaignReportingView() {
   }, [peopleDirectory]);
   const rateYears = useMemo(() => {
     const set = new Set<number>();
-    rows.forEach((row) => {
-      const year = parseYearFromDate(row.sendDate) ?? row.year ?? currentYear;
+    units.forEach((unit) => {
+      const year = parseYearFromDate(unit.sendDate) ?? unit.year ?? currentYear;
       if (year) set.add(year);
     });
     if (set.size === 0) set.add(currentYear);
     return Array.from(set).sort((a, b) => a - b);
-  }, [rows, currentYear]);
+  }, [units, currentYear]);
   const rateYearsKey = useMemo(() => rateYears.join(","), [rateYears]);
   const resolveOwnerKey = useCallback(
     (label?: string | null, personId?: string | null) => {
@@ -325,12 +368,12 @@ export default function CrmCampaignReportingView() {
     (key: string) => peopleById.get(key) ?? key,
     [peopleById],
   );
-  const getRateForRow = useCallback(
-    (row: Row) => {
-      const year = parseYearFromDate(row.sendDate) ?? row.year ?? currentYear;
+  const getRateForUnit = useCallback(
+    (unit: Unit) => {
+      const year = parseYearFromDate(unit.sendDate) ?? unit.year ?? currentYear;
       const rates = ratesByYear[year];
       if (!rates) return null;
-      return row.personId ? rates.byPerson[row.personId] : rates.byOwner[row.owner];
+      return unit.personId ? rates.byPerson[unit.personId] : rates.byOwner[unit.owner];
     },
     [currentYear, ratesByYear],
   );
@@ -379,6 +422,7 @@ export default function CrmCampaignReportingView() {
   );
   const [actionsOpen, setActionsOpen] = useState(false);
   const actionsRef = useRef<HTMLDivElement | null>(null);
+  const importInputRef = useRef<HTMLInputElement | null>(null);
   const headerSelectRef = useRef<HTMLInputElement | null>(null);
   const [openAdvanced, setOpenAdvanced] = useState(false);
   const makeClearAndResetPage = useCallback(
@@ -417,8 +461,8 @@ export default function CrmCampaignReportingView() {
         const res = await fetch(`/api/crm/campaign-email-units?${params.toString()}`);
         const body = await res.json().catch(() => null);
         if (!res.ok) throw new Error(body?.error || `Failed to load (${res.status})`);
-        const list: Row[] = Array.isArray(body?.rows)
-          ? body.rows.map((r: any) => ({
+        const rawUnits = Array.isArray(body?.units) ? body.units : [];
+        const list: Unit[] = rawUnits.map((r: any) => ({
               id: r.id,
               clientSlug: r.clientSlug,
               week: r.week ?? null,
@@ -435,12 +479,18 @@ export default function CrmCampaignReportingView() {
               personId: r.personId ?? null,
               jiraTicket: r.jiraTicket || "",
               status: r.status || "",
+              hoursMasterTemplate: Number(r.hoursMasterTemplate ?? 0),
+              hoursTranslations: Number(r.hoursTranslations ?? 0),
+              hoursCopywriting: Number(r.hoursCopywriting ?? 0),
+              hoursAssets: Number(r.hoursAssets ?? 0),
+              hoursRevisions: Number(r.hoursRevisions ?? 0),
+              hoursBuild: Number(r.hoursBuild ?? 0),
+              hoursPrep: Number(r.hoursPrep ?? 0),
               hoursTotal: Number(r.hoursTotal ?? 0),
               daysTotal: Number(r.daysTotal ?? 0),
               budgetEur: r.budgetEur != null ? Number(r.budgetEur) : null,
             }))
-          : [];
-        if (active) setRows(list);
+        if (active) setUnits(list);
       } catch (err) {
         if (active) setError(err instanceof Error ? err.message : "Unable to load data");
       } finally {
@@ -458,7 +508,7 @@ export default function CrmCampaignReportingView() {
       active = false;
       window.removeEventListener("crm:imported", handler);
     };
-  }, [clientSlug, currentYear, dateFrom, dateTo]);
+  }, [clientSlug, currentYear, dateFrom, dateTo, refreshTick]);
 
   useEffect(() => {
     let active = true;
@@ -501,10 +551,10 @@ export default function CrmCampaignReportingView() {
   useEffect(() => {
     // Clear any selection if the dataset changes
     setSelectedIds(new Set());
-  }, [rows]);
+  }, [units]);
 
-  const rowMatchesFilters = useCallback(
-    (r: Row, exclude?: keyof Filters) => {
+  const unitMatchesFilters = useCallback(
+    (r: Unit, exclude?: keyof Filters) => {
       if (dateFrom && (!r.sendDate || r.sendDate < dateFrom)) return false;
       if (dateTo && (!r.sendDate || r.sendDate > dateTo)) return false;
       if (exclude !== "brand" && filters.brand.length && !filters.brand.includes(r.brand || "")) return false;
@@ -548,7 +598,7 @@ export default function CrmCampaignReportingView() {
       return Object.fromEntries(map);
     };
 
-    const subset = (exclude: keyof Filters) => rows.filter((r) => rowMatchesFilters(r, exclude));
+    const subset = (exclude: keyof Filters) => units.filter((r) => unitMatchesFilters(r, exclude));
     const ownerValues = uniq(subset("owner").map((r) => resolveOwnerKey(r.owner, r.personId)));
     const ownerCounts = countEntries(subset("owner").map((r) => resolveOwnerKey(r.owner, r.personId)));
     const ownerOptions = ownerValues
@@ -585,7 +635,7 @@ export default function CrmCampaignReportingView() {
         counts: countEntries(subset("status").map((r) => r.status)),
       },
     };
-  }, [rows, rowMatchesFilters, resolveOwnerKey, labelForOwnerKey]);
+  }, [units, unitMatchesFilters, resolveOwnerKey, labelForOwnerKey]);
 
   const bulkEditOwnerOptions = useMemo(() => {
     const canonicalLabels = peopleDirectory
@@ -601,7 +651,7 @@ export default function CrmCampaignReportingView() {
         keySet.add(key || owner);
       });
     });
-    rows.forEach((r) => {
+    units.forEach((r) => {
       const key = resolveOwnerKey(r.owner, r.personId);
       if (key) keySet.add(key);
     });
@@ -609,15 +659,15 @@ export default function CrmCampaignReportingView() {
       .map((key) => labelForOwnerKey(key))
       .filter((label) => label.trim().length > 0);
     return Array.from(new Set(labels)).sort((a, b) => a.localeCompare(b));
-  }, [peopleDirectory, ratesByYear, rows, resolveOwnerKey, labelForOwnerKey]);
+  }, [peopleDirectory, ratesByYear, units, resolveOwnerKey, labelForOwnerKey]);
 
   const bulkEditStatusOptions = useMemo(() => {
     const set = new Set<string>(["Planned", "Done", "Sent"]);
-    rows.forEach((r) => {
+    units.forEach((r) => {
       if (r.status) set.add(r.status);
     });
     return Array.from(set).sort((a, b) => a.localeCompare(b));
-  }, [rows]);
+  }, [units]);
 
   const handleFilterChange = useCallback((key: keyof Filters, value: string | string[]) => {
     setFilters((prev) => ({ ...prev, [key]: value as any }));
@@ -639,18 +689,18 @@ export default function CrmCampaignReportingView() {
     setDateTo(endOfThisMonth);
   };
 
-  const filteredRows = useMemo(
-    () => rows.filter((r) => rowMatchesFilters(r)),
-    [rows, rowMatchesFilters],
+  const filteredUnits = useMemo(
+    () => units.filter((r) => unitMatchesFilters(r)),
+    [units, unitMatchesFilters],
   );
 
-  const computedRows = useMemo<ComputedRow[]>(() => {
-    return filteredRows.map((r) => {
-      const rate = getRateForRow(r);
+  const computedUnits = useMemo<ComputedUnit[]>(() => {
+    return filteredUnits.map((r) => {
+      const rate = getRateForUnit(r);
       const budgetValue = rate != null ? r.daysTotal * rate : r.budgetEur ?? 0;
       return { ...r, budgetValue };
     });
-  }, [filteredRows, getRateForRow]);
+  }, [filteredUnits, getRateForUnit]);
 
   const activeChips = useMemo(() => {
     const chips: { label: string; onClear: () => void }[] = [];
@@ -838,22 +888,22 @@ export default function CrmCampaignReportingView() {
 
   useEffect(() => {
     setPage(0);
-  }, [rows.length]);
+  }, [units.length]);
 
   useEffect(() => {
-    const maxPage = Math.max(Math.ceil(computedRows.length / pageSize) - 1, 0);
+    const maxPage = Math.max(Math.ceil(computedUnits.length / pageSize) - 1, 0);
     if (page > maxPage) setPage(maxPage);
-  }, [computedRows.length, pageSize, page]);
+  }, [computedUnits.length, pageSize, page]);
 
   const totals = useMemo(() => {
-    const totalHours = computedRows.reduce((acc, r) => acc + r.hoursTotal, 0);
-    const totalDays = computedRows.reduce((acc, r) => acc + r.daysTotal, 0);
-    const totalBudget = computedRows.reduce((acc, r) => acc + r.budgetValue, 0);
+    const totalHours = computedUnits.reduce((acc, r) => acc + r.hoursTotal, 0);
+    const totalDays = computedUnits.reduce((acc, r) => acc + r.daysTotal, 0);
+    const totalBudget = computedUnits.reduce((acc, r) => acc + r.budgetValue, 0);
     return { totalHours, totalDays, totalBudget };
-  }, [computedRows]);
+  }, [computedUnits]);
 
-  const sortedRows = useMemo(() => {
-    const list = [...computedRows];
+  const sortedUnits = useMemo(() => {
+    const list = [...computedUnits];
     const cmp = (a: any, b: any) => {
       const dir = sortDir === "asc" ? 1 : -1;
       switch (sortKey) {
@@ -877,24 +927,24 @@ export default function CrmCampaignReportingView() {
     };
     list.sort(cmp);
     return list;
-  }, [computedRows, sortDir, sortKey]);
+  }, [computedUnits, sortDir, sortKey]);
 
-  const pagedRows = useMemo(() => {
-    if (sortedRows.length <= pageSize) return sortedRows;
-    const start = Math.min(page * pageSize, Math.max(sortedRows.length - 1, 0));
-    return sortedRows.slice(start, start + pageSize);
-  }, [sortedRows, page, pageSize]);
+  const pagedUnits = useMemo(() => {
+    if (sortedUnits.length <= pageSize) return sortedUnits;
+    const start = Math.min(page * pageSize, Math.max(sortedUnits.length - 1, 0));
+    return sortedUnits.slice(start, start + pageSize);
+  }, [sortedUnits, page, pageSize]);
 
-  const pageIds = useMemo(() => pagedRows.map((r) => r.id), [pagedRows]);
+  const pageUnitIds = useMemo(() => pagedUnits.map((r) => r.id), [pagedUnits]);
   const selectedCount = selectedIds.size;
-  const allPageSelected = pageIds.length > 0 && pageIds.every((id) => selectedIds.has(id));
-  const somePageSelected = pageIds.some((id) => selectedIds.has(id)) && !allPageSelected;
+  const allPageUnitsSelected = pageUnitIds.length > 0 && pageUnitIds.every((id) => selectedIds.has(id));
+  const somePageUnitsSelected = pageUnitIds.some((id) => selectedIds.has(id)) && !allPageUnitsSelected;
 
   useEffect(() => {
     if (headerSelectRef.current) {
-      headerSelectRef.current.indeterminate = somePageSelected;
+      headerSelectRef.current.indeterminate = somePageUnitsSelected;
     }
-  }, [somePageSelected, allPageSelected]);
+  }, [somePageUnitsSelected, allPageUnitsSelected]);
 
   useEffect(() => {
     if (selectedCount === 0) {
@@ -902,7 +952,7 @@ export default function CrmCampaignReportingView() {
     }
   }, [selectedCount]);
 
-  const toggleRowSelection = (id: string) => {
+  const toggleUnitSelection = (id: string) => {
     setSelectedIds((prev) => {
       const next = new Set(prev);
       if (next.has(id)) next.delete(id);
@@ -914,10 +964,10 @@ export default function CrmCampaignReportingView() {
   const togglePageSelection = () => {
     setSelectedIds((prev) => {
       const next = new Set(prev);
-      if (allPageSelected) {
-        pageIds.forEach((id) => next.delete(id));
+      if (allPageUnitsSelected) {
+        pageUnitIds.forEach((id) => next.delete(id));
       } else {
-        pageIds.forEach((id) => next.add(id));
+        pageUnitIds.forEach((id) => next.add(id));
       }
       return next;
     });
@@ -925,30 +975,9 @@ export default function CrmCampaignReportingView() {
 
   const clearSelection = () => setSelectedIds(new Set());
 
-  const dateFromRef = useRef<HTMLInputElement | null>(null);
-  const dateToRef = useRef<HTMLInputElement | null>(null);
-  const openPicker = (ref: React.RefObject<HTMLInputElement>) => {
-    const el = ref.current;
-    if (!el) return;
-    el.focus();
-    // @ts-expect-error showPicker is not yet in lib.dom.d.ts everywhere
-    if (typeof el.showPicker === "function") {
-      // Must be called from a user gesture; wrap in try/catch to avoid runtime errors.
-      try {
-        // @ts-expect-error showPicker is not yet in lib.dom.d.ts everywhere
-        el.showPicker();
-      } catch {
-        // fallback to native focus/click already done above
-        el.click();
-      }
-    } else {
-      el.click();
-    }
-  };
-
-  const totalPages = Math.max(Math.ceil(sortedRows.length / pageSize), 1);
-  const startIdx = sortedRows.length === 0 ? 0 : page * pageSize + 1;
-  const endIdx = Math.min(sortedRows.length, (page + 1) * pageSize);
+  const totalPages = Math.max(Math.ceil(sortedUnits.length / pageSize), 1);
+  const startIdx = sortedUnits.length === 0 ? 0 : page * pageSize + 1;
+  const endIdx = Math.min(sortedUnits.length, (page + 1) * pageSize);
   const tableDensityClass = compact
     ? "text-xs [&_td]:py-2 [&_td]:px-2 [&_th]:py-2 [&_th]:px-2"
     : "";
@@ -970,47 +999,86 @@ export default function CrmCampaignReportingView() {
     return () => document.removeEventListener("mousedown", handler);
   }, []);
 
+  const handleImportCsv = async (file: File) => {
+    setImporting(true);
+    try {
+      const text = await file.text();
+      const res = await fetch(`/api/crm/campaign-email-units?client=${clientSlug}`, {
+        method: "PUT",
+        headers: { "Content-Type": "text/csv" },
+        body: text,
+      });
+      const body = await res.json().catch(() => null);
+      if (!res.ok) {
+        throw new Error(body?.error || `Import failed (${res.status})`);
+      }
+      showSuccess(`Imported ${body?.imported ?? 0} units`);
+      setRefreshTick((prev) => prev + 1);
+      if (typeof window !== "undefined") {
+        window.dispatchEvent(
+          new CustomEvent("crm:imported", {
+            detail: { target: "campaigns", client: clientSlug },
+          }),
+        );
+      }
+    } catch (err) {
+      showError(err instanceof Error ? err.message : "Unable to import CSV");
+    } finally {
+      setImporting(false);
+      if (importInputRef.current) importInputRef.current.value = "";
+    }
+  };
+
 
   const exportCsv = async () => {
-    if (sortedRows.length === 0) return;
+    if (sortedUnits.length === 0) return;
     try {
       setExporting(true);
       const header = [
-        "date",
+        "send_date",
+        "jira_ticket",
+        "campaign_name",
         "brand",
-        "campaign",
         "market",
+        "owner",
+        "week",
+        "year",
         "scope",
         "segment",
         "touchpoint",
         "variant",
-        "owner",
         "status",
-        "hours",
-        "days",
-        "budget_eur",
-        "jira_ticket",
+        "hours_master_template",
+        "hours_translations",
+        "hours_copywriting",
+        "hours_assets",
+        "hours_revisions",
+        "hours_build",
+        "hours_prep",
       ];
       const escape = (val: string) => `"${val.replace(/"/g, '""')}"`;
-      const lines = sortedRows.map((r) => {
-        const rate = getRateForRow(r);
-        const budget =
-          rate != null ? r.daysTotal * rate : r.budgetEur ?? r.daysTotal * 0;
+      const lines = sortedUnits.map((r) => {
         return [
-          formatDate(r.sendDate) || "",
-          r.brand,
+          r.sendDate || "",
+          r.jiraTicket,
           r.campaignName,
+          r.brand,
           r.market,
+          r.owner,
+          r.week ?? "",
+          r.year ?? "",
           r.scope,
           r.segment ?? "",
           r.touchpoint ?? "",
           r.variant ?? "",
-          r.owner,
           r.status,
-          r.hoursTotal.toFixed(2),
-          r.daysTotal.toFixed(2),
-          budget.toFixed(2),
-          r.jiraTicket,
+          r.hoursMasterTemplate.toFixed(2),
+          r.hoursTranslations.toFixed(2),
+          r.hoursCopywriting.toFixed(2),
+          r.hoursAssets.toFixed(2),
+          r.hoursRevisions.toFixed(2),
+          r.hoursBuild.toFixed(2),
+          r.hoursPrep.toFixed(2),
         ]
           .map((v) => escape(String(v ?? "")))
           .join(",");
@@ -1041,7 +1109,7 @@ export default function CrmCampaignReportingView() {
       if (!res.ok) {
         throw new Error(body?.error || `Failed to delete (${res.status})`);
       }
-      setRows((prev) => prev.filter((r) => !selectedIds.has(r.id)));
+      setUnits((prev) => prev.filter((r) => !selectedIds.has(r.id)));
       setSelectedIds(new Set());
       showSuccess("Email units deleted");
       return true;
@@ -1061,170 +1129,235 @@ export default function CrmCampaignReportingView() {
 
   return (
     <div className="space-y-4">
-      <header className="flex flex-col gap-3 rounded-3xl border border-[color:var(--color-border)] bg-[color:var(--color-surface)] px-5 py-6 shadow-sm">
-        <div className="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
-          <div className="space-y-1">
-            <div className="flex items-center gap-3">
-              <p className="text-xs uppercase tracking-[0.3em] text-[color:var(--color-text)]/65">
-                Campaigns
+      <header className="relative overflow-hidden rounded-3xl border border-[color:var(--color-border)] bg-[color:var(--color-surface)] px-6 py-6 shadow-sm">
+        <div className="pointer-events-none absolute inset-0 bg-[radial-gradient(120%_120%_at_0%_0%,rgba(14,165,233,0.18),transparent_60%),radial-gradient(120%_120%_at_80%_0%,rgba(99,102,241,0.16),transparent_55%)]" />
+        <div className="relative z-10 space-y-6">
+          <div className="flex flex-wrap items-center justify-between gap-4">
+            <div>
+              <h1
+                className="text-2xl font-bold tracking-tight text-[var(--color-text)]"
+                title="Track email production effort per campaign/market/segment."
+              >
+                Campaign Reporting · {clientSlug?.toUpperCase()}
+              </h1>
+              <p className="mt-1 text-sm text-[var(--color-muted)]">
+                Track email production effort per campaign, market, and segment.
               </p>
-              <span className="rounded-full bg-[color:var(--color-surface-2)] px-3 py-1 text-xs font-semibold text-[color:var(--color-text)]/80">
-                {clientSlug?.toUpperCase()} - Campaign Ops
-              </span>
             </div>
-            <h1
-              className="text-2xl font-semibold text-[color:var(--color-text)]"
-              title="Track email production effort per campaign/market/segment."
-            >
-              Campaign Reporting
-            </h1>
+
+            <div className="flex flex-wrap items-center gap-2 rounded-xl border border-[var(--color-border)] bg-[var(--color-surface)] p-1.5 shadow-sm">
+              <input
+                ref={importInputRef}
+                type="file"
+                accept=".csv,text/csv"
+                className="hidden"
+                onChange={(e) => {
+                  const file = e.target.files?.[0];
+                  if (!file) return;
+                  void handleImportCsv(file);
+                }}
+              />
+              <button
+                className="btn-ghost flex h-8 items-center gap-2 px-3 text-xs"
+                type="button"
+                onClick={() => importInputRef.current?.click()}
+                disabled={importing}
+              >
+                <Upload size={14} />
+                {importing ? "Importing..." : "Import CSV"}
+              </button>
+              <button
+                className="btn-ghost flex h-8 items-center gap-2 px-3 text-xs"
+                type="button"
+                onClick={() => setRefreshTick((prev) => prev + 1)}
+              >
+                <RefreshCw size={14} className={loading ? "animate-spin" : undefined} />
+                Refresh
+              </button>
+              <button
+                className="btn-ghost flex h-8 items-center gap-2 px-3 text-xs"
+                type="button"
+                onClick={() => void exportCsv()}
+                disabled={exporting || sortedUnits.length === 0}
+              >
+                <FileDown size={14} />
+                {exporting ? "Exporting..." : "Export CSV"}
+              </button>
+              <div className="mx-1 h-5 w-px bg-[var(--color-border)]" />
+              <button
+                className="btn-primary flex h-8 items-center gap-2 px-4 text-xs shadow-sm"
+                type="button"
+                onClick={() => setOpenGenerate(true)}
+              >
+                <Plus size={14} />
+                Add units
+              </button>
+            </div>
           </div>
-          <div className="grid grid-cols-2 gap-x-4 gap-y-2 text-sm text-[color:var(--color-text)] lg:grid-cols-4">
-            <div>
-              <span className="text-xs uppercase text-[color:var(--color-text)]/60">Rows</span>
-              <div className="text-lg font-semibold text-[color:var(--color-text)]">{filteredRows.length}</div>
-            </div>
-            <div>
-              <span className="text-xs uppercase text-[color:var(--color-text)]/60">Hours</span>
-              <div className="text-lg font-semibold text-[color:var(--color-text)]">
-                {formatNumber(totals.totalHours)}
-              </div>
-            </div>
-            <div>
-              <span className="text-xs uppercase text-[color:var(--color-text)]/60">Days</span>
-              <div className="text-lg font-semibold text-[color:var(--color-text)]">
-                {formatNumber(totals.totalDays)}
-              </div>
-            </div>
-            <div>
-              <span className="text-xs uppercase text-[color:var(--color-text)]/60">Budget (€)</span>
-              <div className="text-lg font-semibold text-[color:var(--color-text)]">
-                {formatNumber(totals.totalBudget)}
-              </div>
-            </div>
+
+          <div className="mt-6 grid gap-4 md:grid-cols-2 lg:grid-cols-4">
+            {[
+              {
+                label: "Total Units",
+                value: filteredUnits.length.toLocaleString("es-ES"),
+                icon: Layers,
+              },
+              {
+                label: "Total Hours",
+                value: `${formatNumber(totals.totalHours)} h`,
+                icon: Clock,
+              },
+              {
+                label: "Total Days",
+                value: `${formatNumber(totals.totalDays)} d`,
+                icon: Calendar,
+              },
+              {
+                label: "Total Budget",
+                value: `${formatNumber(totals.totalBudget)} €`,
+                icon: Coins,
+              },
+            ].map((item) => {
+              const Icon = item.icon;
+              return (
+                <div key={item.label} className="kpi-frame p-5">
+                  <div className="flex items-center gap-4">
+                    <div className="flex h-12 w-12 shrink-0 items-center justify-center rounded-xl bg-[var(--color-surface-2)] text-[var(--color-primary)]">
+                      <Icon size={24} />
+                    </div>
+                    <div>
+                      <p className="text-[11px] font-bold uppercase tracking-widest text-[var(--color-muted)]">
+                        {item.label}
+                      </p>
+                      <div className="mt-0.5 flex items-baseline gap-2">
+                        <span className="text-2xl font-bold tracking-tight text-[var(--color-text)] tabular-nums">
+                          {item.value}
+                        </span>
+                      </div>
+                    </div>
+                  </div>
+                </div>
+              );
+            })}
           </div>
         </div>
       </header>
 
-      <div className="rounded-2xl border border-[color:var(--color-border)] bg-[color:var(--color-surface-2)]/60 px-4 py-3">
-        <div className="flex flex-col gap-3">
-          <div className="flex flex-wrap items-end gap-3">
-            <div className="flex min-w-[220px] flex-1 flex-col gap-1">
-              <label className="text-xs font-medium text-[color:var(--color-text)]/70">
-                Search
-              </label>
-              <input
-                value={filters.search}
-                onChange={(e) => handleFilterChange("search", e.target.value)}
-                className="input h-10 w-full"
-                placeholder="Campaign, brand, JIRA..."
-              />
-            </div>
-            <div className="min-w-[180px] flex-1">
-              <MultiSelect
-                label="Owner"
-                options={filterOptions.owner.options}
-                values={filters.owner}
-                counts={filterOptions.owner.counts}
-                onChange={(vals) => handleFilterChange("owner", vals)}
-              />
-            </div>
-            <div className="min-w-[180px] flex-1">
-              <MultiSelect
-                label="Brand"
-                options={filterOptions.brand.values.map((s) => ({ label: s, value: s }))}
-                values={filters.brand}
-                counts={filterOptions.brand.counts}
-                onChange={(vals) => handleFilterChange("brand", vals)}
-              />
-            </div>
-            <div className="min-w-[180px] flex-1">
+      <section className={`mt-6 rounded-2xl border border-[var(--color-border)] bg-[var(--color-surface)] p-1.5 shadow-sm ${openAdvanced ? "pb-2" : ""}`}>
+        <div className="flex flex-wrap items-center gap-2">
+          <div className="relative min-w-[220px] flex-1">
+            <Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-[var(--color-text)]/55" />
+            <input
+              value={filters.search}
+              onChange={(e) => handleFilterChange("search", e.target.value)}
+              className="h-9 w-full rounded-xl border-none bg-transparent pl-9 pr-4 text-sm text-[var(--color-text)] placeholder:text-[var(--color-text)]/55 focus:ring-0"
+              placeholder="Campaign, brand, JIRA..."
+            />
+          </div>
+
+          <div className="h-6 w-px bg-[var(--color-border)]" />
+
+          <MultiSelect
+            label="Owner"
+            options={filterOptions.owner.options}
+            values={filters.owner}
+            counts={filterOptions.owner.counts}
+            onChange={(vals) => handleFilterChange("owner", vals)}
+            placeholder="All owners"
+            hideLabel
+            containerClassName="min-w-[170px] flex-1 md:flex-none"
+          />
+          <MultiSelect
+            label="Brand"
+            options={filterOptions.brand.values.map((s) => ({ label: s, value: s }))}
+            values={filters.brand}
+            counts={filterOptions.brand.counts}
+            onChange={(vals) => handleFilterChange("brand", vals)}
+            placeholder="All brands"
+            hideLabel
+            containerClassName="min-w-[170px] flex-1 md:flex-none"
+          />
+          <MultiSelect
+            label="Segment"
+            options={filterOptions.segment.values.map((s) => ({ label: s, value: s }))}
+            values={filters.segment}
+            counts={filterOptions.segment.counts}
+            onChange={(vals) => handleFilterChange("segment", vals)}
+            placeholder="All segments"
+            hideLabel
+            containerClassName="min-w-[170px] flex-1 md:flex-none"
+          />
+          <MultiSelect
+            label="Touchpoint"
+            options={filterOptions.touchpoint.values.map((s) => ({ label: s, value: s }))}
+            values={filters.touchpoint}
+            counts={filterOptions.touchpoint.counts}
+            onChange={(vals) => handleFilterChange("touchpoint", vals)}
+            placeholder="All touchpoints"
+            hideLabel
+            containerClassName="min-w-[170px] flex-1 md:flex-none"
+          />
+
+          <div className="min-w-[170px] flex-1 md:flex-none">
+            <select
+              className="h-9 w-full rounded-lg border-none bg-[var(--color-surface-2)]/50 px-3 text-sm font-medium text-[var(--color-text)] transition hover:bg-[var(--color-surface-2)] focus:outline-none focus:ring-2 focus:ring-[var(--color-primary)]/20"
+              value={datePreset}
+              onChange={(e) => applyDatePreset(e.target.value as typeof datePreset)}
+              aria-label="Date range preset"
+            >
+              <option value="all-time">All time</option>
+              <option value="this-week">This week</option>
+              <option value="last-week">Last week</option>
+              <option value="this-month">This month</option>
+              <option value="last-month">Last month</option>
+              <option value="this-quarter">This quarter</option>
+              <option value="last-quarter">Last quarter</option>
+              <option value="this-year">This year</option>
+              <option value="last-year">Last year</option>
+              <option value="">Custom range</option>
+            </select>
+          </div>
+
+          <div className="h-6 w-px bg-[var(--color-border)]" />
+          <button
+            className={[
+              "btn-ghost relative h-9 w-9 rounded-lg",
+              openAdvanced
+                ? "bg-[var(--color-surface-2)] text-[var(--color-primary)]"
+                : "text-[var(--color-text)]/60",
+            ].join(" ")}
+            style={{ padding: 0 }}
+            type="button"
+            onClick={() => setOpenAdvanced((v) => !v)}
+            aria-expanded={openAdvanced}
+            aria-label={openAdvanced ? "Hide advanced filters" : "Show advanced filters"}
+            title={openAdvanced ? "Hide advanced filters" : "Show advanced filters"}
+          >
+            {openAdvanced ? <ChevronUp size={18} /> : <ChevronDown size={18} />}
+          </button>
+        </div>
+
+        {openAdvanced ? (
+          <>
+            <hr className="my-2 border-[var(--color-border)]/60" />
+            <div className="grid grid-cols-[repeat(auto-fit,minmax(200px,1fr))] gap-3">
               <MultiSelect
                 label="Market"
                 options={filterOptions.market.values.map((s) => ({ label: s, value: s }))}
                 values={filters.market}
                 counts={filterOptions.market.counts}
                 onChange={(vals) => handleFilterChange("market", vals)}
+                placeholder="All markets"
+                hideLabel
               />
-            </div>
-            <div className="min-w-[180px] flex-1">
               <MultiSelect
                 label="Scope"
                 options={filterOptions.scope.values.map((s) => ({ label: s, value: s }))}
                 values={filters.scope}
                 counts={filterOptions.scope.counts}
                 onChange={(vals) => handleFilterChange("scope", vals)}
-              />
-            </div>
-            <div className="min-w-[180px] flex-1">
-              <MultiSelect
-                label="Segment"
-                options={filterOptions.segment.values.map((s) => ({ label: s, value: s }))}
-                values={filters.segment}
-                counts={filterOptions.segment.counts}
-                onChange={(vals) => handleFilterChange("segment", vals)}
-              />
-            </div>
-            <div className="min-w-[180px] flex-1 flex flex-col gap-1">
-              <label className="text-xs font-medium text-[color:var(--color-text)]/70">Date range</label>
-              <select
-                className="input h-10"
-                value={datePreset}
-                onChange={(e) => applyDatePreset(e.target.value as typeof datePreset)}
-              >
-                <option value="all-time">All time</option>
-                <option value="this-week">This week</option>
-                <option value="last-week">Last week</option>
-                <option value="this-month">This month</option>
-                <option value="last-month">Last month</option>
-                <option value="this-quarter">This quarter</option>
-                <option value="last-quarter">Last quarter</option>
-                <option value="this-year">This year</option>
-                <option value="last-year">Last year</option>
-                <option value="">Custom range</option>
-              </select>
-            </div>
-            <div className="flex items-center gap-2 ml-auto">
-              <button
-                className="btn-primary h-10 gap-2"
-                type="button"
-                onClick={() => setOpenGenerate(true)}
-              >
-                <span className="text-base leading-none">+</span>
-                Add units
-              </button>
-              <button
-                className="btn-ghost h-10"
-                type="button"
-                onClick={() => {
-                  clearFilters();
-                  setPage(0);
-                }}
-              >
-                Clear filters
-              </button>
-              <button
-                className="btn-ghost h-10"
-                type="button"
-                onClick={() => setOpenAdvanced((v) => !v)}
-              >
-                {openAdvanced ? "Hide filters" : "More filters"}
-                {(filters.status.length ||
-                  filters.touchpoint.length ||
-                  datePreset === "") && !openAdvanced
-                  ? " *"
-                  : ""}
-              </button>
-            </div>
-          </div>
-          {openAdvanced ? (
-            <div className="mt-3 grid grid-cols-[repeat(auto-fit,minmax(140px,1fr))] gap-3">
-              <MultiSelect
-                label="Touchpoint"
-                options={filterOptions.touchpoint.values.map((s) => ({ label: s, value: s }))}
-                values={filters.touchpoint}
-                counts={filterOptions.touchpoint.counts}
-                onChange={(vals) => handleFilterChange("touchpoint", vals)}
+                placeholder="All scopes"
+                hideLabel
               />
               <MultiSelect
                 label="Status"
@@ -1232,79 +1365,66 @@ export default function CrmCampaignReportingView() {
                 values={filters.status}
                 counts={filterOptions.status.counts}
                 onChange={(vals) => handleFilterChange("status", vals)}
+                placeholder="All statuses"
+                hideLabel
               />
-              <div className="flex flex-col gap-1 justify-end">
-                <label className="text-xs font-medium text-[color:var(--color-text)]/70">From</label>
-                <div className="relative flex w-full items-center">
-                  <input
-                    ref={dateFromRef}
-                    type="date"
-                    className="input input-date h-10 w-full pr-10"
-                    value={dateFrom}
-                    onChange={(e) => {
-                      setDatePreset("");
-                      setDateFrom(e.target.value);
-                    }}
-                    onClick={() => openPicker(dateFromRef)}
-                    onFocus={() => openPicker(dateFromRef)}
-                  />
-                  <button
-                    type="button"
-                    onClick={() => openPicker(dateFromRef)}
-                    className="absolute right-3 top-1/2 -translate-y-1/2 transform text-[color:var(--color-text)]/60"
-                    aria-label="Open start date picker"
-                  >
-                    📅
-                  </button>
-                </div>
-              </div>
-              <div className="flex flex-col gap-1 justify-end">
-                <label className="text-xs font-medium text-[color:var(--color-text)]/70">To</label>
-                <div className="relative flex w-full items-center">
-                  <input
-                    ref={dateToRef}
-                    type="date"
-                    className="input input-date h-10 w-full pr-10"
-                    value={dateTo}
-                    onChange={(e) => {
-                      setDatePreset("");
-                      setDateTo(e.target.value);
-                    }}
-                    onClick={() => openPicker(dateToRef)}
-                    onFocus={() => openPicker(dateToRef)}
-                  />
-                  <button
-                    type="button"
-                    onClick={() => openPicker(dateToRef)}
-                    className="absolute right-3 top-1/2 -translate-y-1/2 transform text-[color:var(--color-text)]/60"
-                    aria-label="Open end date picker"
-                  >
-                    📅
-                  </button>
-                </div>
-              </div>
-              {(dateFrom && dateFrom !== currentYearStart) || dateTo ? (
-                <div className="flex items-end">
-                  <button
-                    className="btn-ghost h-10"
-                    type="button"
-                    onClick={() => {
-                      setDatePreset("this-year");
-                      setDateFrom(currentYearStart);
-                      setDateTo("");
-                    }}
-                  >
-                    Clear dates
-                  </button>
-                </div>
-              ) : null}
+
+              <DatePicker
+                value={dateFrom}
+                onChange={(value) => {
+                  setDatePreset("");
+                  setDateFrom(value);
+                }}
+                placeholder="From"
+                ariaLabel="From date"
+                displayFormat="dd/MM/yyyy"
+                buttonClassName="h-9 rounded-lg border-none bg-[var(--color-surface-2)]/50 px-3 text-sm font-medium text-[var(--color-text)] transition hover:bg-[var(--color-surface-2)] focus:outline-none focus:ring-2 focus:ring-[var(--color-primary)]/20"
+              />
+
+              <DatePicker
+                value={dateTo}
+                onChange={(value) => {
+                  setDatePreset("");
+                  setDateTo(value);
+                }}
+                placeholder="To"
+                ariaLabel="To date"
+                displayFormat="dd/MM/yyyy"
+                buttonClassName="h-9 rounded-lg border-none bg-[var(--color-surface-2)]/50 px-3 text-sm font-medium text-[var(--color-text)] transition hover:bg-[var(--color-surface-2)] focus:outline-none focus:ring-2 focus:ring-[var(--color-primary)]/20"
+              />
             </div>
-          ) : null}
-        </div>
-      </div>
+
+            <div className="mt-3 flex flex-wrap items-center gap-2">
+              <button
+                className="btn-ghost h-9 px-3 text-xs"
+                type="button"
+                onClick={() => {
+                  setDatePreset("all-time");
+                  setDateFrom("");
+                  setDateTo("");
+                }}
+              >
+                <X size={14} />
+                Clear dates
+              </button>
+              <button
+                className="btn-ghost h-9 px-3 text-xs"
+                type="button"
+                onClick={() => {
+                  clearFilters();
+                  setPage(0);
+                }}
+              >
+                <X size={14} />
+                Clear filters
+              </button>
+            </div>
+          </>
+        ) : null}
+      </section>
 
       {activeChips.length > 0 ? (
-        <div className="flex flex-wrap gap-2 text-xs sm:text-sm text-[color:var(--color-text)]/80">
+        <div className="mt-3 flex flex-wrap gap-2 text-xs sm:text-sm text-[color:var(--color-text)]/80">
           {activeChips.map((chip, idx) => (
             <span
               key={idx}
@@ -1312,14 +1432,25 @@ export default function CrmCampaignReportingView() {
             >
               {chip.label}
               <button
-                className="text-[color:var(--color-accent)]"
+                className="inline-flex text-[color:var(--color-accent)]"
                 onClick={chip.onClear}
                 aria-label="Clear filter"
               >
-                ×
+                <X size={12} />
               </button>
             </span>
           ))}
+          <button
+            className="inline-flex items-center gap-1 rounded-full border border-[color:var(--color-border)] px-2.5 py-1 text-[color:var(--color-text)]/70 hover:bg-[color:var(--color-surface-2)]"
+            type="button"
+            onClick={() => {
+              clearFilters();
+              setPage(0);
+            }}
+          >
+            <X size={12} />
+            Clear all
+          </button>
         </div>
       ) : null}
 
@@ -1378,7 +1509,7 @@ export default function CrmCampaignReportingView() {
                     ref={headerSelectRef}
                     type="checkbox"
                     className="h-4 w-4"
-                    checked={allPageSelected}
+                    checked={allPageUnitsSelected}
                     onChange={togglePageSelection}
                     aria-label="Select all on page"
                   />
@@ -1397,7 +1528,11 @@ export default function CrmCampaignReportingView() {
                     >
                       Date
                       {sortKey === "sendDate" ? (
-                        <span className="text-[10px]">{sortDir === "asc" ? "▲" : "▼"}</span>
+                        sortDir === "asc" ? (
+                          <ChevronUp className="h-3 w-3" />
+                        ) : (
+                          <ChevronDown className="h-3 w-3" />
+                        )
                       ) : null}
                     </button>
                   </th>
@@ -1445,7 +1580,11 @@ export default function CrmCampaignReportingView() {
                     >
                       Hours
                       {sortKey === "hoursTotal" ? (
-                        <span className="text-[10px]">{sortDir === "asc" ? "▲" : "▼"}</span>
+                        sortDir === "asc" ? (
+                          <ChevronUp className="h-3 w-3" />
+                        ) : (
+                          <ChevronDown className="h-3 w-3" />
+                        )
                       ) : null}
                     </button>
                   </th>
@@ -1466,7 +1605,11 @@ export default function CrmCampaignReportingView() {
                     >
                       Days
                       {sortKey === "daysTotal" ? (
-                        <span className="text-[10px]">{sortDir === "asc" ? "▲" : "▼"}</span>
+                        sortDir === "asc" ? (
+                          <ChevronUp className="h-3 w-3" />
+                        ) : (
+                          <ChevronDown className="h-3 w-3" />
+                        )
                       ) : null}
                     </button>
                   </th>
@@ -1487,7 +1630,11 @@ export default function CrmCampaignReportingView() {
                     >
                       Budget (€)
                       {sortKey === "budgetValue" ? (
-                        <span className="text-[10px]">{sortDir === "asc" ? "▲" : "▼"}</span>
+                        sortDir === "asc" ? (
+                          <ChevronUp className="h-3 w-3" />
+                        ) : (
+                          <ChevronDown className="h-3 w-3" />
+                        )
                       ) : null}
                     </button>
                   </th>
@@ -1498,12 +1645,12 @@ export default function CrmCampaignReportingView() {
                 <th className="w-[1%] pr-2 text-right">
                   <div className="relative inline-flex" ref={actionsRef}>
                     <button
-                      className="btn-ghost h-8 w-8 text-lg border border-[color:var(--color-border)] bg-[color:var(--color-surface)]/90"
+                      className="btn-ghost h-8 w-8 !p-0 border border-[color:var(--color-border)] bg-[color:var(--color-surface)]/90 text-[color:var(--color-text)]/70"
                       type="button"
                       onClick={() => setActionsOpen((v) => !v)}
                       aria-label="Table actions"
                     >
-                      ⋯
+                      <MoreHorizontal className="h-4 w-4 shrink-0" />
                     </button>
                     {actionsOpen ? (
                       <div className="absolute right-0 z-30 mt-2 w-44 rounded-lg border border-[color:var(--color-border)] bg-[color:var(--color-surface)] shadow-lg">
@@ -1536,7 +1683,7 @@ export default function CrmCampaignReportingView() {
                             setActionsOpen(false);
                             void exportCsv();
                           }}
-                          disabled={exporting || sortedRows.length === 0}
+                          disabled={exporting || sortedUnits.length === 0}
                         >
                           {exporting ? "Exporting..." : "Download CSV"}
                         </button>
@@ -1554,7 +1701,7 @@ export default function CrmCampaignReportingView() {
                   </td>
                 </tr>
               ) : (
-                pagedRows.map((r) => {
+                pagedUnits.map((r) => {
                   const ownerKey = resolveOwnerKey(r.owner, r.personId);
                   const ownerLabel = ownerKey ? labelForOwnerKey(ownerKey) : r.owner;
                   const ownerTitle =
@@ -1579,8 +1726,8 @@ export default function CrmCampaignReportingView() {
                         type="checkbox"
                         className="h-4 w-4"
                         checked={selectedIds.has(r.id)}
-                        onChange={() => toggleRowSelection(r.id)}
-                        aria-label="Select row"
+                        onChange={() => toggleUnitSelection(r.id)}
+                        aria-label="Select unit"
                       />
                     </td>
                     {showCol("date") ? (
@@ -1698,16 +1845,16 @@ export default function CrmCampaignReportingView() {
                   );
                 })
               )}
-              {!loading && rows.length === 0 ? (
+              {!loading && units.length === 0 ? (
                 <tr>
                   <td className="px-3 py-6 text-center text-[color:var(--color-text)]/60" colSpan={columnCount}>
                     No data yet. Import a CSV to get started.
                   </td>
                 </tr>
-              ) : !loading && rows.length > 0 && filteredRows.length === 0 ? (
+              ) : !loading && units.length > 0 && filteredUnits.length === 0 ? (
                 <tr>
                   <td className="px-3 py-6 text-center text-[color:var(--color-text)]/60" colSpan={columnCount}>
-                    No rows match the current filters.
+                    No units match the current filters.
                   </td>
                 </tr>
               ) : null}
@@ -1716,16 +1863,17 @@ export default function CrmCampaignReportingView() {
           </div>
         <div className="flex flex-wrap items-center justify-between gap-3 border-t border-[color:var(--color-border)]/70 px-3 py-3 text-xs text-[color:var(--color-text)]/75">
           <div>
-            {filteredRows.length > 0 ? (
+            {filteredUnits.length > 0 ? (
               <span>
-                Showing {startIdx.toLocaleString()}-{endIdx.toLocaleString()} of {filteredRows.length.toLocaleString()}
+                Showing {startIdx.toLocaleString()}-{endIdx.toLocaleString()} of{" "}
+                {filteredUnits.length.toLocaleString()} units
               </span>
             ) : (
-              <span>0 results</span>
+              <span>0 units</span>
             )}
           </div>
           <div className="flex items-center gap-2">
-            <label className="text-[color:var(--color-text)]/60">Rows per page</label>
+            <label className="text-[color:var(--color-text)]/60">Units per page</label>
             <select
               className="input h-9 w-20"
               value={pageSize}
@@ -1781,7 +1929,7 @@ export default function CrmCampaignReportingView() {
           statusOptions={bulkEditStatusOptions}
           onApplied={(patch: CampaignUnitsBulkPatch) => {
             const idSet = new Set(bulkEditIds);
-            setRows((prev) =>
+            setUnits((prev) =>
               prev.map((r) =>
                 idSet.has(r.id)
                   ? {
@@ -1824,10 +1972,10 @@ export default function CrmCampaignReportingView() {
         >
           <div className="space-y-3 text-sm text-[color:var(--color-text)]">
             <p>
-              You’re about to permanently delete{" "}
+              You&apos;re about to permanently delete{" "}
               <strong>{selectedCount.toLocaleString()}</strong> email unit(s).
             </p>
-            <p className="text-[color:var(--color-text)]/65">This action can’t be undone.</p>
+            <p className="text-[color:var(--color-text)]/65">This action can&apos;t be undone.</p>
           </div>
         </MiniModal>
       ) : null}
