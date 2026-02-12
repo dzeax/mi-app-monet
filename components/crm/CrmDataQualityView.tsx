@@ -32,7 +32,6 @@ import {
   Plus,
   RefreshCw,
   Search,
-  Settings2,
   Ticket,
   X,
 } from "lucide-react";
@@ -2634,7 +2633,7 @@ export default function CrmDataQualityView() {
 
   return (
     <div className="space-y-6">
-      <header className="relative overflow-hidden rounded-3xl border border-[color:var(--color-border)] bg-[color:var(--color-surface)] px-6 py-6 shadow-sm">
+      <header className="relative flex flex-col gap-8 overflow-hidden rounded-3xl border border-[color:var(--color-border)] bg-[color:var(--color-surface)] px-6 py-6 shadow-sm">
         <div className="pointer-events-none absolute inset-0 bg-[radial-gradient(120%_120%_at_0%_0%,rgba(14,165,233,0.18),transparent_60%),radial-gradient(120%_120%_at_80%_0%,rgba(99,102,241,0.14),transparent_55%)]" />
         <div className="relative z-10 flex flex-wrap items-start justify-between gap-4">
           <div className="space-y-2">
@@ -2706,62 +2705,69 @@ export default function CrmDataQualityView() {
             ) : null}
           </div>
         </div>
+        <div className="relative z-10 grid gap-4 md:grid-cols-2 lg:grid-cols-4">
+          <div className="kpi-frame p-5">
+            <div className="flex items-center gap-4">
+              <div className="flex h-12 w-12 shrink-0 items-center justify-center rounded-xl bg-[var(--color-surface-2)] text-[var(--color-primary)]">
+                <Ticket size={24} />
+              </div>
+              <div>
+                <p className="text-[11px] font-bold uppercase tracking-widest text-[var(--color-muted)]">
+                  Tickets
+                </p>
+                <p className="text-2xl font-bold leading-tight tracking-tight text-[var(--color-text)]">
+                  {filtered.length}
+                </p>
+              </div>
+            </div>
+          </div>
+          <div className="kpi-frame p-5">
+            <div className="flex items-center gap-4">
+              <div className="flex h-12 w-12 shrink-0 items-center justify-center rounded-xl bg-[var(--color-surface-2)] text-[var(--color-primary)]">
+                <Clock size={24} />
+              </div>
+              <div>
+                <p className="text-[11px] font-bold uppercase tracking-widest text-[var(--color-muted)]">
+                  Total Work
+                </p>
+                <p className="text-2xl font-bold leading-tight tracking-tight text-[var(--color-text)]">
+                  {totals.totalHours.toFixed(1)} h
+                </p>
+              </div>
+            </div>
+          </div>
+          <div className="kpi-frame p-5">
+            <div className="flex items-center gap-4">
+              <div className="flex h-12 w-12 shrink-0 items-center justify-center rounded-xl bg-[var(--color-surface-2)] text-[var(--color-primary)]">
+                <Calendar size={24} />
+              </div>
+              <div>
+                <p className="text-[11px] font-bold uppercase tracking-widest text-[var(--color-muted)]">
+                  Total Days
+                </p>
+                <p className="text-2xl font-bold leading-tight tracking-tight text-[var(--color-text)]">
+                  {totals.totalDays.toFixed(1)} d
+                </p>
+              </div>
+            </div>
+          </div>
+          <div className="kpi-frame p-5">
+            <div className="flex items-center gap-4">
+              <div className="flex h-12 w-12 shrink-0 items-center justify-center rounded-xl bg-[var(--color-surface-2)] text-[var(--color-primary)]">
+                <Coins size={24} />
+              </div>
+              <div>
+                <p className="text-[11px] font-bold uppercase tracking-widest text-[var(--color-muted)]">
+                  Budget
+                </p>
+                <p className="text-2xl font-bold leading-tight tracking-tight text-[var(--color-text)]">
+                  {formatCurrency(totals.totalBudget, "EUR")}
+                </p>
+              </div>
+            </div>
+          </div>
+        </div>
       </header>
-
-      <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-4">
-        <div className="kpi-frame px-5 py-4">
-          <div className="flex items-center gap-4">
-            <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-[var(--color-surface-2)] text-[var(--color-primary)]">
-              <Ticket size={20} />
-            </div>
-            <div>
-              <p className="text-[10px] font-bold uppercase tracking-widest text-[var(--color-muted)]">Tickets</p>
-              <p className="text-xl font-bold leading-tight tracking-tight text-[var(--color-text)]">
-                {filtered.length}
-              </p>
-            </div>
-          </div>
-        </div>
-        <div className="kpi-frame px-5 py-4">
-          <div className="flex items-center gap-4">
-            <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-[var(--color-surface-2)] text-[var(--color-primary)]">
-              <Clock size={20} />
-            </div>
-            <div>
-              <p className="text-[10px] font-bold uppercase tracking-widest text-[var(--color-muted)]">Total Work</p>
-              <p className="text-xl font-bold leading-tight tracking-tight text-[var(--color-text)]">
-                {totals.totalHours.toFixed(1)} h
-              </p>
-            </div>
-          </div>
-        </div>
-        <div className="kpi-frame px-5 py-4">
-          <div className="flex items-center gap-4">
-            <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-[var(--color-surface-2)] text-[var(--color-primary)]">
-              <Calendar size={20} />
-            </div>
-            <div>
-              <p className="text-[10px] font-bold uppercase tracking-widest text-[var(--color-muted)]">Total Days</p>
-              <p className="text-xl font-bold leading-tight tracking-tight text-[var(--color-text)]">
-                {totals.totalDays.toFixed(1)} d
-              </p>
-            </div>
-          </div>
-        </div>
-        <div className="kpi-frame px-5 py-4">
-          <div className="flex items-center gap-4">
-            <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-[var(--color-surface-2)] text-[var(--color-primary)]">
-              <Coins size={20} />
-            </div>
-            <div>
-              <p className="text-[10px] font-bold uppercase tracking-widest text-[var(--color-muted)]">Budget</p>
-              <p className="text-xl font-bold leading-tight tracking-tight text-[var(--color-text)]">
-                {formatCurrency(totals.totalBudget, "EUR")}
-              </p>
-            </div>
-          </div>
-        </div>
-      </div>
 
       <div
         className={`mt-6 rounded-2xl border border-[var(--color-border)] bg-[var(--color-surface)] p-1.5 shadow-sm ${openAdvanced ? "pb-2" : ""}`}
@@ -3022,7 +3028,7 @@ export default function CrmDataQualityView() {
               <button
                 id="actions-btn-dq-actions"
                 ref={dqActionsButtonRef}
-                className="btn-ghost h-8 w-8 p-0 text-[var(--color-text)]/70 hover:bg-[var(--color-surface-2)] hover:text-[var(--color-text)]"
+                className="btn-ghost h-8 w-8 p-0 text-[var(--color-text)] hover:bg-[var(--color-surface-2)]"
                 type="button"
                 onClick={() =>
                   setOpenMenuId((prev) => (prev === "dq-actions" ? null : "dq-actions"))
@@ -3030,7 +3036,9 @@ export default function CrmDataQualityView() {
                 aria-label="Actions"
                 title="Actions"
               >
-                <Settings2 size={16} />
+                <span aria-hidden="true" className="text-lg leading-none">
+                  ⋯
+                </span>
               </button>
               {openMenuId === "dq-actions" ? (
                 <div
