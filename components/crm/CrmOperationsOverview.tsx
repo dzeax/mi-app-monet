@@ -101,78 +101,118 @@ const formatPercent = (value: number) => {
   return `${Math.round(value * 100)}%`;
 };
 
+const CACHE_PREFIX = "crm.operations.metrics.v2";
+const CACHE_TTL_MS = 2 * 60 * 1000;
+
+const readMetricsCache = (year: number): Record<string, ClientMetrics> | null => {
+  if (typeof window === "undefined") return null;
+  try {
+    const raw = window.sessionStorage.getItem(`${CACHE_PREFIX}:${year}`);
+    if (!raw) return null;
+    const parsed = JSON.parse(raw) as {
+      ts?: number;
+      metricsByClient?: Record<string, ClientMetrics>;
+    };
+    if (!parsed || typeof parsed.ts !== "number" || !parsed.metricsByClient) return null;
+    if (Date.now() - parsed.ts > CACHE_TTL_MS) return null;
+    return parsed.metricsByClient;
+  } catch {
+    return null;
+  }
+};
+
+const writeMetricsCache = (year: number, metricsByClient: Record<string, ClientMetrics>) => {
+  if (typeof window === "undefined") return;
+  try {
+    window.sessionStorage.setItem(
+      `${CACHE_PREFIX}:${year}`,
+      JSON.stringify({ ts: Date.now(), metricsByClient }),
+    );
+  } catch {
+    // ignore cache write failures
+  }
+};
+
 export default function CrmOperationsOverview() {
   const { isAdmin } = useAuth();
   const nowYear = new Date().getFullYear();
   const [year, setYear] = useState(nowYear);
   const [metricsByClient, setMetricsByClient] = useState<Record<string, ClientMetrics>>({});
-  const [loading, setLoading] = useState(false);
+  const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const clientSlugsQuery = useMemo(
+    () => CLIENTS.map((client) => client.slug).join(","),
+    [],
+  );
 
   const yearOptions = useMemo(() => {
     const set = new Set<number>([nowYear, nowYear - 1]);
     return Array.from(set).filter((y) => Number.isFinite(y) && y > 1900).sort((a, b) => b - a);
   }, [nowYear]);
 
+  const handleYearChange = (nextYear: number) => {
+    const cached = readMetricsCache(nextYear);
+    if (cached && Object.keys(cached).length > 0) {
+      setMetricsByClient(cached);
+      setLoading(false);
+    } else {
+      setMetricsByClient({});
+      setLoading(true);
+    }
+    setYear(nextYear);
+  };
+
   useEffect(() => {
     let active = true;
-    const loadMetrics = async () => {
+    const cached = readMetricsCache(year);
+    const hasCached = Boolean(cached && Object.keys(cached).length > 0);
+    if (hasCached && cached) {
+      setMetricsByClient(cached);
+      setLoading(false);
+    } else {
+      setMetricsByClient({});
       setLoading(true);
-      setError(null);
+    }
+    setError(null);
+
+    const loadMetrics = async () => {
       try {
-        const results = await Promise.all(
-          CLIENTS.map(async (client) => {
-            try {
-              const res = await fetch(`/api/crm/budget?client=${client.slug}&year=${year}`);
-              const body = await res.json().catch(() => null);
-              if (!res.ok) throw new Error(body?.error || `Failed (${res.status})`);
-
-              const roles = Array.isArray(body?.roles) ? body.roles : [];
-              const spendByPerson = body?.spendByPerson ?? {};
-              const budgetTotal = roles.reduce(
-                (acc: number, role: any) =>
-                  acc +
-                  Number(
-                    role?.adjustedPoolAmount ??
-                      role?.poolAmount ??
-                      role?.basePoolAmount ??
-                      0,
-                  ),
-                0,
-              );
-              const spentTotal = Object.values(spendByPerson).reduce(
-                (acc: number, value: any) => acc + Number(value ?? 0),
-                0,
-              );
-              const remainingTotal = budgetTotal - spentTotal;
-              const utilizationTotal = budgetTotal > 0 ? spentTotal / budgetTotal : 0;
-              const currency = roles[0]?.currency || body?.spendCurrency || "EUR";
-              return {
-                slug: client.slug,
-                metrics: {
-                  budgetTotal,
-                  spentTotal,
-                  remainingTotal,
-                  utilizationTotal,
-                  currency,
-                },
-              };
-            } catch {
-              return { slug: client.slug, metrics: null };
-            }
-          }),
+        const res = await fetch(
+          `/api/crm/operations-metrics?year=${year}&clients=${encodeURIComponent(clientSlugsQuery)}`,
+          {
+            cache: "no-store",
+          },
         );
-
+        const body = await res.json().catch(() => null);
+        if (!res.ok) {
+          throw new Error(body?.error || `Failed to load metrics (${res.status})`);
+        }
         if (!active) return;
+
+        const source =
+          body && typeof body.metricsByClient === "object" && body.metricsByClient
+            ? (body.metricsByClient as Record<string, Partial<ClientMetrics> | null>)
+            : {};
         const next: Record<string, ClientMetrics> = {};
-        results.forEach((result) => {
-          if (result.metrics) {
-            next[result.slug] = result.metrics;
-          }
+        CLIENTS.forEach((client) => {
+          const metric = source[client.slug];
+          if (!metric) return;
+          next[client.slug] = {
+            budgetTotal: Number(metric.budgetTotal ?? 0),
+            spentTotal: Number(metric.spentTotal ?? 0),
+            remainingTotal: Number(metric.remainingTotal ?? 0),
+            utilizationTotal: Number(metric.utilizationTotal ?? 0),
+            currency: metric.currency || "EUR",
+          };
         });
+
         setMetricsByClient(next);
+        writeMetricsCache(year, next);
       } catch (err) {
         if (!active) return;
+        if (!hasCached) {
+          setMetricsByClient({});
+        }
         setError(err instanceof Error ? err.message : "Unable to load client metrics");
       } finally {
         if (active) setLoading(false);
@@ -183,7 +223,13 @@ export default function CrmOperationsOverview() {
     return () => {
       active = false;
     };
-  }, [year]);
+  }, [year, clientSlugsQuery]);
+
+  const hasMetricsData = useMemo(
+    () => Object.keys(metricsByClient).length > 0,
+    [metricsByClient],
+  );
+  const showLoadingPlaceholders = loading && !hasMetricsData;
 
   const totals = useMemo(() => {
     let budgetTotal = 0;
@@ -229,7 +275,7 @@ export default function CrmOperationsOverview() {
               <select
                 className="input h-9 min-w-[110px] bg-[color:var(--color-surface-2)]"
                 value={year}
-                onChange={(e) => setYear(Number(e.target.value))}
+                onChange={(e) => handleYearChange(Number(e.target.value))}
               >
                 {yearOptions.map((opt) => (
                   <option key={opt} value={opt}>
@@ -244,7 +290,11 @@ export default function CrmOperationsOverview() {
                   Total budget
                 </p>
                 <p className="text-sm font-semibold text-[color:var(--color-text)]">
-                  {loading ? "..." : formatCurrency(totals.budgetTotal, totals.currency)}
+                  {showLoadingPlaceholders
+                    ? "..."
+                    : hasMetricsData
+                      ? formatCurrency(totals.budgetTotal, totals.currency)
+                      : "--"}
                 </p>
               </div>
               <div className="rounded-2xl border border-[color:var(--color-border)] bg-[color:var(--color-surface-2)]/60 px-3 py-2">
@@ -252,14 +302,22 @@ export default function CrmOperationsOverview() {
                   Total spent
                 </p>
                 <p className="text-sm font-semibold text-[color:var(--color-text)]">
-                  {loading ? "..." : formatCurrency(totals.spentTotal, totals.currency)}
+                  {showLoadingPlaceholders
+                    ? "..."
+                    : hasMetricsData
+                      ? formatCurrency(totals.spentTotal, totals.currency)
+                      : "--"}
                 </p>
               </div>
               <div
                 className="flex items-center rounded-full border border-[color:var(--color-border)] bg-[color:var(--color-surface-2)]/60 px-3 py-2 text-xs font-semibold text-[color:var(--color-text)]"
                 title="Total utilization (spent / budget)"
               >
-                {loading ? "..." : formatPercent(totals.utilizationTotal)}
+                {showLoadingPlaceholders
+                  ? "..."
+                  : hasMetricsData
+                    ? formatPercent(totals.utilizationTotal)
+                    : "--"}
               </div>
             </div>
           </div>
@@ -275,7 +333,7 @@ export default function CrmOperationsOverview() {
         {CLIENTS.map((client) => {
           const metrics = metricsByClient[client.slug];
           const currency = metrics?.currency || "EUR";
-          const placeholder = loading ? "..." : "--";
+          const placeholder = showLoadingPlaceholders ? "..." : "--";
           const computedStatus: "active" | "onboarding" | null = metrics
             ? metrics.spentTotal > 0
               ? "active"
@@ -285,18 +343,12 @@ export default function CrmOperationsOverview() {
             metrics && totals.budgetTotal > 0 && metrics.budgetTotal > 0
               ? metrics.budgetTotal / totals.budgetTotal
               : null;
-          const budgetValue = metrics
-            ? formatCurrency(metrics.budgetTotal, currency)
-            : placeholder;
-          const spentValue = metrics
-            ? formatCurrency(metrics.spentTotal, currency)
-            : placeholder;
+          const budgetValue = metrics ? formatCurrency(metrics.budgetTotal, currency) : placeholder;
+          const spentValue = metrics ? formatCurrency(metrics.spentTotal, currency) : placeholder;
           const remainingValue = metrics
             ? formatCurrency(metrics.remainingTotal, currency)
             : placeholder;
-          const utilizationValue = metrics
-            ? formatPercent(metrics.utilizationTotal)
-            : placeholder;
+          const utilizationValue = metrics ? formatPercent(metrics.utilizationTotal) : placeholder;
           const workspaceHref =
             getCrmWorkspaceHref(getCrmClient(client.slug), workspaceRole) ??
             `/crm/${client.slug}/manual-efforts`;
@@ -369,9 +421,7 @@ export default function CrmOperationsOverview() {
               </div>
 
               <div className="mt-auto flex items-center justify-between">
-                <span className="text-xs text-[color:var(--color-text)]/50">
-                  Snapshot · {year}
-                </span>
+                <span className="text-xs text-[color:var(--color-text)]/50">Snapshot · {year}</span>
                 <Link href={workspaceHref} className="btn-primary">
                   {client.ctaLabel}
                 </Link>
