@@ -27,6 +27,7 @@ import CrmGenerateUnitsModal from "@/components/crm/CrmGenerateUnitsModal";
 import CrmBulkEditUnitsModal, {
   type CampaignUnitsBulkPatch,
 } from "@/components/crm/CrmBulkEditUnitsModal";
+import { useAuth } from "@/context/AuthContext";
 import { showError, showSuccess } from "@/utils/toast";
 
 type Unit = {
@@ -284,6 +285,7 @@ const buildJiraUrl = (ticket: string) =>
     : `https://europcarmobility.atlassian.net/browse/${ticket}`;
 
 export default function CrmCampaignReportingView() {
+  const { isAdmin } = useAuth();
   const pathname = usePathname();
   const segments = pathname?.split("/").filter(Boolean) ?? [];
   const clientSlug = segments[1] || "emg";
@@ -787,10 +789,10 @@ export default function CrmCampaignReportingView() {
     columnOptions.forEach((c) => {
       if (showCol(c.id)) count += 1;
     });
-    // +1 for the selection column
-    // +1 for actions column
-    return Math.max(count, 1) + 2;
-  }, [columnOptions, showCol]);
+    const selectionCols = isAdmin ? 1 : 0;
+    const actionCols = 1;
+    return Math.max(count, 1) + selectionCols + actionCols;
+  }, [columnOptions, isAdmin, showCol]);
 
   const applyDatePreset = useCallback((preset: typeof datePreset) => {
     const today = new Date();
@@ -953,6 +955,7 @@ export default function CrmCampaignReportingView() {
   }, [selectedCount]);
 
   const toggleUnitSelection = (id: string) => {
+    if (!isAdmin) return;
     setSelectedIds((prev) => {
       const next = new Set(prev);
       if (next.has(id)) next.delete(id);
@@ -962,6 +965,7 @@ export default function CrmCampaignReportingView() {
   };
 
   const togglePageSelection = () => {
+    if (!isAdmin) return;
     setSelectedIds((prev) => {
       const next = new Set(prev);
       if (allPageUnitsSelected) {
@@ -973,7 +977,10 @@ export default function CrmCampaignReportingView() {
     });
   };
 
-  const clearSelection = () => setSelectedIds(new Set());
+  const clearSelection = () => {
+    if (!isAdmin) return;
+    setSelectedIds(new Set());
+  };
 
   const totalPages = Math.max(Math.ceil(sortedUnits.length / pageSize), 1);
   const startIdx = sortedUnits.length === 0 ? 0 : page * pageSize + 1;
@@ -1097,6 +1104,7 @@ export default function CrmCampaignReportingView() {
   };
 
   const deleteSelected = async (): Promise<boolean> => {
+    if (!isAdmin) return false;
     if (!selectedIds.size) return false;
     try {
       setDeleting(true);
@@ -1122,10 +1130,21 @@ export default function CrmCampaignReportingView() {
   };
 
   const handleConfirmDelete = async () => {
+    if (!isAdmin) return;
     if (deleting || !selectedIds.size) return;
     const ok = await deleteSelected();
     if (ok) setConfirmDeleteOpen(false);
   };
+
+  useEffect(() => {
+    if (isAdmin) return;
+    if (selectedIds.size > 0) setSelectedIds(new Set());
+    if (openBulkEdit) {
+      setOpenBulkEdit(false);
+      setBulkEditIds([]);
+    }
+    if (confirmDeleteOpen) setConfirmDeleteOpen(false);
+  }, [isAdmin, selectedIds, openBulkEdit, confirmDeleteOpen]);
 
   return (
     <div className="space-y-4">
@@ -1146,26 +1165,30 @@ export default function CrmCampaignReportingView() {
             </div>
 
             <div className="flex flex-wrap items-center gap-2 rounded-xl border border-[var(--color-border)] bg-[var(--color-surface)] p-1.5 shadow-sm">
-              <input
-                ref={importInputRef}
-                type="file"
-                accept=".csv,text/csv"
-                className="hidden"
-                onChange={(e) => {
-                  const file = e.target.files?.[0];
-                  if (!file) return;
-                  void handleImportCsv(file);
-                }}
-              />
-              <button
-                className="btn-ghost flex h-8 items-center gap-2 px-3 text-xs"
-                type="button"
-                onClick={() => importInputRef.current?.click()}
-                disabled={importing}
-              >
-                <Upload size={14} />
-                {importing ? "Importing..." : "Import CSV"}
-              </button>
+              {isAdmin ? (
+                <>
+                  <input
+                    ref={importInputRef}
+                    type="file"
+                    accept=".csv,text/csv"
+                    className="hidden"
+                    onChange={(e) => {
+                      const file = e.target.files?.[0];
+                      if (!file) return;
+                      void handleImportCsv(file);
+                    }}
+                  />
+                  <button
+                    className="btn-ghost flex h-8 items-center gap-2 px-3 text-xs"
+                    type="button"
+                    onClick={() => importInputRef.current?.click()}
+                    disabled={importing}
+                  >
+                    <Upload size={14} />
+                    {importing ? "Importing..." : "Import CSV"}
+                  </button>
+                </>
+              ) : null}
               <button
                 className="btn-ghost flex h-8 items-center gap-2 px-3 text-xs"
                 type="button"
@@ -1174,15 +1197,17 @@ export default function CrmCampaignReportingView() {
                 <RefreshCw size={14} className={loading ? "animate-spin" : undefined} />
                 Refresh
               </button>
-              <button
-                className="btn-ghost flex h-8 items-center gap-2 px-3 text-xs"
-                type="button"
-                onClick={() => void exportCsv()}
-                disabled={exporting || sortedUnits.length === 0}
-              >
-                <FileDown size={14} />
-                {exporting ? "Exporting..." : "Export CSV"}
-              </button>
+              {isAdmin ? (
+                <button
+                  className="btn-ghost flex h-8 items-center gap-2 px-3 text-xs"
+                  type="button"
+                  onClick={() => void exportCsv()}
+                  disabled={exporting || sortedUnits.length === 0}
+                >
+                  <FileDown size={14} />
+                  {exporting ? "Exporting..." : "Export CSV"}
+                </button>
+              ) : null}
               <div className="mx-1 h-5 w-px bg-[var(--color-border)]" />
               <button
                 className="btn-primary flex h-8 items-center gap-2 px-4 text-xs shadow-sm"
@@ -1454,7 +1479,7 @@ export default function CrmCampaignReportingView() {
         </div>
       ) : null}
 
-      {selectedCount > 0 ? (
+      {isAdmin && selectedCount > 0 ? (
         <div className="flex flex-wrap items-center justify-between gap-3 rounded-xl border border-[color:var(--color-border)] bg-[color:var(--color-surface)] px-3 py-2 text-sm text-[color:var(--color-text)] shadow-sm">
           <div className="flex flex-wrap items-center gap-3">
             <span className="inline-flex items-center rounded-full bg-[color:var(--color-primary)]/15 px-3 py-1 text-xs font-semibold text-[color:var(--color-primary)]">
@@ -1504,16 +1529,18 @@ export default function CrmCampaignReportingView() {
           <table className={`min-w-full text-sm ${tableDensityClass}`}>
             <thead className="bg-[color:var(--color-surface-2)]/60 text-left text-[color:var(--color-text)]/80">
               <tr>
-                <th className="w-10 px-3 py-3 border-l-2 border-transparent">
-                  <input
-                    ref={headerSelectRef}
-                    type="checkbox"
-                    className="h-4 w-4"
-                    checked={allPageUnitsSelected}
-                    onChange={togglePageSelection}
-                    aria-label="Select all on page"
-                  />
-                </th>
+                {isAdmin ? (
+                  <th className="w-10 px-3 py-3 border-l-2 border-transparent">
+                    <input
+                      ref={headerSelectRef}
+                      type="checkbox"
+                      className="h-4 w-4"
+                      checked={allPageUnitsSelected}
+                      onChange={togglePageSelection}
+                      aria-label="Select all on page"
+                    />
+                  </th>
+                ) : null}
                 {showCol("date") ? (
                   <th className={`px-3 py-3 font-semibold border-b-2 border-transparent ${sortHeaderClass("sendDate")}`}>
                     <button
@@ -1677,16 +1704,18 @@ export default function CrmCampaignReportingView() {
                         >
                           Columns
                         </button>
-                        <button
-                          className="block w-full px-3 py-2 text-left text-sm hover:bg-[color:var(--color-surface-2)] disabled:cursor-not-allowed disabled:opacity-50"
-                          onClick={() => {
-                            setActionsOpen(false);
-                            void exportCsv();
-                          }}
-                          disabled={exporting || sortedUnits.length === 0}
-                        >
-                          {exporting ? "Exporting..." : "Download CSV"}
-                        </button>
+                        {isAdmin ? (
+                          <button
+                            className="block w-full px-3 py-2 text-left text-sm hover:bg-[color:var(--color-surface-2)] disabled:cursor-not-allowed disabled:opacity-50"
+                            onClick={() => {
+                              setActionsOpen(false);
+                              void exportCsv();
+                            }}
+                            disabled={exporting || sortedUnits.length === 0}
+                          >
+                            {exporting ? "Exporting..." : "Download CSV"}
+                          </button>
+                        ) : null}
                       </div>
                     ) : null}
                   </div>
@@ -1719,17 +1748,19 @@ export default function CrmCampaignReportingView() {
                           : "hover:bg-[color:var(--color-surface-2)]/40",
                       ].join(" ")}
                     >
-                    <td
-                      className={`px-3 py-3 border-l-2 ${selectedIds.has(r.id) ? "border-[color:var(--color-text)]/20" : "border-transparent"}`}
-                    >
-                      <input
-                        type="checkbox"
-                        className="h-4 w-4"
-                        checked={selectedIds.has(r.id)}
-                        onChange={() => toggleUnitSelection(r.id)}
-                        aria-label="Select unit"
-                      />
-                    </td>
+                    {isAdmin ? (
+                      <td
+                        className={`px-3 py-3 border-l-2 ${selectedIds.has(r.id) ? "border-[color:var(--color-text)]/20" : "border-transparent"}`}
+                      >
+                        <input
+                          type="checkbox"
+                          className="h-4 w-4"
+                          checked={selectedIds.has(r.id)}
+                          onChange={() => toggleUnitSelection(r.id)}
+                          aria-label="Select unit"
+                        />
+                      </td>
+                    ) : null}
                     {showCol("date") ? (
                       <td className="px-3 py-3 font-semibold">
                         {r.sendDate ? formatDate(r.sendDate) : ""}
@@ -1921,7 +1952,7 @@ export default function CrmCampaignReportingView() {
         />
       ) : null}
 
-      {openBulkEdit ? (
+      {isAdmin && openBulkEdit ? (
         <CrmBulkEditUnitsModal
           clientSlug={clientSlug}
           ids={bulkEditIds}
@@ -1951,7 +1982,7 @@ export default function CrmCampaignReportingView() {
         />
       ) : null}
 
-      {confirmDeleteOpen ? (
+      {isAdmin && confirmDeleteOpen ? (
         <MiniModal
           title="Delete selected email units"
           widthClass="max-w-md"
