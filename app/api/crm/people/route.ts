@@ -21,6 +21,78 @@ const UpdatePersonZ = z.object({
 });
 
 const normalize = (value: string) => value.trim();
+const normalizeKey = (value?: string | null) => {
+  const trimmed = value?.trim().toLowerCase() ?? "";
+  if (!trimmed) return "";
+  return trimmed
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .replace(/\s+/g, " ");
+};
+
+type PersonRowForAvatar = {
+  id?: string | null;
+  display_name?: string | null;
+  email?: string | null;
+};
+
+const resolveAvatarByPeople = async (
+  supabase: ReturnType<typeof createRouteHandlerClient>,
+  peopleRows: PersonRowForAvatar[],
+  aliasesByPersonId: Map<string, string[]>,
+) => {
+  if (peopleRows.length === 0) return new Map<string, string>();
+
+  const { data: appUsersRows, error: appUsersError } = await supabase
+    .from("app_users")
+    .select("display_name,email,avatar_url")
+    .eq("is_active", true);
+
+  if (appUsersError) {
+    throw new Error(appUsersError.message);
+  }
+
+  const avatarByMatcher = new Map<string, string>();
+  (appUsersRows ?? []).forEach(
+    (row: { display_name?: string | null; email?: string | null; avatar_url?: string | null }) => {
+      const avatar = String(row?.avatar_url ?? "").trim();
+      if (!avatar) return;
+      const displayNameKey = normalizeKey(row?.display_name);
+      const emailKey = normalizeKey(row?.email);
+      if (displayNameKey && !avatarByMatcher.has(displayNameKey)) {
+        avatarByMatcher.set(displayNameKey, avatar);
+      }
+      if (emailKey && !avatarByMatcher.has(emailKey)) {
+        avatarByMatcher.set(emailKey, avatar);
+      }
+    },
+  );
+
+  const avatarByPersonId = new Map<string, string>();
+  peopleRows.forEach((row) => {
+    const personId = String(row?.id ?? "").trim();
+    if (!personId) return;
+
+    const matchers = new Set<string>();
+    const displayNameKey = normalizeKey(row?.display_name);
+    const emailKey = normalizeKey(row?.email);
+    if (emailKey) matchers.add(emailKey);
+    if (displayNameKey) matchers.add(displayNameKey);
+    (aliasesByPersonId.get(personId) ?? []).forEach((alias) => {
+      const aliasKey = normalizeKey(alias);
+      if (aliasKey) matchers.add(aliasKey);
+    });
+
+    for (const matcher of matchers) {
+      const avatar = avatarByMatcher.get(matcher);
+      if (!avatar) continue;
+      avatarByPersonId.set(personId, avatar);
+      break;
+    }
+  });
+
+  return avatarByPersonId;
+};
 
 export async function GET(request: Request) {
   const cookieStore = await cookies();
@@ -57,10 +129,21 @@ export async function GET(request: Request) {
     const aliasMap = new Map<string, string[]>();
     (aliasRows ?? []).forEach((row: { person_id?: string | null; alias?: string | null }) => {
       if (!row.person_id || !row.alias) return;
-      const list = aliasMap.get(row.person_id) || [];
-      list.push(row.alias);
-      aliasMap.set(row.person_id, list);
+      const personId = String(row.person_id);
+      const list = aliasMap.get(personId) || [];
+      list.push(String(row.alias));
+      aliasMap.set(personId, list);
     });
+
+    const avatarByPersonId = await resolveAvatarByPeople(
+      supabase,
+      (peopleRows ?? []).map((row) => ({
+        id: row.id,
+        display_name: row.display_name,
+        email: row.email,
+      })),
+      aliasMap,
+    );
 
     const people =
       peopleRows?.map((row) => ({
@@ -69,8 +152,9 @@ export async function GET(request: Request) {
         clientSlug: row.client_slug,
         displayName: row.display_name,
         email: row.email ?? null,
+        avatarUrl: avatarByPersonId.get(String(row.id)) ?? null,
         isActive: row.is_active,
-        aliases: aliasMap.get(row.id) ?? [],
+        aliases: aliasMap.get(String(row.id)) ?? [],
       })) ?? [];
 
     return NextResponse.json({ people });
@@ -146,6 +230,18 @@ export async function POST(request: Request) {
       return NextResponse.json({ error: aliasError.message }, { status: 500 });
     }
 
+    const avatarByPersonId = await resolveAvatarByPeople(
+      supabase,
+      [
+        {
+          id: person.id,
+          display_name: person.display_name,
+          email: person.email ?? null,
+        },
+      ],
+      new Map<string, string[]>([[String(person.id), [displayName]]]),
+    );
+
     return NextResponse.json({
       person: {
         id: person.id,
@@ -153,6 +249,7 @@ export async function POST(request: Request) {
         clientSlug: person.client_slug,
         displayName: person.display_name,
         email: person.email ?? null,
+        avatarUrl: avatarByPersonId.get(String(person.id)) ?? null,
         isActive: person.is_active,
         aliases: [displayName],
       },
@@ -251,6 +348,22 @@ export async function PATCH(request: Request) {
       .eq("client_slug", clientSlug)
       .eq("person_id", parsed.personId);
 
+    const aliases = (aliasRows ?? [])
+      .map((row: { alias?: string | null }) => row.alias)
+      .filter((value): value is string => Boolean(value));
+
+    const avatarByPersonId = await resolveAvatarByPeople(
+      supabase,
+      [
+        {
+          id: person.id,
+          display_name: person.display_name,
+          email: person.email ?? null,
+        },
+      ],
+      new Map<string, string[]>([[String(person.id), aliases]]),
+    );
+
     return NextResponse.json({
       person: {
         id: person.id,
@@ -258,10 +371,9 @@ export async function PATCH(request: Request) {
         clientSlug: person.client_slug,
         displayName: person.display_name,
         email: person.email ?? null,
+        avatarUrl: avatarByPersonId.get(String(person.id)) ?? null,
         isActive: person.is_active,
-        aliases: (aliasRows ?? [])
-          .map((row: { alias?: string | null }) => row.alias)
-          .filter(Boolean),
+        aliases,
       },
     });
   } catch (err) {

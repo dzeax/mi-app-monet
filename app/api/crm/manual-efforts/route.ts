@@ -3,6 +3,7 @@ import { cookies } from "next/headers";
 import { createRouteHandlerClient } from "@supabase/auth-helpers-nextjs";
 import { z } from "zod";
 import { parse } from "csv-parse/sync";
+import { supabaseAdmin } from "@/lib/supabase/admin";
 
 const DEFAULT_CLIENT = "emg";
 const normalizeKey = (value?: string | null) => {
@@ -765,6 +766,7 @@ export async function PATCH(request: Request) {
 export async function DELETE(request: Request) {
   const cookieStore = await cookies();
   const supabase = createRouteHandlerClient({ cookies: () => cookieStore });
+  const admin = supabaseAdmin();
   const { searchParams } = new URL(request.url);
   const id = searchParams.get("id");
   const clientSlug = searchParams.get("client") || DEFAULT_CLIENT;
@@ -801,13 +803,17 @@ export async function DELETE(request: Request) {
       }
     }
 
-    const { error } = await supabase
+    const { data: deletedRows, error: deleteError } = await admin
       .from("crm_manual_efforts")
       .delete()
       .eq("id", id)
-      .eq("client_slug", clientSlug);
-    if (error) {
-      return NextResponse.json({ error: error.message }, { status: 500 });
+      .eq("client_slug", clientSlug)
+      .select("id");
+    if (deleteError) {
+      return NextResponse.json({ error: deleteError.message }, { status: 500 });
+    }
+    if (!Array.isArray(deletedRows) || deletedRows.length === 0) {
+      return NextResponse.json({ error: "Entry was not deleted" }, { status: 409 });
     }
 
     return NextResponse.json({ ok: true });
