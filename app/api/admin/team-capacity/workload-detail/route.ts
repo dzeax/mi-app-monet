@@ -8,7 +8,7 @@ const DATE_RE = /^\d{4}-\d{2}-\d{2}$/;
 const PAGE_SIZE = 1000;
 
 const querySchema = z.object({
-  userId: z.string().uuid(),
+  userId: z.string().uuid().optional(),
   start: z.string().regex(DATE_RE),
   end: z.string().regex(DATE_RE),
 });
@@ -18,6 +18,7 @@ type AppUserRow = {
   email: string | null;
   display_name: string | null;
   is_active: boolean;
+  in_team_capacity: boolean | null;
 };
 
 type PeopleRow = {
@@ -207,7 +208,7 @@ export async function GET(req: Request) {
   const admin = supabaseAdmin();
   const { data: users, error: usersError } = await admin
     .from('app_users')
-    .select('user_id,email,display_name,is_active')
+    .select('user_id,email,display_name,is_active,in_team_capacity')
     .eq('is_active', true);
 
   if (usersError) {
@@ -310,6 +311,13 @@ export async function GET(req: Request) {
   clientNames.set('internal', 'Internal');
 
   const { start, end, userId } = parsed.data;
+  const targetUserIds = userId
+    ? new Set([userId])
+    : new Set(
+        members
+          .filter((member) => member.in_team_capacity ?? true)
+          .map((member) => member.user_id),
+      );
   let strategyTickets = new Map<string, StrategyTicketRow>();
 
   try {
@@ -364,7 +372,7 @@ export async function GET(req: Request) {
 
     const detailMap = new Map<string, WorkloadDetail>();
     const addDetail = (resolvedUserId: string | null, detail: WorkloadDetail) => {
-      if (!resolvedUserId || resolvedUserId !== userId) return;
+      if (!resolvedUserId || !targetUserIds.has(resolvedUserId)) return;
       if (!Number.isFinite(detail.hours) || detail.hours <= 0) return;
       const key = `${detail.source}|${detail.clientSlug ?? 'unassigned'}|${detail.label ?? 'general'}`;
       const current = detailMap.get(key) ?? { ...detail, hours: 0 };

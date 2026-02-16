@@ -140,6 +140,16 @@ type WorkloadDetailItem = {
   hours: number;
 };
 
+type TeamWorkloadDrawerState = {
+  mode: 'total' | 'last_week';
+  start: string;
+  end: string;
+  title: string;
+  subtitle: string;
+  summaryHours: number;
+  summaryDays: number | null;
+};
+
 type UnmappedDetailItem = {
   id: string;
   ownerKey: string;
@@ -595,6 +605,9 @@ export default function TeamCapacityPage() {
   const [vacationOpen, setVacationOpen] = useState(false);
   const [weeklyPanelOpen, setWeeklyPanelOpen] = useState(false);
   const [workloadDrawerMember, setWorkloadDrawerMember] = useState<CapacityMember | null>(null);
+  const [teamWorkloadDrawer, setTeamWorkloadDrawer] = useState<TeamWorkloadDrawerState | null>(
+    null,
+  );
   const [workloadDetailItems, setWorkloadDetailItems] = useState<WorkloadDetailItem[]>([]);
   const [workloadDetailLoading, setWorkloadDetailLoading] = useState(false);
   const [workloadDetailError, setWorkloadDetailError] = useState<string | null>(null);
@@ -830,6 +843,25 @@ export default function TeamCapacityPage() {
   }, [memberLookup, workloadDrawerMember]);
 
   const orderedMembers = useMemo(() => activeMembers, [activeMembers]);
+  const workloadDrawerOpen = Boolean(workloadDrawerMember || teamWorkloadDrawer);
+
+  const workloadDrawerRequest = useMemo(() => {
+    if (workloadDrawerMember) {
+      return {
+        start: startDate,
+        end: endDate,
+        userId: workloadDrawerMember.userId,
+      };
+    }
+    if (teamWorkloadDrawer) {
+      return {
+        start: teamWorkloadDrawer.start,
+        end: teamWorkloadDrawer.end,
+        userId: null,
+      };
+    }
+    return null;
+  }, [endDate, startDate, teamWorkloadDrawer, workloadDrawerMember]);
 
   const sortedWorkloadDetails = useMemo(
     () => [...workloadDetailItems].sort((a, b) => b.hours - a.hours),
@@ -837,9 +869,22 @@ export default function TeamCapacityPage() {
   );
 
   const drawerHoursPerDay = useMemo(
-    () => (workloadDrawerMember ? getHoursPerDay(workloadDrawerMember.weeklyHours) : null),
-    [workloadDrawerMember],
+    () => (workloadDrawerMember ? getHoursPerDay(workloadDrawerMember.weeklyHours) : averageHoursPerDay),
+    [averageHoursPerDay, workloadDrawerMember],
   );
+
+  const workloadDrawerSummaryHours = useMemo(() => {
+    if (workloadDrawerMember) return workloadDrawerMember.workloadHours;
+    if (teamWorkloadDrawer) return teamWorkloadDrawer.summaryHours;
+    return 0;
+  }, [teamWorkloadDrawer, workloadDrawerMember]);
+
+  const workloadDrawerTitle = workloadDrawerMember
+    ? 'Workload Breakdown'
+    : teamWorkloadDrawer?.title ?? 'Workload Breakdown';
+  const workloadDrawerSubtitle = workloadDrawerMember
+    ? workloadDrawerMember.displayName || workloadDrawerMember.email || 'Member workload'
+    : teamWorkloadDrawer?.subtitle ?? formatIsoRange(startDate, endDate);
 
   const groupedWorkload = useMemo(() => {
     const grouped = new Map<
@@ -1196,7 +1241,7 @@ export default function TeamCapacityPage() {
   }, [holidayActionsOpen]);
 
   useEffect(() => {
-    if (!workloadDrawerMember) {
+    if (!workloadDrawerRequest) {
       setWorkloadDetailItems([]);
       setWorkloadDetailError(null);
       setWorkloadDetailLoading(false);
@@ -1210,10 +1255,12 @@ export default function TeamCapacityPage() {
       setWorkloadDetailItems([]);
       try {
         const params = new URLSearchParams({
-          userId: workloadDrawerMember.userId,
-          start: startDate,
-          end: endDate,
+          start: workloadDrawerRequest.start,
+          end: workloadDrawerRequest.end,
         });
+        if (workloadDrawerRequest.userId) {
+          params.set('userId', workloadDrawerRequest.userId);
+        }
         const response = await fetch(
           `/api/admin/team-capacity/workload-detail?${params.toString()}`,
           { signal: controller.signal },
@@ -1245,7 +1292,7 @@ export default function TeamCapacityPage() {
     loadDetails();
 
     return () => controller.abort();
-  }, [workloadDrawerMember, startDate, endDate]);
+  }, [workloadDrawerRequest]);
 
   useEffect(() => {
     if (!unmappedDrawerOpen) {
@@ -1627,6 +1674,40 @@ export default function TeamCapacityPage() {
     }
   };
 
+  const closeWorkloadDrawer = () => {
+    setWorkloadDrawerMember(null);
+    setTeamWorkloadDrawer(null);
+  };
+
+  const openTotalWorkloadDrawer = () => {
+    setUnmappedDrawerOpen(false);
+    setWorkloadDrawerMember(null);
+    setTeamWorkloadDrawer({
+      mode: 'total',
+      start: startDate,
+      end: endDate,
+      title: 'Team Workload Breakdown',
+      subtitle: formatIsoRange(startDate, endDate),
+      summaryHours: totalWorkload,
+      summaryDays: totalWorkloadDays,
+    });
+  };
+
+  const openLastReportedWeekDrawer = () => {
+    if (!lastReportedWeek) return;
+    setUnmappedDrawerOpen(false);
+    setWorkloadDrawerMember(null);
+    setTeamWorkloadDrawer({
+      mode: 'last_week',
+      start: lastReportedWeek.weekStart,
+      end: lastReportedWeek.weekEnd,
+      title: 'Last Reported Week Breakdown',
+      subtitle: formatWeekLabel(lastReportedWeek.weekStart, lastReportedWeek.weekEnd),
+      summaryHours: lastReportedWeek.workloadHours,
+      summaryDays: weeklyReferenceDays,
+    });
+  };
+
   if (!isAdmin) {
     return (
       <section className="card p-6">
@@ -1763,79 +1844,131 @@ export default function TeamCapacityPage() {
             </div>
         </div>
         <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-4">
-          <div className="kpi-frame">
-            <p className="text-xs font-bold tracking-widest text-[--color-muted] uppercase">Total capacity</p>
-            <p className="mt-2 text-3xl font-bold tracking-tight">
-              {formatHours(totalCapacity)}
-              {totalCapacityDays != null ? (
-                <span className="text-lg font-normal text-[var(--color-muted)] ml-2">
-                  ({formatDaysValue(totalCapacityDays)})
-                </span>
-              ) : null}
-            </p>
+          <div className="kpi-frame p-5">
+            <div className="flex items-center gap-4">
+              <div className="flex h-12 w-12 shrink-0 items-center justify-center rounded-xl bg-[var(--color-surface-2)] text-[var(--color-primary)]">
+                <CalendarDays size={22} />
+              </div>
+              <div>
+                <p className="text-[11px] font-bold uppercase tracking-widest text-[var(--color-muted)]">
+                  Total capacity
+                </p>
+                <div className="mt-0.5 flex items-baseline gap-2">
+                  <span className="text-2xl font-bold tracking-tight text-[var(--color-text)] tabular-nums">
+                    {formatHours(totalCapacity)}
+                  </span>
+                  {totalCapacityDays != null ? (
+                    <span className="text-xs text-[var(--color-muted)]">
+                      ({formatDaysValue(totalCapacityDays)})
+                    </span>
+                  ) : null}
+                </div>
+              </div>
+            </div>
           </div>
-          <div className="kpi-frame">
-            <p className="text-xs font-bold tracking-widest text-[--color-muted] uppercase">Total workload</p>
-            <p className="mt-2 text-3xl font-bold tracking-tight">
-              {formatHours(totalWorkload)}
-              {totalWorkloadDays != null ? (
-                <span className="text-lg font-normal text-[var(--color-muted)] ml-2">
-                  ({formatDaysValue(totalWorkloadDays)})
-                </span>
-              ) : null}
-            </p>
-          </div>
-          <div
-            className="kpi-frame group cursor-pointer transition-shadow hover:shadow-md"
-            role="button"
-            tabIndex={0}
+
+          <button
+            type="button"
+            className="kpi-frame group block w-full appearance-none border-0 bg-transparent p-5 text-left font-[inherit] transition-transform hover:-translate-y-0.5 hover:shadow-md focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-primary)]/35"
+            onClick={openTotalWorkloadDrawer}
+            title="Open team workload details"
+          >
+            <div className="flex items-center gap-4">
+              <div className="flex h-12 w-12 shrink-0 items-center justify-center rounded-xl bg-[var(--color-surface-2)] text-[var(--color-primary)]">
+                <Clock size={22} />
+              </div>
+              <div>
+                <p className="text-[11px] font-bold uppercase tracking-widest text-[var(--color-muted)]">
+                  Total workload
+                </p>
+                <div className="mt-0.5 flex items-baseline gap-2">
+                  <span className="text-2xl font-bold tracking-tight text-[var(--color-text)] tabular-nums">
+                    {formatHours(totalWorkload)}
+                  </span>
+                  {totalWorkloadDays != null ? (
+                    <span className="text-xs text-[var(--color-muted)]">
+                      ({formatDaysValue(totalWorkloadDays)})
+                    </span>
+                  ) : null}
+                </div>
+              </div>
+            </div>
+          </button>
+
+          <button
+            type="button"
+            className="kpi-frame group block w-full appearance-none border-0 bg-transparent p-5 text-left font-[inherit] transition-transform hover:-translate-y-0.5 hover:shadow-md focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-primary)]/35"
             onClick={() => {
+              setTeamWorkloadDrawer(null);
               setWorkloadDrawerMember(null);
               setUnmappedDrawerOpen(true);
             }}
-            onKeyDown={(event) => {
-              if (event.key === 'Enter' || event.key === ' ') {
-                event.preventDefault();
-                setWorkloadDrawerMember(null);
-                setUnmappedDrawerOpen(true);
-              }
-            }}
+            title="Open external workload details"
           >
-            <p className="text-xs font-bold tracking-widest text-[--color-muted] uppercase">External workload</p>
-            <p
-              className={`mt-2 text-3xl font-bold tracking-tight ${
-                unmappedHours > 0 ? 'text-amber-600 group-hover:text-amber-500' : ''
-              }`}
-            >
-              {formatHours(unmappedHours)}
-              {unmappedDays != null ? (
-                <span className="text-lg font-normal text-[var(--color-muted)] ml-2">
-                  ({formatDaysValue(unmappedDays)})
-                </span>
-              ) : null}
-            </p>
-          </div>
-          <div className="kpi-frame">
-            <p className="text-xs font-bold tracking-widest text-[--color-muted] uppercase">
-              Last reported week
-            </p>
-            <p className="mt-2 text-3xl font-bold tracking-tight">
-              {formatHours(lastReportedWeek?.workloadHours ?? null)}
-              {weeklyReferenceDays != null ? (
-                <span className="text-lg font-normal text-[var(--color-muted)] ml-2">
-                  ({formatDaysValue(weeklyReferenceDays)})
-                </span>
-              ) : null}
-            </p>
-            <p className="mt-1 text-xs text-[var(--color-muted)]">
-              {weeklyReferenceRange}
-              {lastReportedWeek?.utilization != null ? (
-                <span className="ml-2">
-                  {percentFormatter.format(lastReportedWeek.utilization)}
-                </span>
-              ) : null}
-            </p>
-          </div>
+            <div className="flex items-center gap-4">
+              <div className="flex h-12 w-12 shrink-0 items-center justify-center rounded-xl bg-[var(--color-surface-2)] text-[var(--color-primary)]">
+                <Briefcase size={22} />
+              </div>
+              <div>
+                <p className="text-[11px] font-bold uppercase tracking-widest text-[var(--color-muted)]">
+                  External workload
+                </p>
+                <div className="mt-0.5 flex items-baseline gap-2">
+                  <span
+                    className={`text-2xl font-bold tracking-tight tabular-nums ${
+                      unmappedHours > 0
+                        ? 'text-amber-600 group-hover:text-amber-500'
+                        : 'text-[var(--color-text)]'
+                    }`}
+                  >
+                    {formatHours(unmappedHours)}
+                  </span>
+                  {unmappedDays != null ? (
+                    <span className="text-xs text-[var(--color-muted)]">
+                      ({formatDaysValue(unmappedDays)})
+                    </span>
+                  ) : null}
+                </div>
+              </div>
+            </div>
+          </button>
+
+          <button
+            type="button"
+            className="kpi-frame group block w-full appearance-none border-0 bg-transparent p-5 text-left font-[inherit] transition-transform hover:-translate-y-0.5 hover:shadow-md focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-primary)]/35 disabled:cursor-not-allowed disabled:opacity-70 disabled:hover:translate-y-0 disabled:hover:shadow-none"
+            onClick={openLastReportedWeekDrawer}
+            title={lastReportedWeek ? 'Open last reported week details' : 'No weekly data available'}
+            disabled={!lastReportedWeek}
+          >
+            <div className="flex items-center gap-4">
+              <div className="flex h-12 w-12 shrink-0 items-center justify-center rounded-xl bg-[var(--color-surface-2)] text-[var(--color-primary)]">
+                <Calendar size={22} />
+              </div>
+              <div>
+                <p className="text-[11px] font-bold uppercase tracking-widest text-[var(--color-muted)]">
+                  Last reported week
+                </p>
+                <div className="mt-0.5 flex items-baseline gap-2">
+                  <span className="text-2xl font-bold tracking-tight text-[var(--color-text)] tabular-nums">
+                    {formatHours(lastReportedWeek?.workloadHours ?? null)}
+                  </span>
+                  {weeklyReferenceDays != null ? (
+                    <span className="text-xs text-[var(--color-muted)]">
+                      ({formatDaysValue(weeklyReferenceDays)})
+                    </span>
+                  ) : null}
+                </div>
+                <p className="mt-1 text-xs text-[var(--color-muted)]">
+                  {weeklyReferenceRange}
+                  {lastReportedWeek?.utilization != null ? (
+                    <span className="ml-2">
+                      {percentFormatter.format(lastReportedWeek.utilization)}
+                    </span>
+                  ) : null}
+                </p>
+              </div>
+            </div>
+          </button>
         </div>
       </div>
 
@@ -1965,6 +2098,7 @@ export default function TeamCapacityPage() {
                         className="cursor-pointer group hover:bg-[var(--color-surface-2)]/50 transition-colors rounded px-2 -mx-2"
                         onClick={() => {
                           setUnmappedDrawerOpen(false);
+                          setTeamWorkloadDrawer(null);
                           setWorkloadDrawerMember(member);
                         }}
                       >
@@ -3025,12 +3159,12 @@ export default function TeamCapacityPage() {
       </div>
 
       {/* Workload Detail Drawer */}
-      {workloadDrawerMember ? (
+      {workloadDrawerOpen ? (
         <div className="fixed inset-0 z-[150] flex justify-end" role="dialog">
           {/* Backdrop */}
           <div
             className="absolute inset-0 bg-black/20 backdrop-blur-[2px] animate-in fade-in duration-200"
-            onClick={() => setWorkloadDrawerMember(null)}
+            onClick={closeWorkloadDrawer}
           />
 
           {/* Drawer Panel */}
@@ -3038,30 +3172,35 @@ export default function TeamCapacityPage() {
             {/* Drawer Header */}
             <div className="flex items-center justify-between border-b border-[var(--color-border)] bg-[var(--color-surface-2)]/30 px-6 py-5">
               <div className="flex items-center gap-3">
-                {/* Avatar (Reused logic) */}
-                <div className="h-10 w-10 shrink-0 overflow-hidden rounded-full border border-[var(--color-border)]">
-                  {workloadDrawerMember.avatarUrl ? (
-                    <img
-                      src={workloadDrawerMember.avatarUrl}
-                      className="h-full w-full object-cover"
-                      alt={workloadDrawerMember.displayName ?? 'Member'}
-                      referrerPolicy="no-referrer"
-                    />
-                  ) : (
-                    <div className="flex h-full w-full items-center justify-center bg-[var(--color-surface-2)] text-xs font-bold">
-                      {workloadDrawerMember.displayName?.[0] ?? '?'}
-                    </div>
-                  )}
-                </div>
+                {workloadDrawerMember ? (
+                  <div className="h-10 w-10 shrink-0 overflow-hidden rounded-full border border-[var(--color-border)]">
+                    {workloadDrawerMember.avatarUrl ? (
+                      <img
+                        src={workloadDrawerMember.avatarUrl}
+                        className="h-full w-full object-cover"
+                        alt={workloadDrawerMember.displayName ?? 'Member'}
+                        referrerPolicy="no-referrer"
+                      />
+                    ) : (
+                      <div className="flex h-full w-full items-center justify-center bg-[var(--color-surface-2)] text-xs font-bold">
+                        {workloadDrawerMember.displayName?.[0] ?? '?'}
+                      </div>
+                    )}
+                  </div>
+                ) : (
+                  <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full border border-[var(--color-border)] bg-[var(--color-surface-2)] text-[var(--color-primary)]">
+                    <Briefcase size={18} />
+                  </div>
+                )}
                 <div>
-                  <h3 className="text-base font-bold text-[var(--color-text)]">Workload Breakdown</h3>
+                  <h3 className="text-base font-bold text-[var(--color-text)]">{workloadDrawerTitle}</h3>
                   <p className="text-xs text-[var(--color-muted)]">
-                    {workloadDrawerMember.displayName}
+                    {workloadDrawerSubtitle}
                   </p>
                 </div>
               </div>
               <button
-                onClick={() => setWorkloadDrawerMember(null)}
+                onClick={closeWorkloadDrawer}
                 className="btn-ghost rounded-full p-2 hover:bg-[var(--color-border)]"
               >
                 <XCircle className="h-5 w-5 text-[var(--color-muted)]" />
@@ -3075,14 +3214,14 @@ export default function TeamCapacityPage() {
                 <div className="flex flex-wrap items-end justify-between gap-4">
                   <div>
                     <p className="text-xs font-semibold uppercase tracking-widest text-[var(--color-muted)]">
-                      Total Workload
+                      {teamWorkloadDrawer?.mode === 'last_week' ? 'Last reported week' : 'Total Workload'}
                     </p>
                     <div className="mt-2 flex items-baseline gap-2">
                       <span className="text-3xl font-bold text-[var(--color-primary)]">
-                        {formatHours(workloadDrawerMember.workloadHours)}
+                        {formatHours(workloadDrawerSummaryHours)}
                       </span>
                       <span className="text-sm text-[var(--color-muted)]">
-                        ({formatAsDays(workloadDrawerMember.workloadHours, drawerHoursPerDay)})
+                        ({formatAsDays(workloadDrawerSummaryHours, drawerHoursPerDay)})
                       </span>
                     </div>
                   </div>
