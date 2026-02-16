@@ -452,7 +452,19 @@ const renderPriorityTooltip = ({ active, payload }: any) => {
 
 const renderEtaTooltip = ({ active, payload, label }: any) => {
   if (!active || !payload || payload.length === 0) return null;
-  const value = payload[0]?.value ?? 0;
+  const entryPayload = payload[0]?.payload ?? {};
+  const value = Number(payload[0]?.value ?? entryPayload?.count ?? 0);
+  const ownerBreakdown = Array.isArray(entryPayload?.ownerBreakdown)
+    ? entryPayload.ownerBreakdown
+    : [];
+  const noEtaWithBlocker = Number(entryPayload?.noEtaWithBlocker ?? 0);
+  const noEtaWithoutBlocker = Number(entryPayload?.noEtaWithoutBlocker ?? 0);
+  const noEtaNeedsActionByOwner = Array.isArray(entryPayload?.noEtaNeedsActionByOwner)
+    ? entryPayload.noEtaNeedsActionByOwner
+    : [];
+  const showNoEtaBreakdown =
+    label === "No ETA" &&
+    (noEtaWithBlocker > 0 || noEtaWithoutBlocker > 0 || noEtaNeedsActionByOwner.length > 0);
   return (
     <div className={tooltipContainerClassName}>
       <div className="font-semibold">{label}</div>
@@ -460,6 +472,61 @@ const renderEtaTooltip = ({ active, payload, label }: any) => {
         <span>Tickets</span>
         <span className="font-semibold">{value}</span>
       </div>
+      {showNoEtaBreakdown ? (
+        <div className="mt-2 border-t border-[color:var(--color-border)] pt-2">
+          <div className="mb-1 text-[10px] font-semibold uppercase tracking-[0.12em] text-[color:var(--color-text)]/60">
+            No ETA policy
+          </div>
+          <div className="flex items-center justify-between gap-3">
+            <span>Allowed (has blocker)</span>
+            <span className="font-semibold text-emerald-700">{noEtaWithBlocker}</span>
+          </div>
+          <div className="mt-1 flex items-center justify-between gap-3">
+            <span>Needs action (no blocker)</span>
+            <span className="font-semibold text-rose-700">{noEtaWithoutBlocker}</span>
+          </div>
+          {noEtaNeedsActionByOwner.length > 0 ? (
+            <div className="mt-2">
+              <div className="mb-1 text-[10px] font-semibold uppercase tracking-[0.12em] text-[color:var(--color-text)]/60">
+                Needs action by owner
+              </div>
+              <div className="max-h-32 space-y-1 overflow-y-auto pr-1">
+                {noEtaNeedsActionByOwner.map((item: any, index: number) => (
+                  <div
+                    key={`no-eta-needs-action-${item?.owner ?? "owner"}-${index}`}
+                    className="flex items-center justify-between gap-3"
+                  >
+                    <span className="max-w-[180px] truncate" title={String(item?.owner ?? "")}>
+                      {item?.owner ?? "Unassigned"}
+                    </span>
+                    <span className="font-semibold text-rose-700">{Number(item?.count ?? 0)}</span>
+                  </div>
+                ))}
+              </div>
+            </div>
+          ) : null}
+        </div>
+      ) : null}
+      {ownerBreakdown.length > 0 ? (
+        <div className="mt-2 border-t border-[color:var(--color-border)] pt-2">
+          <div className="mb-1 text-[10px] font-semibold uppercase tracking-[0.12em] text-[color:var(--color-text)]/60">
+            By owner
+          </div>
+          <div className="max-h-36 space-y-1 overflow-y-auto pr-1">
+            {ownerBreakdown.map((item: any, index: number) => (
+              <div
+                key={`${label}-${item?.owner ?? "owner"}-${index}`}
+                className="flex items-center justify-between gap-3"
+              >
+                <span className="max-w-[180px] truncate" title={String(item?.owner ?? "")}>
+                  {item?.owner ?? "Unassigned"}
+                </span>
+                <span className="font-semibold">{Number(item?.count ?? 0)}</span>
+              </div>
+            ))}
+          </div>
+        </div>
+      ) : null}
     </div>
   );
 };
@@ -707,6 +774,7 @@ export default function CrmDqTicketsAnalyticsView({
   const [priorityFilters, setPriorityFilters] = useState<string[]>([]);
   const [typeFilters, setTypeFilters] = useState<string[]>([]);
   const [etaBucketFilters, setEtaBucketFilters] = useState<string[]>([]);
+  const [noEtaNeedsActionOnly, setNoEtaNeedsActionOnly] = useState(false);
   const [searchQuery, setSearchQuery] = useState("");
   const [quickClearId, setQuickClearId] = useState<string | null>(null);
   const [blockerTicket, setBlockerTicket] = useState<TicketView | null>(null);
@@ -1106,12 +1174,20 @@ export default function CrmDqTicketsAnalyticsView({
   }, [viewRows, statusFilters, assigneeFilters, priorityFilters, typeFilters, searchQuery]);
 
   const filteredRows = useMemo(() => {
-    if (etaBucketFilters.length === 0) return baseFilteredRows;
     const etaBucketSet = new Set(etaBucketFilters.map(normalizePersonKey));
-    return baseFilteredRows.filter((row) =>
-      etaBucketSet.has(normalizePersonKey(getEtaBucketLabel(row))),
-    );
-  }, [baseFilteredRows, etaBucketFilters]);
+    return baseFilteredRows.filter((row) => {
+      if (
+        etaBucketSet.size > 0 &&
+        !etaBucketSet.has(normalizePersonKey(getEtaBucketLabel(row)))
+      ) {
+        return false;
+      }
+      if (!noEtaNeedsActionOnly) return true;
+      const isNoEta = getEtaBucketLabel(row) === "No ETA";
+      const hasBlocker = Boolean(row.appStatus?.trim());
+      return isNoEta && !hasBlocker;
+    });
+  }, [baseFilteredRows, etaBucketFilters, noEtaNeedsActionOnly]);
 
   const tableRows = useMemo(() => {
     const priorityRank: Record<string, number> = { P1: 0, P2: 1, P3: 2 };
@@ -1315,16 +1391,54 @@ export default function CrmDqTicketsAnalyticsView({
   const etaBucketData = useMemo(() => {
     const orderedLabels = ["Overdue", "Due 0-7d", "Due 8-14d", "Due 15+d", "No ETA"];
     const counts = new Map(orderedLabels.map((label) => [label, 0]));
+    const ownersByBucket = new Map(
+      orderedLabels.map((label) => [label, new Map<string, number>()]),
+    );
+    let noEtaWithBlocker = 0;
+    let noEtaWithoutBlocker = 0;
+    const noEtaNeedsActionByOwner = new Map<string, number>();
     baseFilteredRows.forEach((row) => {
       const bucket = getEtaBucketLabel(row);
       counts.set(bucket, (counts.get(bucket) ?? 0) + 1);
+      const owner = row.assigneeLabel?.trim() || "Unassigned";
+      const ownerMap = ownersByBucket.get(bucket) ?? new Map<string, number>();
+      ownerMap.set(owner, (ownerMap.get(owner) ?? 0) + 1);
+      ownersByBucket.set(bucket, ownerMap);
+      if (bucket === "No ETA") {
+        const hasBlocker = Boolean(row.appStatus?.trim());
+        if (hasBlocker) {
+          noEtaWithBlocker += 1;
+        } else {
+          noEtaWithoutBlocker += 1;
+          noEtaNeedsActionByOwner.set(owner, (noEtaNeedsActionByOwner.get(owner) ?? 0) + 1);
+        }
+      }
     });
     return orderedLabels.map((label) => ({
       label,
       count: counts.get(label) ?? 0,
       fill: ETA_BUCKET_COLORS[label] ?? "var(--chart-5)",
+      ownerBreakdown: Array.from(ownersByBucket.get(label)?.entries() ?? [])
+        .map(([owner, count]) => ({ owner, count }))
+        .sort((a, b) => b.count - a.count || a.owner.localeCompare(b.owner)),
+      noEtaWithBlocker: label === "No ETA" ? noEtaWithBlocker : 0,
+      noEtaWithoutBlocker: label === "No ETA" ? noEtaWithoutBlocker : 0,
+      noEtaNeedsActionByOwner:
+        label === "No ETA"
+          ? Array.from(noEtaNeedsActionByOwner.entries())
+              .map(([owner, count]) => ({ owner, count }))
+              .sort((a, b) => b.count - a.count || a.owner.localeCompare(b.owner))
+          : [],
     }));
   }, [baseFilteredRows]);
+
+  const noEtaBucketSummary = useMemo(
+    () => etaBucketData.find((entry) => entry.label === "No ETA"),
+    [etaBucketData],
+  );
+  const noEtaNeedsActionCount = Number(noEtaBucketSummary?.noEtaWithoutBlocker ?? 0);
+  const noEtaAllowedCount = Number(noEtaBucketSummary?.noEtaWithBlocker ?? 0);
+  const noEtaTotalCount = Number(noEtaBucketSummary?.count ?? 0);
 
   const blockerTypeChartData = useMemo(() => {
     const counts = new Map<string, number>();
@@ -1380,6 +1494,7 @@ export default function CrmDqTicketsAnalyticsView({
     setPriorityFilters([]);
     setTypeFilters([]);
     setEtaBucketFilters([]);
+    setNoEtaNeedsActionOnly(false);
     setSearchQuery("");
   };
 
@@ -1389,6 +1504,7 @@ export default function CrmDqTicketsAnalyticsView({
     setPriorityFilters([]);
     setTypeFilters([]);
     setEtaBucketFilters([]);
+    setNoEtaNeedsActionOnly(false);
     setSearchQuery("");
   };
 
@@ -1718,11 +1834,38 @@ export default function CrmDqTicketsAnalyticsView({
         <article className="card px-6 py-5">
           <div className="flex flex-wrap items-center justify-between gap-2">
             <h2 className="text-lg font-semibold text-[color:var(--color-text)]">ETA risk buckets</h2>
-            <span className="text-xs uppercase tracking-[0.2em] text-[color:var(--color-text)]/60">
-              Click bars to filter
-            </span>
+            <div className="flex flex-wrap items-center justify-end gap-2">
+              <span className="text-xs uppercase tracking-[0.2em] text-[color:var(--color-text)]/60">
+                Click bars to filter
+              </span>
+              <button
+                type="button"
+                className={[
+                  "inline-flex items-center rounded-full border px-2 py-0.5 text-[10px] font-semibold transition-colors",
+                  noEtaNeedsActionCount > 0
+                    ? "border-rose-200 bg-rose-50 text-rose-700"
+                    : "border-emerald-200 bg-emerald-50 text-emerald-700",
+                  noEtaNeedsActionOnly
+                    ? "ring-1 ring-[color:var(--color-primary)] ring-offset-1"
+                    : "",
+                ].join(" ")}
+                disabled={loading}
+                onClick={() => setNoEtaNeedsActionOnly((prev) => !prev)}
+                title={
+                  loading
+                    ? "No ETA health"
+                    : `No ETA total: ${noEtaTotalCount} | Allowed (has blocker): ${noEtaAllowedCount} | Needs action: ${noEtaNeedsActionCount} | Click to ${noEtaNeedsActionOnly ? "disable" : "enable"} action filter`
+                }
+              >
+                {loading
+                  ? "No ETA needs action: --"
+                  : `No ETA needs action: ${noEtaNeedsActionCount}${
+                      noEtaNeedsActionOnly ? " (on)" : ""
+                    }`}
+              </button>
+            </div>
           </div>
-          {etaBucketFilters.length > 0 ? (
+          {etaBucketFilters.length > 0 || noEtaNeedsActionOnly ? (
             <div className="mt-3 flex flex-wrap items-center gap-2">
               {etaBucketFilters.map((label) => (
                 <span
@@ -1732,12 +1875,20 @@ export default function CrmDqTicketsAnalyticsView({
                   {label}
                 </span>
               ))}
+              {noEtaNeedsActionOnly ? (
+                <span className="inline-flex items-center rounded-full border border-rose-200 bg-rose-50 px-2 py-0.5 text-[10px] font-semibold text-rose-700">
+                  No ETA without blocker
+                </span>
+              ) : null}
               <button
                 type="button"
                 className="text-xs font-medium text-[color:var(--color-primary)] hover:underline"
-                onClick={() => setEtaBucketFilters([])}
+                onClick={() => {
+                  setEtaBucketFilters([]);
+                  setNoEtaNeedsActionOnly(false);
+                }}
               >
-                Clear ETA filter
+                Clear ETA filters
               </button>
             </div>
           ) : null}
