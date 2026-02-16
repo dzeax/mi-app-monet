@@ -3,7 +3,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import { usePathname } from "next/navigation";
-import { Activity, AlertTriangle, Calendar, Clock, FileText, Link2, Pencil, X } from "lucide-react";
+import { Activity, AlertTriangle, ArrowRight, Calendar, Clock, FileText, Link2, Pencil, X } from "lucide-react";
 import {
   ResponsiveContainer,
   BarChart,
@@ -56,6 +56,8 @@ type TicketView = DashboardTicket & {
   isDueSoon: boolean;
   searchText: string;
 };
+
+type KpiDrawerMode = "overdue" | "dueSoon";
 
 const STATUS_OPTIONS = ["Backlog", "Refining", "Ready", "In progress", "Validation", "Done"];
 const PRIORITY_OPTIONS = ["P1", "P2", "P3"];
@@ -775,6 +777,7 @@ export default function CrmDqTicketsAnalyticsView({
   const [typeFilters, setTypeFilters] = useState<string[]>([]);
   const [etaBucketFilters, setEtaBucketFilters] = useState<string[]>([]);
   const [noEtaNeedsActionOnly, setNoEtaNeedsActionOnly] = useState(false);
+  const [kpiDrawerMode, setKpiDrawerMode] = useState<KpiDrawerMode | null>(null);
   const [searchQuery, setSearchQuery] = useState("");
   const [quickClearId, setQuickClearId] = useState<string | null>(null);
   const [blockerTicket, setBlockerTicket] = useState<TicketView | null>(null);
@@ -842,6 +845,17 @@ export default function CrmDqTicketsAnalyticsView({
   useEffect(() => {
     void loadTickets();
   }, [loadTickets]);
+
+  useEffect(() => {
+    if (!kpiDrawerMode) return;
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (event.key === "Escape") {
+        setKpiDrawerMode(null);
+      }
+    };
+    window.addEventListener("keydown", onKeyDown);
+    return () => window.removeEventListener("keydown", onKeyDown);
+  }, [kpiDrawerMode]);
 
   const openBlockerModal = useCallback(
     (ticket: TicketView) => {
@@ -1188,6 +1202,93 @@ export default function CrmDqTicketsAnalyticsView({
       return isNoEta && !hasBlocker;
     });
   }, [baseFilteredRows, etaBucketFilters, noEtaNeedsActionOnly]);
+
+  const overdueRows = useMemo(
+    () => filteredRows.filter((row) => row.isOverdue),
+    [filteredRows],
+  );
+  const dueSoonRows = useMemo(
+    () => filteredRows.filter((row) => row.isDueSoon),
+    [filteredRows],
+  );
+
+  const kpiDrawerData = useMemo(() => {
+    if (!kpiDrawerMode) return null;
+    const sourceRows = kpiDrawerMode === "overdue" ? overdueRows : dueSoonRows;
+    const rows = [...sourceRows].sort((a, b) => (a.etaDays ?? 999) - (b.etaDays ?? 999));
+    const withBlocker = rows.filter((row) => Boolean(row.appStatus?.trim())).length;
+    const withoutBlocker = rows.length - withBlocker;
+    const ownerMap = new Map<
+      string,
+      {
+        owner: string;
+        avatarUrl: string | null;
+        count: number;
+        withBlocker: number;
+        withoutBlocker: number;
+      }
+    >();
+
+    rows.forEach((row) => {
+      const owner = row.assigneeLabel?.trim() || "Unassigned";
+      const current = ownerMap.get(owner) ?? {
+        owner,
+        avatarUrl: row.assigneeAvatarUrl ?? null,
+        count: 0,
+        withBlocker: 0,
+        withoutBlocker: 0,
+      };
+      if (!current.avatarUrl && row.assigneeAvatarUrl) {
+        current.avatarUrl = row.assigneeAvatarUrl;
+      }
+      current.count += 1;
+      if (row.appStatus?.trim()) {
+        current.withBlocker += 1;
+      } else {
+        current.withoutBlocker += 1;
+      }
+      ownerMap.set(owner, current);
+    });
+
+    const ownerBreakdown = Array.from(ownerMap.values()).sort(
+      (a, b) => b.count - a.count || a.owner.localeCompare(b.owner),
+    );
+    const etaValues = rows
+      .map((row) => row.etaDays)
+      .filter((days): days is number => typeof days === "number");
+    const avgEtaAbsDays =
+      etaValues.length > 0
+        ? Math.round(
+            etaValues.reduce((sum, days) => sum + Math.abs(days), 0) / etaValues.length,
+          )
+        : 0;
+    const maxEtaAbsDays =
+      etaValues.length > 0
+        ? Math.max(...etaValues.map((days) => Math.abs(days)))
+        : 0;
+    const dueToday = rows.filter((row) => row.etaDays === 0).length;
+    const dueInThreeDays = rows.filter(
+      (row) => typeof row.etaDays === "number" && row.etaDays <= 3,
+    ).length;
+
+    return {
+      mode: kpiDrawerMode,
+      title: kpiDrawerMode === "overdue" ? "Overdue ticket breakdown" : "Due soon ticket breakdown",
+      subtitle:
+        kpiDrawerMode === "overdue"
+          ? "ETA in the past"
+          : "ETA in the next 7 days",
+      total: rows.length,
+      withBlocker,
+      withoutBlocker,
+      ownerBreakdown,
+      rows,
+      avgEtaAbsDays,
+      maxEtaAbsDays,
+      dueToday,
+      dueInThreeDays,
+    };
+  }, [kpiDrawerMode, overdueRows, dueSoonRows]);
 
   const tableRows = useMemo(() => {
     const priorityRank: Record<string, number> = { P1: 0, P2: 1, P3: 2 };
@@ -1605,7 +1706,17 @@ export default function CrmDqTicketsAnalyticsView({
               </div>
             </div>
           </div>
-          <div className="kpi-frame !px-4 !py-3.5">
+          <button
+            type="button"
+            className="group relative kpi-frame !px-4 !py-3.5 text-left transition enabled:cursor-pointer enabled:hover:-translate-y-0.5 enabled:hover:shadow-lg enabled:hover:ring-2 enabled:hover:ring-[color:var(--color-primary)]/30 enabled:focus-visible:ring-2 enabled:focus-visible:ring-[color:var(--color-primary)] disabled:cursor-default disabled:opacity-80"
+            onClick={() => setKpiDrawerMode("overdue")}
+            aria-label="Open overdue details"
+            disabled={loading}
+          >
+            <span className="pointer-events-none absolute right-3 top-3 inline-flex items-center gap-1 rounded-full border border-[color:var(--color-border)] bg-[color:var(--color-surface-2)]/80 px-2 py-0.5 text-[10px] font-semibold text-[color:var(--color-text)]/65 transition group-hover:border-[color:var(--color-primary)]/40 group-hover:text-[color:var(--color-primary)]">
+              Details
+              <ArrowRight className="h-3 w-3" />
+            </span>
             <div className="flex items-center gap-3.5">
               <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-[color:var(--color-surface-2)] text-amber-500">
                 <AlertTriangle className="h-4 w-4" />
@@ -1617,13 +1728,23 @@ export default function CrmDqTicketsAnalyticsView({
                 <div className="mt-0.5 text-2xl font-bold leading-none text-[color:var(--color-text)]">
                   {loading ? "--" : kpis.overdue}
                 </div>
-                <div className="mt-1 text-[11px] leading-tight text-[color:var(--color-text)]/60">
+                <div className="mt-1 text-[11px] leading-tight text-[color:var(--color-text)]/60 group-hover:text-[color:var(--color-primary)]/85">
                   ETA in the past
                 </div>
               </div>
             </div>
-          </div>
-          <div className="kpi-frame !px-4 !py-3.5">
+          </button>
+          <button
+            type="button"
+            className="group relative kpi-frame !px-4 !py-3.5 text-left transition enabled:cursor-pointer enabled:hover:-translate-y-0.5 enabled:hover:shadow-lg enabled:hover:ring-2 enabled:hover:ring-[color:var(--color-primary)]/30 enabled:focus-visible:ring-2 enabled:focus-visible:ring-[color:var(--color-primary)] disabled:cursor-default disabled:opacity-80"
+            onClick={() => setKpiDrawerMode("dueSoon")}
+            aria-label="Open due soon details"
+            disabled={loading}
+          >
+            <span className="pointer-events-none absolute right-3 top-3 inline-flex items-center gap-1 rounded-full border border-[color:var(--color-border)] bg-[color:var(--color-surface-2)]/80 px-2 py-0.5 text-[10px] font-semibold text-[color:var(--color-text)]/65 transition group-hover:border-[color:var(--color-primary)]/40 group-hover:text-[color:var(--color-primary)]">
+              Details
+              <ArrowRight className="h-3 w-3" />
+            </span>
             <div className="flex items-center gap-3.5">
               <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-[color:var(--color-surface-2)] text-amber-500">
                 <Clock className="h-4 w-4" />
@@ -1635,12 +1756,12 @@ export default function CrmDqTicketsAnalyticsView({
                 <div className="mt-0.5 text-2xl font-bold leading-none text-[color:var(--color-text)]">
                   {loading ? "--" : kpis.dueSoon}
                 </div>
-                <div className="mt-1 text-[11px] leading-tight text-[color:var(--color-text)]/60">
+                <div className="mt-1 text-[11px] leading-tight text-[color:var(--color-text)]/60 group-hover:text-[color:var(--color-primary)]/85">
                   ETA in 7 days
                 </div>
               </div>
             </div>
-          </div>
+          </button>
           <button
             type="button"
             className="kpi-frame !px-4 !py-3.5 text-left transition hover:shadow-md"
@@ -2223,6 +2344,308 @@ export default function CrmDqTicketsAnalyticsView({
           </table>
         </div>
       </section>
+
+      {kpiDrawerData ? (
+        <div className="fixed inset-0 z-[150] flex justify-end" role="dialog" aria-modal="true">
+          <button
+            type="button"
+            className="absolute inset-0 bg-black/20 backdrop-blur-[2px] animate-in fade-in duration-200"
+            onClick={() => setKpiDrawerMode(null)}
+            aria-label="Close KPI breakdown drawer"
+          />
+          <aside className="relative flex h-full w-full max-w-2xl flex-col border-l border-[color:var(--color-border)] bg-[color:var(--color-surface)] shadow-2xl animate-in slide-in-from-right duration-300">
+            <div className="flex items-center justify-between border-b border-[color:var(--color-border)] bg-[color:var(--color-surface-2)]/30 px-6 py-5">
+              <div>
+                <h3 className="text-base font-bold text-[color:var(--color-text)]">
+                  {kpiDrawerData.title}
+                </h3>
+                <p className="text-xs text-[color:var(--color-text)]/60">{kpiDrawerData.subtitle}</p>
+              </div>
+              <button
+                type="button"
+                onClick={() => setKpiDrawerMode(null)}
+                className="btn-ghost rounded-full p-2 hover:bg-[color:var(--color-border)]"
+                aria-label="Close KPI breakdown drawer"
+              >
+                <X className="h-5 w-5 text-[color:var(--color-text)]/60" />
+              </button>
+            </div>
+
+            <div className="flex-1 space-y-5 overflow-y-auto p-6">
+              <div className="rounded-2xl border border-[color:var(--color-border)] bg-[color:var(--color-surface)] p-5 shadow-sm">
+                <div className="flex flex-wrap items-end justify-between gap-3">
+                  <div>
+                    <p className="text-xs font-semibold uppercase tracking-widest text-[color:var(--color-text)]/60">
+                      Total tickets
+                    </p>
+                    <div className="mt-1 flex items-baseline gap-2">
+                      <span
+                        className={[
+                          "text-3xl font-bold",
+                          kpiDrawerData.mode === "overdue" ? "text-rose-600" : "text-amber-600",
+                        ].join(" ")}
+                      >
+                        {kpiDrawerData.total}
+                      </span>
+                      <span className="text-xs text-[color:var(--color-text)]/55">
+                        {kpiDrawerData.ownerBreakdown.length} owners
+                      </span>
+                    </div>
+                  </div>
+                  <button
+                    type="button"
+                    className="btn-ghost h-8 px-3 text-xs"
+                    onClick={() => {
+                      setEtaBucketFilters(
+                        kpiDrawerData.mode === "overdue" ? ["Overdue"] : ["Due 0-7d"],
+                      );
+                      setNoEtaNeedsActionOnly(false);
+                      setKpiDrawerMode(null);
+                    }}
+                  >
+                    Apply ETA filter
+                  </button>
+                </div>
+
+                <div className="mt-4 grid gap-2 sm:grid-cols-2">
+                  <div className="rounded-lg border border-[color:var(--color-border)] bg-[color:var(--color-surface-2)]/45 px-3 py-2">
+                    <p className="text-[10px] uppercase tracking-[0.14em] text-[color:var(--color-text)]/60">
+                      With blocker
+                    </p>
+                    <p className="mt-1 text-lg font-semibold text-[color:var(--color-text)]">
+                      {kpiDrawerData.withBlocker}
+                    </p>
+                  </div>
+                  <div className="rounded-lg border border-rose-200 bg-rose-50/70 px-3 py-2">
+                    <p className="text-[10px] uppercase tracking-[0.14em] text-rose-600/90">
+                      Without blocker
+                    </p>
+                    <p className="mt-1 text-lg font-semibold text-rose-700">
+                      {kpiDrawerData.withoutBlocker}
+                    </p>
+                  </div>
+                  {kpiDrawerData.mode === "overdue" ? (
+                    <>
+                      <div className="rounded-lg border border-[color:var(--color-border)] bg-[color:var(--color-surface-2)]/45 px-3 py-2">
+                        <p className="text-[10px] uppercase tracking-[0.14em] text-[color:var(--color-text)]/60">
+                          Avg delay
+                        </p>
+                        <p className="mt-1 text-lg font-semibold text-[color:var(--color-text)]">
+                          {kpiDrawerData.avgEtaAbsDays}d
+                        </p>
+                      </div>
+                      <div className="rounded-lg border border-[color:var(--color-border)] bg-[color:var(--color-surface-2)]/45 px-3 py-2">
+                        <p className="text-[10px] uppercase tracking-[0.14em] text-[color:var(--color-text)]/60">
+                          Max delay
+                        </p>
+                        <p className="mt-1 text-lg font-semibold text-[color:var(--color-text)]">
+                          {kpiDrawerData.maxEtaAbsDays}d
+                        </p>
+                      </div>
+                    </>
+                  ) : (
+                    <>
+                      <div className="rounded-lg border border-[color:var(--color-border)] bg-[color:var(--color-surface-2)]/45 px-3 py-2">
+                        <p className="text-[10px] uppercase tracking-[0.14em] text-[color:var(--color-text)]/60">
+                          Due today
+                        </p>
+                        <p className="mt-1 text-lg font-semibold text-[color:var(--color-text)]">
+                          {kpiDrawerData.dueToday}
+                        </p>
+                      </div>
+                      <div className="rounded-lg border border-[color:var(--color-border)] bg-[color:var(--color-surface-2)]/45 px-3 py-2">
+                        <p className="text-[10px] uppercase tracking-[0.14em] text-[color:var(--color-text)]/60">
+                          Due &lt;=3d
+                        </p>
+                        <p className="mt-1 text-lg font-semibold text-[color:var(--color-text)]">
+                          {kpiDrawerData.dueInThreeDays}
+                        </p>
+                      </div>
+                    </>
+                  )}
+                </div>
+              </div>
+
+              <div className="space-y-3">
+                <div className="flex items-center justify-between">
+                  <h4 className="text-xs font-semibold uppercase tracking-[0.14em] text-[color:var(--color-text)]/60">
+                    By owner
+                  </h4>
+                  <span className="text-xs text-[color:var(--color-text)]/55">
+                    {kpiDrawerData.total} tickets
+                  </span>
+                </div>
+                {kpiDrawerData.ownerBreakdown.length === 0 ? (
+                  <div className="rounded-xl border border-[color:var(--color-border)] bg-[color:var(--color-surface)] p-4 text-sm text-[color:var(--color-text)]/60">
+                    No tickets for current filters.
+                  </div>
+                ) : (
+                  <div className="space-y-2">
+                    {kpiDrawerData.ownerBreakdown.map((ownerRow) => (
+                      <div
+                        key={`${kpiDrawerData.mode}-${ownerRow.owner}`}
+                        className="rounded-xl border border-[color:var(--color-border)] bg-[color:var(--color-surface)] px-4 py-3"
+                      >
+                        <div className="flex items-center justify-between gap-3">
+                          <div className="flex min-w-0 items-center gap-2.5">
+                            <div
+                              className="h-7 w-7 shrink-0 overflow-hidden rounded-full border border-[color:var(--color-border)] bg-[color:var(--color-surface-2)]"
+                              title={ownerRow.owner}
+                            >
+                              {ownerRow.avatarUrl ? (
+                                <img
+                                  src={ownerRow.avatarUrl}
+                                  alt={ownerRow.owner}
+                                  className="h-full w-full object-cover"
+                                  referrerPolicy="no-referrer"
+                                />
+                              ) : (
+                                <div className="flex h-full w-full items-center justify-center text-[10px] font-semibold text-[color:var(--color-text)]/60">
+                                  {getAvatarInitials(ownerRow.owner)}
+                                </div>
+                              )}
+                            </div>
+                            <p className="truncate text-sm font-semibold text-[color:var(--color-text)]">
+                              {ownerRow.owner}
+                            </p>
+                          </div>
+                          <p className="text-sm font-bold text-[color:var(--color-text)]">
+                            {ownerRow.count}
+                          </p>
+                        </div>
+                        <div className="mt-2 h-1.5 w-full overflow-hidden rounded-full bg-[color:var(--color-border)]/60">
+                          <div
+                            className={[
+                              "h-full rounded-full",
+                              kpiDrawerData.mode === "overdue" ? "bg-rose-500" : "bg-amber-500",
+                            ].join(" ")}
+                            style={{
+                              width: `${
+                                kpiDrawerData.total > 0
+                                  ? (ownerRow.count / kpiDrawerData.total) * 100
+                                  : 0
+                              }%`,
+                            }}
+                          />
+                        </div>
+                        <div className="mt-1 flex items-center justify-between text-[11px] text-[color:var(--color-text)]/60">
+                          <span>With blocker: {ownerRow.withBlocker}</span>
+                          <span>Without blocker: {ownerRow.withoutBlocker}</span>
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </div>
+
+              <div className="space-y-3">
+                <div className="flex items-center justify-between">
+                  <h4 className="text-xs font-semibold uppercase tracking-[0.14em] text-[color:var(--color-text)]/60">
+                    Ticket details
+                  </h4>
+                  <span className="text-xs text-[color:var(--color-text)]/55">
+                    Top {Math.min(kpiDrawerData.rows.length, 20)}
+                  </span>
+                </div>
+                {kpiDrawerData.rows.length === 0 ? (
+                  <div className="rounded-xl border border-[color:var(--color-border)] bg-[color:var(--color-surface)] p-4 text-sm text-[color:var(--color-text)]/60">
+                    No tickets to display.
+                  </div>
+                ) : (
+                  <div className="overflow-hidden rounded-xl border border-[color:var(--color-border)] bg-[color:var(--color-surface)]">
+                    <table className="w-full text-xs">
+                      <thead className="bg-[color:var(--color-surface-2)]/70 text-[10px] uppercase tracking-[0.12em] text-[color:var(--color-text)]/60">
+                        <tr>
+                          <th className="px-3 py-2 text-left font-semibold">Ticket</th>
+                          <th className="px-3 py-2 text-left font-semibold">Owner</th>
+                          <th className="px-3 py-2 text-left font-semibold">ETA</th>
+                          <th className="px-3 py-2 text-left font-semibold">Blocker</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {kpiDrawerData.rows.slice(0, 20).map((row) => (
+                          <tr key={`${kpiDrawerData.mode}-${row.id}`} className="border-t border-[color:var(--color-border)]">
+                            <td className="px-3 py-2 align-top">
+                              {row.jiraUrl ? (
+                                <a
+                                  href={row.jiraUrl}
+                                  target="_blank"
+                                  rel="noreferrer"
+                                  className="font-semibold text-[color:var(--color-primary)] hover:underline"
+                                >
+                                  {row.ticketId}
+                                </a>
+                              ) : (
+                                <span className="font-semibold text-[color:var(--color-text)]">
+                                  {row.ticketId}
+                                </span>
+                              )}
+                              <p className="mt-0.5 max-w-[240px] truncate text-[10px] text-[color:var(--color-text)]/55">
+                                {row.title}
+                              </p>
+                            </td>
+                            <td className="px-3 py-2 text-[color:var(--color-text)]/85">
+                              <div className="flex min-w-0 items-center gap-2">
+                                <div
+                                  className="h-6 w-6 shrink-0 overflow-hidden rounded-full border border-[color:var(--color-border)] bg-[color:var(--color-surface-2)]"
+                                  title={row.assigneeLabel}
+                                >
+                                  {row.assigneeAvatarUrl ? (
+                                    <img
+                                      src={row.assigneeAvatarUrl}
+                                      alt={row.assigneeLabel}
+                                      className="h-full w-full object-cover"
+                                      referrerPolicy="no-referrer"
+                                    />
+                                  ) : (
+                                    <div className="flex h-full w-full items-center justify-center text-[9px] font-semibold text-[color:var(--color-text)]/60">
+                                      {getAvatarInitials(row.assigneeLabel)}
+                                    </div>
+                                  )}
+                                </div>
+                                <span className="truncate">{row.assigneeLabel}</span>
+                              </div>
+                            </td>
+                            <td className="px-3 py-2">
+                              <span
+                                className={[
+                                  "inline-flex items-center rounded-full px-2 py-0.5 text-[10px] font-semibold",
+                                  kpiDrawerData.mode === "overdue"
+                                    ? "bg-rose-50 text-rose-700"
+                                    : "bg-amber-50 text-amber-700",
+                                ].join(" ")}
+                              >
+                                {row.etaLabel}
+                              </span>
+                            </td>
+                            <td className="px-3 py-2">
+                              {row.appStatus ? (
+                                <span className="inline-flex items-center rounded-full border border-rose-200 bg-rose-50 px-2 py-0.5 text-[10px] font-semibold text-rose-700">
+                                  {row.appStatus}
+                                </span>
+                              ) : (
+                                <span className="text-[10px] text-[color:var(--color-text)]/60">
+                                  No blocker
+                                </span>
+                              )}
+                            </td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
+                )}
+              </div>
+            </div>
+
+            <div className="border-t border-[color:var(--color-border)] bg-[color:var(--color-surface-2)]/30 p-4 text-center">
+              <p className="text-[10px] text-[color:var(--color-text)]/55">
+                Data scoped to your current dashboard filters.
+              </p>
+            </div>
+          </aside>
+        </div>
+      ) : null}
 
       {!shareMode ? (
         <CrmDqTicketsShareModal
