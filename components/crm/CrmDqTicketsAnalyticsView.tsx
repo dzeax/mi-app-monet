@@ -1587,72 +1587,80 @@ export default function CrmDqTicketsAnalyticsView({
         ) : null}
 
         <div className="mt-6 grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
-          <div className="kpi-frame flex items-center gap-4">
-            <div className="flex h-11 w-11 items-center justify-center rounded-full bg-[color:var(--color-surface-2)] text-[color:var(--color-primary)]">
-              <Activity className="h-5 w-5" />
-            </div>
-            <div>
-              <div className="text-xs font-semibold uppercase tracking-[0.2em] text-[color:var(--color-text)]/55">
-                Open tickets
+          <div className="kpi-frame !px-4 !py-3.5">
+            <div className="flex items-center gap-3.5">
+              <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-[color:var(--color-surface-2)] text-[color:var(--color-primary)]">
+                <Activity className="h-4 w-4" />
               </div>
-              <div className="mt-1 text-2xl font-semibold text-[color:var(--color-text)]">
-                {loading ? "--" : kpis.total}
-              </div>
-              <div className="mt-1 text-xs text-[color:var(--color-text)]/60">
-                Current filters
-              </div>
-            </div>
-          </div>
-          <div className="kpi-frame flex items-center gap-4">
-            <div className="flex h-11 w-11 items-center justify-center rounded-full bg-[color:var(--color-surface-2)] text-amber-500">
-              <AlertTriangle className="h-5 w-5" />
-            </div>
-            <div>
-              <div className="text-xs font-semibold uppercase tracking-[0.2em] text-[color:var(--color-text)]/55">
-                Overdue
-              </div>
-              <div className="mt-1 text-2xl font-semibold text-[color:var(--color-text)]">
-                {loading ? "--" : kpis.overdue}
-              </div>
-              <div className="mt-1 text-xs text-[color:var(--color-text)]/60">
-                ETA in the past
+              <div>
+                <div className="text-[11px] font-bold uppercase tracking-[0.16em] leading-none text-[color:var(--color-text)]/55">
+                  Open tickets
+                </div>
+                <div className="mt-0.5 text-2xl font-bold leading-none text-[color:var(--color-text)]">
+                  {loading ? "--" : kpis.total}
+                </div>
+                <div className="mt-1 text-[11px] leading-tight text-[color:var(--color-text)]/60">
+                  Current filters
+                </div>
               </div>
             </div>
           </div>
-          <div className="kpi-frame flex items-center gap-4">
-            <div className="flex h-11 w-11 items-center justify-center rounded-full bg-[color:var(--color-surface-2)] text-amber-500">
-              <Clock className="h-5 w-5" />
+          <div className="kpi-frame !px-4 !py-3.5">
+            <div className="flex items-center gap-3.5">
+              <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-[color:var(--color-surface-2)] text-amber-500">
+                <AlertTriangle className="h-4 w-4" />
+              </div>
+              <div>
+                <div className="text-[11px] font-bold uppercase tracking-[0.16em] leading-none text-[color:var(--color-text)]/55">
+                  Overdue
+                </div>
+                <div className="mt-0.5 text-2xl font-bold leading-none text-[color:var(--color-text)]">
+                  {loading ? "--" : kpis.overdue}
+                </div>
+                <div className="mt-1 text-[11px] leading-tight text-[color:var(--color-text)]/60">
+                  ETA in the past
+                </div>
+              </div>
             </div>
-            <div>
-              <div className="text-xs font-semibold uppercase tracking-[0.2em] text-[color:var(--color-text)]/55">
-                Due soon
+          </div>
+          <div className="kpi-frame !px-4 !py-3.5">
+            <div className="flex items-center gap-3.5">
+              <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-[color:var(--color-surface-2)] text-amber-500">
+                <Clock className="h-4 w-4" />
               </div>
-              <div className="mt-1 text-2xl font-semibold text-[color:var(--color-text)]">
-                {loading ? "--" : kpis.dueSoon}
-              </div>
-              <div className="mt-1 text-xs text-[color:var(--color-text)]/60">
-                ETA in 7 days
+              <div>
+                <div className="text-[11px] font-bold uppercase tracking-[0.16em] leading-none text-[color:var(--color-text)]/55">
+                  Due soon
+                </div>
+                <div className="mt-0.5 text-2xl font-bold leading-none text-[color:var(--color-text)]">
+                  {loading ? "--" : kpis.dueSoon}
+                </div>
+                <div className="mt-1 text-[11px] leading-tight text-[color:var(--color-text)]/60">
+                  ETA in 7 days
+                </div>
               </div>
             </div>
           </div>
           <button
             type="button"
-            className="kpi-frame flex items-center gap-4 text-left transition hover:shadow-md"
+            className="kpi-frame !px-4 !py-3.5 text-left transition hover:shadow-md"
             title={p1AckTitle}
             onClick={() => setP1AckOpen(true)}
           >
-            <div className="flex h-11 w-11 items-center justify-center rounded-full bg-rose-50 text-rose-500">
-              <Clock className="h-5 w-5" />
-            </div>
-            <div>
-              <div className="text-xs font-semibold uppercase tracking-[0.2em] text-[color:var(--color-text)]/55">
-                P1 &lt;4h Ack
+            <div className="flex items-center gap-3.5">
+              <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-rose-50 text-rose-500">
+                <Clock className="h-4 w-4" />
               </div>
-              <div className="mt-1 text-2xl font-semibold text-[color:var(--color-text)]">
-                {p1AckLabel}
-              </div>
-              <div className="mt-1 text-xs text-[color:var(--color-text)]/60">
-                {p1AckMeta}
+              <div>
+                <div className="text-[11px] font-bold uppercase tracking-[0.16em] leading-none text-[color:var(--color-text)]/55">
+                  P1 &lt;4h Ack
+                </div>
+                <div className="mt-0.5 text-2xl font-bold leading-none text-[color:var(--color-text)]">
+                  {p1AckLabel}
+                </div>
+                <div className="mt-1 text-[11px] leading-tight text-[color:var(--color-text)]/60">
+                  {p1AckMeta}
+                </div>
               </div>
             </div>
           </button>
