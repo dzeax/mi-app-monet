@@ -1419,14 +1419,19 @@ export default function CrmDqTicketsAnalyticsView({
 
   const ownerStatusChart = useMemo(() => {
     const ownerMap = new Map<string, Map<string, number>>();
+    const ownerAvatarByName = new Map<string, string | null>();
     const statusCounts = new Map<string, number>();
 
     filteredRows.forEach((row) => {
       const owner = row.assigneeLabel || "Unassigned";
       const status = getStatusLabel(row.status) || "Unknown";
+      const avatarUrl = row.assigneeAvatarUrl ?? null;
       const ownerCounts = ownerMap.get(owner) ?? new Map<string, number>();
       ownerCounts.set(status, (ownerCounts.get(status) ?? 0) + 1);
       ownerMap.set(owner, ownerCounts);
+      if (!ownerAvatarByName.has(owner) || !ownerAvatarByName.get(owner)) {
+        ownerAvatarByName.set(owner, avatarUrl);
+      }
       statusCounts.set(status, (statusCounts.get(status) ?? 0) + 1);
     });
 
@@ -1462,8 +1467,88 @@ export default function CrmDqTicketsAnalyticsView({
       return entry;
     });
 
-    return { data, series, statusByKey };
+    return { data, series, statusByKey, ownerAvatarByName };
   }, [filteredRows]);
+
+  const renderOwnerAxisTick = useCallback(
+    (props: any) => {
+      const x = Number(props?.x ?? 0);
+      const y = Number(props?.y ?? 0);
+      const owner = String(props?.payload?.value ?? "");
+      const avatarUrl = ownerStatusChart.ownerAvatarByName.get(owner) ?? null;
+      const initials = getAvatarInitials(owner);
+      const avatarCenterX = -176;
+      const avatarRadius = 11;
+      const avatarDiameter = avatarRadius * 2;
+      const ownerLabelX = avatarCenterX + avatarRadius + 8;
+      const clipId = `owner-yaxis-clip-${owner
+        .toLowerCase()
+        .replace(/[^a-z0-9]+/g, "-")
+        .replace(/^-+|-+$/g, "")}-${Math.round(y)}`;
+
+      return (
+        <g transform={`translate(${x},${y})`}>
+          <defs>
+            <clipPath id={clipId}>
+              <circle cx={avatarCenterX} cy={0} r={avatarRadius} />
+            </clipPath>
+          </defs>
+          <circle
+            cx={avatarCenterX}
+            cy={0}
+            r={avatarRadius + 1.5}
+            fill="var(--color-surface)"
+            stroke="var(--color-border)"
+            strokeOpacity={0.65}
+          />
+          <circle
+            cx={avatarCenterX}
+            cy={0}
+            r={avatarRadius}
+            fill="var(--color-surface-2)"
+            stroke="var(--color-border)"
+            strokeOpacity={0.8}
+          />
+          {avatarUrl ? (
+            <image
+              href={avatarUrl}
+              x={avatarCenterX - avatarRadius}
+              y={-avatarRadius}
+              width={avatarDiameter}
+              height={avatarDiameter}
+              clipPath={`url(#${clipId})`}
+              preserveAspectRatio="xMidYMid slice"
+            />
+          ) : (
+            <text
+              x={avatarCenterX}
+              y={0}
+              textAnchor="middle"
+              dominantBaseline="central"
+              fill="var(--color-text)"
+              opacity={0.68}
+              fontSize={8.5}
+              fontWeight={800}
+            >
+              {initials}
+            </text>
+          )}
+          <text
+            x={ownerLabelX}
+            y={0}
+            fill="var(--color-text)"
+            opacity={0.82}
+            fontSize={13}
+            fontWeight={600}
+            dominantBaseline="central"
+          >
+            {owner}
+          </text>
+        </g>
+      );
+    },
+    [ownerStatusChart.ownerAvatarByName],
+  );
 
   const priorityChartData = useMemo(() => {
     const counts = new Map<string, number>();
@@ -1866,7 +1951,7 @@ export default function CrmDqTicketsAnalyticsView({
                 <BarChart
                   data={ownerStatusChart.data}
                   layout="vertical"
-                  margin={{ top: 8, right: 16, left: 12, bottom: 0 }}
+                  margin={{ top: 8, right: 16, left: 10, bottom: 0 }}
                 >
                   <CartesianGrid stroke={chartTheme.grid} vertical={true} horizontal={false} />
                   <XAxis
@@ -1879,8 +1964,8 @@ export default function CrmDqTicketsAnalyticsView({
                   <YAxis
                     type="category"
                     dataKey="owner"
-                    width={130}
-                    tick={chartTheme.tick}
+                    width={210}
+                    tick={renderOwnerAxisTick}
                     axisLine={chartTheme.axisLine}
                     tickLine={chartTheme.tickLine}
                   />
