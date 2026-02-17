@@ -1,13 +1,13 @@
 'use client';
 
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import type { CSSProperties } from 'react';
 import { CampaignRow } from '@/types/campaign';
 import { useCampaignData } from '@/context/CampaignDataContext';
 // import { useAuth } from '@/context/AuthContext';
 // import { useRoutingSettings } from '@/context/RoutingSettingsContext';
 import CampaignFilters from './CampaignFilters';
-import { useCampaignFilterEngine } from '@/hooks/useCampaignFilterEngine';
+import { defaultFilters as CAMPAIGN_DEFAULT_FILTERS, useCampaignFilterEngine } from '@/hooks/useCampaignFilterEngine';
 
 import ColumnPicker from '@/components/ui/ColumnPicker';
 // import BulkRoutingOverrideModal, { type BulkRoutingOverridePayload } from '@/components/admin/BulkRoutingOverrideModal';
@@ -446,7 +446,15 @@ export default function CampaignTable() {
   );
 
   /* ====== Filtros ====== */
-  const engine = useCampaignFilterEngine(rows);
+  const engine = useCampaignFilterEngine(rows, {
+    initial: { dateRange: rangeForPresetKey('thisMonth') },
+  });
+  const resetToCurrentMonth = useCallback(() => {
+    engine.setFilters({
+      ...CAMPAIGN_DEFAULT_FILTERS,
+      dateRange: rangeForPresetKey('thisMonth'),
+    });
+  }, [engine.setFilters]);
   const dataSource = engine.filteredRows as unknown as (CampaignRow & { _idx: number })[];
 
   // Opciones sin duplicados y con etiquetas canÃ³nicas
@@ -743,7 +751,7 @@ export default function CampaignTable() {
               <CampaignFilters
                 filters={engine.filters}
                 updateFilters={engine.updateFilters}
-                resetFilters={engine.resetFilters}
+                resetFilters={resetToCurrentMonth}
                   options={options}
                   pending={engine.pending}
                 />
