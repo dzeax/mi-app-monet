@@ -30,6 +30,14 @@ const DragHandleIcon = (props: React.SVGProps<SVGSVGElement>) => (
   </svg>
 );
 
+const AlertIcon = (props: React.SVGProps<SVGSVGElement>) => (
+  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2} strokeLinecap="round" strokeLinejoin="round" {...props}>
+    <path d="M10.29 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z" />
+    <line x1="12" y1="9" x2="12" y2="13" />
+    <line x1="12" y1="17" x2="12.01" y2="17" />
+  </svg>
+);
+
 const EllipsisIcon = (props: React.SVGProps<SVGSVGElement>) => (
   <svg viewBox="0 0 20 20" fill="none" stroke="currentColor" strokeWidth={1.6} strokeLinecap="round" {...props}>
     <path d="M5 10h.01M10 10h.01M15 10h.01" />
@@ -58,43 +66,43 @@ const priceFormatter = new Intl.NumberFormat('es-ES', {
 
 const statusThemes: Record<
   CampaignStatus,
-  { card: string; accent: string; pill: string; hover: string }
+  { card: string; border: string; text: string; bgHover: string }
 > = {
   Planning: {
-    card: 'bg-white border-slate-200/80',
-    accent: 'bg-slate-400/70',
-    pill: 'bg-slate-100 text-slate-700 border-slate-200/80',
-    hover: 'hover:border-slate-300 hover:bg-slate-50',
+    card: 'bg-slate-50 border-slate-200',
+    border: 'border-l-slate-300',
+    text: 'text-slate-600',
+    bgHover: 'hover:bg-slate-100',
   },
   Refining: {
-    card: 'bg-[#ff00ff]/12 border-[#ff00ff]/60',
-    accent: 'bg-[#ff00ff]',
-    pill: 'bg-[#ff00ff] text-white border-[#ff00ff]',
-    hover: 'hover:border-[#ff00ff] hover:bg-[#ff00ff]/18',
+    card: 'bg-[#ff00ff]/[0.06] border-slate-200',
+    border: 'border-l-[#ff00ff]',
+    text: 'text-[#d900d9]',
+    bgHover: 'hover:bg-[#ff00ff]/[0.12]',
   },
   Validation: {
-    card: 'bg-[#9900ff]/12 border-[#9900ff]/60',
-    accent: 'bg-[#9900ff]',
-    pill: 'bg-[#9900ff] text-white border-[#9900ff]',
-    hover: 'hover:border-[#9900ff] hover:bg-[#9900ff]/18',
+    card: 'bg-[#9900ff]/[0.06] border-slate-200',
+    border: 'border-l-[#9900ff]',
+    text: 'text-[#8000d9]',
+    bgHover: 'hover:bg-[#9900ff]/[0.12]',
   },
   Approved: {
-    card: 'bg-[#ff9900]/10 border-[#ff9900]/60',
-    accent: 'bg-[#ff9900]',
-    pill: 'bg-[#ff9900] text-white border-[#ff9900]',
-    hover: 'hover:border-[#ff9900] hover:bg-[#ff9900]/15',
+    card: 'bg-[#ff9900]/[0.08] border-slate-200',
+    border: 'border-l-[#ff9900]',
+    text: 'text-[#e68a00]',
+    bgHover: 'hover:bg-[#ff9900]/[0.15]',
   },
   Programmed: {
-    card: 'bg-[#69fc86]/25 border-[#69fc86]/70',
-    accent: 'bg-[#69fc86]',
-    pill: 'bg-[#69fc86] text-emerald-950 border-[#69fc86]',
-    hover: 'hover:border-[#69fc86] hover:bg-[#69fc86]/35',
+    card: 'bg-[#00bfa5]/[0.08] border-slate-200',
+    border: 'border-l-[#00bfa5]',
+    text: 'text-[#008f7a]',
+    bgHover: 'hover:bg-[#00bfa5]/[0.16]',
   },
   Profit: {
-    card: 'bg-[#6aa84f]/20 border-[#6aa84f]/70',
-    accent: 'bg-[#6aa84f]',
-    pill: 'bg-[#6aa84f] text-white border-[#6aa84f]',
-    hover: 'hover:border-[#6aa84f] hover:bg-[#6aa84f]/28',
+    card: 'bg-[#3b82f6]/[0.08] border-slate-200',
+    border: 'border-l-[#3b82f6]',
+    text: 'text-[#1d4ed8]',
+    bgHover: 'hover:bg-[#3b82f6]/[0.16]',
   },
 };
 
@@ -480,9 +488,10 @@ function DayView({
                 <div
                   key={item.id}
                   className={[
-                    'rounded-2xl border p-4 flex flex-col gap-2 cursor-pointer transition-colors shadow-[0_1px_2px_rgba(16,24,40,0.06)]',
+                    'rounded-2xl border border-l-4 p-4 flex flex-col gap-2 cursor-pointer transition-colors shadow-[0_1px_2px_rgba(16,24,40,0.06)]',
                     statusTheme.card,
-                    statusTheme.hover,
+                    statusTheme.border,
+                    statusTheme.bgHover,
                   ].join(' ')}
                   onClick={() => onSelectItem(item)}
                 >
@@ -527,16 +536,16 @@ function DayView({
                   <div className="flex items-center justify-between text-sm text-[color:var(--color-text)]/75">
                     <span className="flex items-center gap-2">
                       <span>{priceFormatter.format(item.price)}</span>
-                      {performance ? (
-                        <span className="inline-flex items-center rounded-full border border-[color:var(--color-primary)]/30 bg-[color:var(--color-primary)]/10 px-2 py-0.5 text-[10px] font-semibold uppercase tracking-[0.14em] text-[color:var(--color-primary)]">
-                          eCPM {priceFormatter.format(performance.ecpm ?? 0)}
+                      {performance?.ecpm ? (
+                        <span className="inline-flex items-center rounded-md border border-slate-200 bg-white px-1.5 py-0.5 text-[9px] font-bold uppercase tracking-wider text-slate-700 shadow-sm ml-auto">
+                          eCPM {priceFormatter.format(performance.ecpm)}
                         </span>
                       ) : null}
                     </span>
                     <span
                       className={[
-                        'inline-flex items-center gap-1 px-2 py-0.5 text-xs rounded-full font-semibold border border-transparent',
-                        statusTheme.pill,
+                        'inline-flex items-center gap-1 px-2 py-0.5 text-xs rounded-full font-semibold border border-slate-200 bg-slate-50',
+                        statusTheme.text,
                       ].join(' ')}
                     >
                       {item.status}
@@ -597,7 +606,6 @@ function CampaignChip({
   isDragging: boolean;
 }) {
   const statusTheme = resolveStatusTheme(item.status);
-  const statusClass = statusTheme.pill;
   const [menuOpen, setMenuOpen] = useState(false);
   const menuRef = useRef<HTMLDivElement | null>(null);
 
@@ -647,12 +655,13 @@ function CampaignChip({
   return (
     <div
       className={[
-        'group relative flex cursor-pointer flex-col rounded-2xl border px-3 pb-3 pt-3 text-xs shadow-[0_1px_2px_rgba(16,24,40,0.08)] transition-all focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[color:var(--color-primary)]/70',
+        'group relative flex cursor-pointer flex-col rounded-2xl border border-l-[4px] px-3 pb-3 pt-3 text-xs shadow-[0_1px_2px_rgba(16,24,40,0.08)] transition-all focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[color:var(--color-primary)]/70',
         statusTheme.card,
-        statusTheme.hover,
+        statusTheme.border,
+        statusTheme.bgHover,
         isDragging
           ? 'opacity-60 ring-1 ring-[color:var(--color-primary)]/60'
-          : 'hover:-translate-y-[1px] hover:border-[color:var(--color-primary)]/30 hover:shadow-[0_8px_24px_rgba(16,24,40,0.12)]',
+          : 'hover:-translate-y-[1px] hover:shadow-[0_8px_24px_rgba(16,24,40,0.12)]',
       ].join(' ')}
       draggable
       onDragStart={(event) => {
@@ -683,150 +692,134 @@ function CampaignChip({
         }
       }}
     >
-      <span
-        className={[
-          'pointer-events-none absolute left-2 top-3 bottom-3 w-[3px] rounded-full transition-opacity group-hover:opacity-90',
-          statusTheme.accent,
-        ].join(' ')}
-        aria-hidden="true"
-      />
-      <div className="flex items-start gap-3">
-        <span
-          className="flex h-7 w-3 items-center justify-center text-[color:var(--color-text)]/30 transition-colors group-hover:text-[color:var(--color-text)]/60"
-          aria-hidden="true"
-          title="Drag campaign"
-        >
-          <DragHandleIcon className="h-4 w-3" />
-        </span>
+      <div className="flex items-start justify-between gap-2">
         <div className="min-w-0 flex-1">
-          <div className="flex items-start gap-3">
-            <div className="min-w-0 flex-1">
+          <div className="truncate text-sm font-bold text-gray-900" title={item.name}>
+            {item.name}
+          </div>
+          <div className="mt-1 truncate text-[10px] font-semibold uppercase tracking-[0.14em] text-gray-500">
+            {item.partner}
+          </div>
+        </div>
+        <div
+          className={[
+            'flex items-center gap-1.5 transition-opacity',
+            menuOpen ? 'opacity-100' : 'opacity-0 group-hover:opacity-100 group-focus-within:opacity-100',
+          ].join(' ')}
+        >
+          <span
+            className="inline-flex h-7 w-7 items-center justify-center rounded-md text-gray-400"
+            aria-hidden="true"
+            title="Drag campaign"
+          >
+            <DragHandleIcon className="h-4 w-3" />
+          </span>
+          <div className="relative flex-shrink-0" ref={menuRef}>
+            <button
+              type="button"
+              className={[
+                'inline-flex h-7 w-7 items-center justify-center rounded-lg transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[color:var(--color-primary)]/70',
+                menuOpen
+                  ? 'bg-[color:var(--color-border)]/50 text-[color:var(--color-text)]'
+                  : 'text-[color:var(--color-text)]/55 hover:bg-[color:var(--color-border)]/40 hover:text-[color:var(--color-text)]',
+              ].join(' ')}
+              aria-haspopup="menu"
+              aria-expanded={menuOpen}
+              aria-controls={`campaign-actions-${item.id}`}
+              onClick={(event) => {
+                event.stopPropagation();
+                setMenuOpen((open) => !open);
+              }}
+              title="More actions"
+            >
+              <EllipsisIcon className="h-4 w-4" />
+              <span className="sr-only">Open campaign actions</span>
+            </button>
+            {menuOpen ? (
               <div
-                className="text-base font-semibold leading-tight text-[color:var(--color-text)]"
-                style={{
-                  display: '-webkit-box',
-                  WebkitLineClamp: 2,
-                  WebkitBoxOrient: 'vertical',
-                  overflow: 'hidden',
-                }}
-                title={item.name}
+                id={`campaign-actions-${item.id}`}
+                role="menu"
+                className="absolute right-0 top-9 z-20 w-36 rounded-xl border border-[color:var(--color-border)] bg-[color:var(--color-surface)] py-1 shadow-lg"
               >
-                {item.name}
-              </div>
-              <div className="mt-1 text-xs font-medium uppercase tracking-[0.16em] text-[color:var(--color-text)]/55">
-                {item.partner}
-              </div>
-            </div>
-            <div className="relative flex-shrink-0" ref={menuRef}>
-              <button
-                type="button"
-                className={[
-                  'inline-flex h-7 w-7 items-center justify-center rounded-lg text-[color:var(--color-text)]/55 transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[color:var(--color-primary)]/70',
-                  menuOpen
-                    ? 'bg-[color:var(--color-border)]/50 text-[color:var(--color-text)]'
-                    : 'hover:bg-[color:var(--color-border)]/40 hover:text-[color:var(--color-text)]',
-                ].join(' ')}
-                aria-haspopup="menu"
-                aria-expanded={menuOpen}
-                aria-controls={`campaign-actions-${item.id}`}
-                onClick={(event) => {
-                  event.stopPropagation();
-                  setMenuOpen((open) => !open);
-                }}
-                title="More actions"
-              >
-                <EllipsisIcon className="h-4 w-4" />
-                <span className="sr-only">Open campaign actions</span>
-              </button>
-              {menuOpen ? (
-                <div
-                  id={`campaign-actions-${item.id}`}
-                  role="menu"
-                  className="absolute right-0 top-9 z-20 w-36 rounded-xl border border-[color:var(--color-border)] bg-[color:var(--color-surface)] py-1 shadow-lg"
+                <button
+                  type="button"
+                  className="flex w-full items-center justify-between px-3 py-2 text-xs text-[color:var(--color-text)] hover:bg-[color:var(--color-surface-2)]/60 focus-visible:outline-none focus-visible:bg-[color:var(--color-surface-2)]/80"
+                  role="menuitem"
+                  onClick={handleEdit}
                 >
-                  <button
-                    type="button"
-                    className="flex w-full items-center justify-between px-3 py-2 text-xs text-[color:var(--color-text)] hover:bg-[color:var(--color-surface-2)]/60 focus-visible:outline-none focus-visible:bg-[color:var(--color-surface-2)]/80"
-                    role="menuitem"
-                    onClick={handleEdit}
-                  >
-                    Edit
-                    <span className="text-[10px] uppercase tracking-[0.16em] text-[color:var(--color-text)]/45">Enter</span>
-                  </button>
-                  <button
-                    type="button"
-                    className="flex w-full items-center justify-between px-3 py-2 text-xs text-[color:var(--color-text)] hover:bg-[color:var(--color-surface-2)]/60 focus-visible:outline-none focus-visible:bg-[color:var(--color-surface-2)]/80"
-                    role="menuitem"
-                    onClick={handleDuplicate}
-                  >
-                    Duplicate
-                    <span className="text-[10px] uppercase tracking-[0.16em] text-[color:var(--color-text)]/45">D</span>
-                  </button>
-                  <button
-                    type="button"
-                    className="flex w-full items-center justify-between px-3 py-2 text-xs text-[color:var(--color-text)] hover:bg-[color:var(--color-surface-2)]/60 focus-visible:outline-none focus-visible:bg-[color:var(--color-surface-2)]/80"
-                    role="menuitem"
-                    onClick={handlePerformance}
-                  >
-                    Performance
-                    <span className="text-[10px] uppercase tracking-[0.16em] text-[color:var(--color-text)]/45">P</span>
-                  </button>
-                  <button
-                    type="button"
-                    className="flex w-full items-center justify-between px-3 py-2 text-xs text-[color:var(--color-accent)] hover:bg-[color:var(--color-surface-2)]/60 focus-visible:outline-none focus-visible:bg-[color:var(--color-surface-2)]/80"
-                    role="menuitem"
-                    onClick={handleDelete}
-                  >
-                    Delete
-                    <span className="text-[10px] uppercase tracking-[0.16em] text-[color:var(--color-accent)]/70">Del</span>
-                  </button>
-                </div>
-              ) : null}
-            </div>
-          </div>
-          <div className="mt-3 flex flex-wrap items-center gap-2 text-sm text-[color:var(--color-text)]/75">
-            <span className="font-semibold text-[color:var(--color-text)]">{priceFormatter.format(item.price)}</span>
-            {performance ? (
-              <span className="inline-flex items-center rounded-full border border-[color:var(--color-primary)]/30 bg-[color:var(--color-primary)]/10 px-2.5 py-1 text-[10px] font-semibold uppercase tracking-[0.18em] text-[color:var(--color-primary)]">
-                eCPM {priceFormatter.format(performance.ecpm ?? 0)}
-              </span>
+                  Edit
+                  <span className="text-[10px] uppercase tracking-[0.16em] text-[color:var(--color-text)]/45">Enter</span>
+                </button>
+                <button
+                  type="button"
+                  className="flex w-full items-center justify-between px-3 py-2 text-xs text-[color:var(--color-text)] hover:bg-[color:var(--color-surface-2)]/60 focus-visible:outline-none focus-visible:bg-[color:var(--color-surface-2)]/80"
+                  role="menuitem"
+                  onClick={handleDuplicate}
+                >
+                  Duplicate
+                  <span className="text-[10px] uppercase tracking-[0.16em] text-[color:var(--color-text)]/45">D</span>
+                </button>
+                <button
+                  type="button"
+                  className="flex w-full items-center justify-between px-3 py-2 text-xs text-[color:var(--color-text)] hover:bg-[color:var(--color-surface-2)]/60 focus-visible:outline-none focus-visible:bg-[color:var(--color-surface-2)]/80"
+                  role="menuitem"
+                  onClick={handlePerformance}
+                >
+                  Performance
+                  <span className="text-[10px] uppercase tracking-[0.16em] text-[color:var(--color-text)]/45">P</span>
+                </button>
+                <button
+                  type="button"
+                  className="flex w-full items-center justify-between px-3 py-2 text-xs text-[color:var(--color-accent)] hover:bg-[color:var(--color-surface-2)]/60 focus-visible:outline-none focus-visible:bg-[color:var(--color-surface-2)]/80"
+                  role="menuitem"
+                  onClick={handleDelete}
+                >
+                  Delete
+                  <span className="text-[10px] uppercase tracking-[0.16em] text-[color:var(--color-accent)]/70">Del</span>
+                </button>
+              </div>
             ) : null}
-            <span className="inline-flex items-center gap-1 rounded-full border border-[color:var(--color-border)] bg-[color:var(--color-surface-2)]/70 px-2.5 py-1 text-[10px] font-semibold uppercase tracking-[0.18em] text-[color:var(--color-text)]/70">
-              {item.type}
-            </span>
-          </div>
-          <div className="mt-3 flex items-center gap-2 text-xs uppercase tracking-[0.14em] text-[color:var(--color-text)]/60">
-            <DatabaseFlag
-              name={item.database}
-              className="h-4 w-4 shrink-0 rounded-[3px] shadow-[0_0_0_1px_rgba(15,23,42,0.08)]"
-            />
-            <span className="truncate text-[color:var(--color-text)]/70">{item.database}</span>
           </div>
         </div>
       </div>
-      <div className="mt-4 flex flex-wrap gap-2">
-        <span
-          className={[
-            'inline-flex items-center gap-1 rounded-full border border-transparent px-3 py-1 text-[10px] font-semibold uppercase tracking-[0.16em]',
-            statusClass,
-          ].join(' ')}
-        >
+
+      <div className="mt-3 flex flex-wrap items-center gap-2">
+        <span className="text-sm font-bold text-gray-800">{priceFormatter.format(item.price)}</span>
+        <span className="inline-flex items-center rounded-full border border-slate-200 bg-slate-100 px-2 py-0.5 text-[10px] font-semibold uppercase tracking-[0.16em] text-slate-600">
+          {item.type}
+        </span>
+        {performance?.ecpm && (
+          <span className="inline-flex items-center rounded-md border border-slate-200 bg-white px-1.5 py-0.5 text-[9px] font-bold uppercase tracking-wider text-slate-700 shadow-sm ml-auto">
+            eCPM {priceFormatter.format(performance.ecpm)}
+          </span>
+        )}
+        <span className={['inline-flex text-[10px] font-semibold uppercase tracking-[0.16em]', statusTheme.text].join(' ')}>
           {item.status}
         </span>
-        {item.dsStatus?.toLowerCase() === 'preview_sent' ? (
-          <span className="inline-flex items-center gap-1 rounded-full border border-emerald-200 bg-emerald-100/90 px-3 py-1 text-[10px] font-semibold uppercase tracking-[0.16em] text-emerald-700">
-            Preview sent
-          </span>
-        ) : item.dsStatus ? (
-          <span className="inline-flex items-center gap-1 rounded-full border border-[color:var(--color-border)] bg-[color:var(--color-surface-2)]/70 px-3 py-1 text-[10px] font-semibold uppercase tracking-[0.16em] text-[color:var(--color-text)]/70">
-            {item.dsStatus}
-          </span>
-        ) : null}
-        {pendingPerformance ? (
-          <span className="inline-flex items-center gap-1 rounded-full border border-amber-200 bg-amber-100 px-3 py-1 text-[10px] font-semibold uppercase tracking-[0.16em] text-amber-700">
-            Pending performance
-          </span>
-        ) : null}
+      </div>
+
+      <div className="mt-3 flex items-center justify-between gap-2 border-t border-slate-200/80 pt-2">
+        <div className="flex min-w-0 items-center gap-2 text-[11px] uppercase tracking-[0.14em] text-gray-500">
+          <DatabaseFlag
+            name={item.database}
+            className="h-4 w-4 shrink-0 rounded-[3px] shadow-[0_0_0_1px_rgba(15,23,42,0.08)]"
+          />
+          <span className="truncate">{item.database}</span>
+        </div>
+        <div className="flex items-center gap-2">
+          {pendingPerformance ? (
+            <span
+              className="inline-flex h-5 w-5 items-center justify-center text-amber-500"
+              title="Pending performance"
+            >
+              <AlertIcon className="h-4 w-4" />
+              <span className="sr-only">Pending performance</span>
+            </span>
+          ) : null}
+          {item.dsStatus?.toLowerCase() === 'preview_sent' ? (
+            <span className="h-2 w-2 rounded-full bg-emerald-400" title="Preview sent" />
+          ) : null}
+        </div>
       </div>
     </div>
   );
