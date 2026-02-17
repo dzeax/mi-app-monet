@@ -32,99 +32,117 @@ export default function CampaignPlanningHeader({
         ? format(activeDate, "'Week of' MMM dd yyyy")
         : format(activeDate, 'MMMM yyyy');
 
-  const monthLabel = format(activeDate, 'MMMM yyyy');
-  const capitalizedMonth = monthLabel.charAt(0).toUpperCase() + monthLabel.slice(1);
-
   return (
-    <header className="space-y-5">
-      <div className="flex flex-wrap items-start gap-4 xl:flex-nowrap">
-        <div className="flex flex-col gap-3 min-w-[240px] flex-shrink-0">
-          <div className="flex flex-wrap items-center gap-2">
-            <button type="button" className="btn-ghost px-3 py-1.5" onClick={() => onNavigate('today')}>
-              Today
+    <header className="flex flex-col gap-5 mb-6">
+      
+      {/* --- FILA SUPERIOR: Título + Acciones Globales --- */}
+      <div className="flex items-center justify-between">
+        <div className="flex flex-col gap-1">
+            <h1 className="text-2xl font-bold text-gray-900 tracking-tight">Campaign Planning</h1>
+            <p className="text-sm text-gray-500">Manage and schedule your marketing campaigns</p>
+        </div>
+        
+        <div className="flex items-center gap-3">
+          <button
+            type="button"
+            onClick={onToggleReporting}
+            className={[
+              'inline-flex items-center justify-center rounded-lg border px-3 py-2 text-sm font-medium transition-colors',
+              reportingOpen
+                ? 'border-blue-200 bg-blue-50 text-blue-700'
+                : 'border-gray-200 bg-white text-gray-700 hover:bg-gray-50 hover:text-gray-900',
+            ].join(' ')}
+          >
+            {reportingOpen ? 'Hide reporting' : 'Show reporting'}
+          </button>
+          
+          <button 
+            type="button" 
+            className="btn-primary px-4 py-2 text-sm shadow-md shadow-emerald-500/20" 
+            onClick={onCreate}
+          >
+            + New campaign
+          </button>
+        </div>
+      </div>
+
+      {/* --- FILA INFERIOR: Toolbar (Navegación + Filtros) --- */}
+      <div className="flex flex-wrap items-center justify-between gap-4 rounded-xl border border-gray-200 bg-white p-2 shadow-sm">
+        
+        {/* IZQUIERDA: Navegación Temporal */}
+        <div className="flex items-center gap-2 pl-2">
+            <button 
+                type="button" 
+                className="text-sm font-medium text-gray-600 hover:text-gray-900 hover:bg-gray-100 px-3 py-1.5 rounded-lg border border-transparent hover:border-gray-200 transition-all" 
+                onClick={() => onNavigate('today')}
+            >
+                Today
             </button>
-            <div className="flex items-center rounded-xl border border-[color:var(--color-border)] bg-white shadow-sm">
+            
+            <div className="flex items-center rounded-lg border border-gray-200 bg-gray-50/50 mx-2">
               <button
                 type="button"
-                className="px-3 py-2 text-[color:var(--color-text)]/70 hover:bg-black/5 rounded-l-xl"
+                className="p-1.5 text-gray-500 hover:text-gray-900 hover:bg-white rounded-md transition-colors m-0.5"
                 onClick={() => onNavigate('prev')}
                 aria-label="Previous period"
               >
                 <NavChevron direction="left" />
               </button>
-              <div className="px-4 py-2 text-sm font-semibold uppercase tracking-[0.18em] text-[color:var(--color-text)]/70">
+              
+              <div className="px-3 py-1 text-sm font-semibold text-gray-800 min-w-[140px] text-center uppercase tracking-wide text-[11px]">
                 {periodLabel}
               </div>
+              
               <button
                 type="button"
-                className="px-3 py-2 text-[color:var(--color-text)]/70 hover:bg-black/5 rounded-r-xl"
+                className="p-1.5 text-gray-500 hover:text-gray-900 hover:bg-white rounded-md transition-colors m-0.5"
                 onClick={() => onNavigate('next')}
                 aria-label="Next period"
               >
                 <NavChevron direction="right" />
               </button>
             </div>
-          </div>
+
+            <div className="h-6 w-px bg-gray-200 mx-2" />
+
+            {/* Selector de Vista (Segmented Control) */}
+            <div className="flex items-center rounded-lg bg-gray-100 p-1">
+                {(['day', 'week', 'month'] as ViewMode[]).map((mode) => (
+                  <button
+                    key={mode}
+                    type="button"
+                    onClick={() => onViewModeChange(mode)}
+                    className={[
+                      'px-3 py-1 text-xs font-semibold rounded-md transition-all',
+                      viewMode === mode
+                        ? 'bg-white text-gray-900 shadow-sm'
+                        : 'text-gray-500 hover:text-gray-700',
+                    ].join(' ')}
+                  >
+                    {mode.charAt(0).toUpperCase() + mode.slice(1)}
+                  </button>
+                ))}
+            </div>
         </div>
 
-        {filtersSlot ? <div className="flex-1 min-w-[320px] max-w-5xl">{filtersSlot}</div> : null}
-
-        <div className="flex flex-col gap-3 sm:flex-row sm:items-center flex-shrink-0 min-w-[260px]">
-          <span className="inline-flex shrink-0 items-center rounded-full border border-[color:var(--color-border)] bg-white px-3 py-1 text-xs font-semibold uppercase tracking-[0.18em] text-[color:var(--color-text)]/60 shadow-sm">
-            {capitalizedMonth}
-          </span>
-          <div className="inline-flex shrink-0 rounded-xl border border-[color:var(--color-border)] bg-white p-1 shadow-inner">
-            {(['day', 'week', 'month'] as ViewMode[]).map((mode) => (
-              <button
-                key={mode}
-                type="button"
-                onClick={() => onViewModeChange(mode)}
-                className={[
-                  'px-3 py-1.5 text-sm font-semibold rounded-lg transition-colors',
-                  viewMode === mode
-                    ? 'bg-[color:var(--color-primary)] text-white shadow-sm'
-                    : 'text-[color:var(--color-text)]/70 hover:bg-black/5',
-                ].join(' ')}
-                aria-pressed={viewMode === mode}
-              >
-                {mode.charAt(0).toUpperCase() + mode.slice(1)}
-              </button>
-            ))}
-          </div>
-          <button
-            type="button"
-            onClick={onToggleReporting}
-            className={[
-              'inline-flex items-center justify-center rounded-xl border px-4 py-2 text-sm font-semibold transition-colors',
-              reportingOpen
-                ? 'border-[color:var(--color-primary)] bg-[color:var(--color-primary)]/10 text-[color:var(--color-primary)]'
-                : 'border-[color:var(--color-border)] bg-white text-[color:var(--color-text)]/80 hover:border-[color:var(--color-primary)]/60',
-            ].join(' ')}
-          >
-            {reportingOpen ? 'Hide reporting' : 'Show reporting'}
-          </button>
-          <button type="button" className="btn-primary px-4 py-2" onClick={onCreate}>
-            + New campaign
-          </button>
+        {/* DERECHA: Slot de Filtros */}
+        <div className="flex-1 flex justify-end min-w-[200px]">
+            {filtersSlot}
         </div>
       </div>
-
-      <h1 className="text-3xl font-semibold text-[color:var(--color-text)]">Campaign Planning</h1>
     </header>
   );
 }
 
 function NavChevron({ direction }: { direction: 'left' | 'right' }) {
   const rotation = direction === 'left' ? 'rotate-180' : '';
-
   return (
     <svg
       viewBox="0 0 20 20"
       fill="none"
-      xmlns="http://www.w3.org/2000/svg"
       className={`h-4 w-4 ${rotation}`}
       stroke="currentColor"
-      strokeWidth={1.8}
+      strokeWidth={1.5}
       strokeLinecap="round"
       strokeLinejoin="round"
     >
