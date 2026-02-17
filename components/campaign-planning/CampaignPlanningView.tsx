@@ -1,4 +1,4 @@
-﻿'use client';
+'use client';
 
 import Image from 'next/image';
 import { useEffect, useMemo, useState } from 'react';
@@ -12,6 +12,7 @@ import CampaignPlanningCalendar from '@/components/campaign-planning/CampaignPla
 import CampaignPlanningDrawer from '@/components/campaign-planning/CampaignPlanningDrawer';
 import PlanningReportingDock from '@/components/campaign-planning/PlanningReportingDock';
 import ReportingFiltersPanel, { REPORTING_DATE_PRESETS } from '@/components/campaign-planning/ReportingFiltersPanel';
+import CreateCampaignModal from '@/components/create-campaign/CreateCampaignModal';
 import type { CampaignStatus, PlanningDraft, PlanningItem } from '@/components/campaign-planning/types';
 import { CAMPAIGN_STATUSES } from '@/components/campaign-planning/types';
 import { addDays, addMonths, addWeeks, format, subDays, subMonths, subWeeks } from 'date-fns';
@@ -26,6 +27,46 @@ import {
 
 const STORAGE_KEY = 'campaign-planning/preferences';
 const REPORTING_FILTERS_KEY = 'campaign-planning/reporting-filters';
+const REPORTING_ALLOWED_TYPES: CampaignRow['type'][] = ['CPL', 'CPM', 'CPC', 'CPA'];
+const PENDING_PERFORMANCE_DELAY_DAYS = 3;
+
+function normalizeKey(value?: string | null): string {
+  return (value ?? '').trim().toLowerCase();
+}
+
+function buildPlanningReportingKey(input: {
+  date: string;
+  campaign: string;
+  partner: string;
+  database: string;
+}): string {
+  return [input.date, input.campaign, input.partner, input.database].map((value) => normalizeKey(value)).join('|');
+}
+
+function toReportingType(type?: string | null): CampaignRow['type'] {
+  if ((REPORTING_ALLOWED_TYPES as string[]).includes(String(type ?? ''))) {
+    return type as CampaignRow['type'];
+  }
+  return 'CPL';
+}
+
+function hasPendingPerformance(item: PlanningItem, hasPerformance: boolean, now: Date): boolean {
+  if (hasPerformance || item.status !== 'Programmed') return false;
+  const source = item.programmedAt ?? item.updatedAt ?? null;
+  if (!source) return false;
+  const start = new Date(source);
+  if (Number.isNaN(start.getTime())) return false;
+  const due = new Date(start);
+  due.setDate(due.getDate() + PENDING_PERFORMANCE_DELAY_DAYS);
+  return now.getTime() >= due.getTime();
+}
+
+type PerformanceModalState = {
+  mode: 'create' | 'edit';
+  planningItemId: string;
+  initialRow?: CampaignRow;
+  seed?: Partial<CampaignRow>;
+};
 
 function clampDate(date: Date) {
   return new Date(date.getFullYear(), date.getMonth(), date.getDate());
@@ -110,7 +151,11 @@ function PlanningViewInner() {
   const { rows, loading: reportingLoading } = useCampaignData();
   const [viewMode, setViewMode] = useState<'day' | 'week' | 'month'>('week');
   const [activeDate, setActiveDate] = useState(new Date());
-  const [filters, setFilters] = useState<PlanningFilters>({ statuses: [], databases: [] });
+  const [filters, setFilters] = useState<PlanningFilters>({
+    statuses: [],
+    databases: [],
+    onlyPendingPerformance: false,
+  });
   const [drawerOpen, setDrawerOpen] = useState(false);
   const [drawerMode, setDrawerMode] = useState<'create' | 'edit'>('create');
   const [selectedId, setSelectedId] = useState<string | null>(null);
@@ -142,6 +187,61 @@ function PlanningViewInner() {
     initial: { ...REPORTING_DEFAULT_FILTERS, ...reportingInitialFilters },
   });
   const [reportingVisibleCount, setReportingVisibleCount] = useState(40);
+  const [performanceModal, setPerformanceModal] = useState<PerformanceModalState | null>(null);
+
+  const reportingRowsById = useMemo(() => {
+    const map = new Map<string, CampaignRow>();
+    rows.forEach((row) => map.set(row.id, row));
+    return map;
+  }, [rows]);
+
+  const reportingRowsByKey = useMemo(() => {
+    const map = new Map<string, CampaignRow>();
+    rows.forEach((row) => {
+      const key = buildPlanningReportingKey({
+        date: row.date,
+        campaign: row.campaign,
+        partner: row.partner,
+        database: row.database,
+      });
+      if (!map.has(key)) {
+        map.set(key, row);
+      }
+    });
+    return map;
+  }, [rows]);
+
+  const performanceByPlanningId = useMemo(() => {
+    const map: Record<string, CampaignRow | undefined> = {};
+    planning.items.forEach((item) => {
+      const linked = item.reportingCampaignId ? reportingRowsById.get(item.reportingCampaignId) : undefined;
+      if (linked) {
+        map[item.id] = linked;
+        return;
+      }
+      const fallback = reportingRowsByKey.get(
+        buildPlanningReportingKey({
+          date: item.date,
+          campaign: item.name,
+          partner: item.partner,
+          database: item.database,
+        }),
+      );
+      if (fallback) {
+        map[item.id] = fallback;
+      }
+    });
+    return map;
+  }, [planning.items, reportingRowsById, reportingRowsByKey]);
+
+  const pendingPerformanceByPlanningId = useMemo(() => {
+    const now = new Date();
+    const map: Record<string, boolean> = {};
+    planning.items.forEach((item) => {
+      map[item.id] = hasPendingPerformance(item, Boolean(performanceByPlanningId[item.id]), now);
+    });
+    return map;
+  }, [planning.items, performanceByPlanningId]);
 
   const activeDateIso = useMemo(() => format(activeDate, 'yyyy-MM-dd'), [activeDate]);
 
@@ -199,9 +299,10 @@ function PlanningViewInner() {
     return planning.items.filter((item) => {
       if (filters.statuses.length && !filters.statuses.includes(item.status)) return false;
       if (filters.databases.length && !filters.databases.includes(item.database)) return false;
+      if (filters.onlyPendingPerformance && !pendingPerformanceByPlanningId[item.id]) return false;
       return true;
     });
-  }, [planning.items, filters]);
+  }, [planning.items, filters, pendingPerformanceByPlanningId]);
 
   const selectedItem: PlanningItem | null = useMemo(() => {
     if (!selectedId) return null;
@@ -238,6 +339,7 @@ function PlanningViewInner() {
         setFilters({
           statuses: statusValues,
           databases: Array.isArray(parsed.filters.databases) ? parsed.filters.databases : [],
+          onlyPendingPerformance: Boolean(parsed.filters.onlyPendingPerformance),
         });
       }
       if (typeof parsed?.reportingOpen === 'boolean') {
@@ -375,6 +477,105 @@ function PlanningViewInner() {
     setDrawerOpen(true);
   };
 
+  const resolveThemeSuggestion = (item: PlanningItem): string => {
+    const campaignKey = normalizeKey(item.name);
+    const partnerKey = normalizeKey(item.partner);
+    const dbKey = normalizeKey(item.database);
+
+    const exact = rows.find(
+      (row) =>
+        normalizeKey(row.campaign) === campaignKey &&
+        normalizeKey(row.partner) === partnerKey &&
+        normalizeKey(row.database) === dbKey &&
+        normalizeKey(row.theme) !== '',
+    );
+    if (exact?.theme) return exact.theme;
+
+    const campaignPartner = rows.find(
+      (row) =>
+        normalizeKey(row.campaign) === campaignKey &&
+        normalizeKey(row.partner) === partnerKey &&
+        normalizeKey(row.theme) !== '',
+    );
+    if (campaignPartner?.theme) return campaignPartner.theme;
+
+    const campaignOnly = rows.find(
+      (row) => normalizeKey(row.campaign) === campaignKey && normalizeKey(row.theme) !== '',
+    );
+    return campaignOnly?.theme ?? '';
+  };
+
+  const handleOpenPerformance = (item: PlanningItem) => {
+    const linkedRow = item.reportingCampaignId ? reportingRowsById.get(item.reportingCampaignId) : undefined;
+    const fallbackRow = reportingRowsByKey.get(
+      buildPlanningReportingKey({
+        date: item.date,
+        campaign: item.name,
+        partner: item.partner,
+        database: item.database,
+      }),
+    );
+    const targetRow = linkedRow ?? fallbackRow ?? null;
+
+    if (!linkedRow && fallbackRow && item.reportingCampaignId !== fallbackRow.id) {
+      void planning.updateItem(item.id, { reportingCampaignId: fallbackRow.id }).catch((error) => {
+        console.error('Unable to auto-link planning item with reporting row', error);
+      });
+    }
+
+    if (targetRow) {
+      setPerformanceModal({
+        mode: 'edit',
+        planningItemId: item.id,
+        initialRow: targetRow,
+      });
+      return;
+    }
+
+    const campaignKey = normalizeKey(item.name);
+    const databaseKey = normalizeKey(item.database);
+    const campaignRow = rows.find((row) => normalizeKey(row.campaign) === campaignKey);
+    const databaseRow = rows.find((row) => normalizeKey(row.database) === databaseKey);
+    const themeSuggestion = resolveThemeSuggestion(item);
+
+    setPerformanceModal({
+      mode: 'create',
+      planningItemId: item.id,
+      seed: {
+        date: item.date,
+        campaign: item.name,
+        advertiser: campaignRow?.advertiser ?? '',
+        partner: item.partner,
+        theme: themeSuggestion,
+        price: item.price,
+        type: toReportingType(item.type),
+        database: item.database,
+        geo: item.geo ?? databaseRow?.geo ?? '',
+        databaseType: databaseRow?.databaseType,
+        invoiceOffice: databaseRow?.invoiceOffice,
+      },
+    });
+  };
+
+  const handleClosePerformanceModal = () => {
+    setPerformanceModal(null);
+  };
+
+  const handlePerformanceSaved = async (reportingCampaignId: string) => {
+    const planningItemId = performanceModal?.planningItemId;
+    if (!planningItemId) return;
+    const planningItem = planning.items.find((entry) => entry.id === planningItemId);
+    if (!planningItem || planningItem.reportingCampaignId === reportingCampaignId) {
+      return;
+    }
+    try {
+      await planning.updateItem(planningItemId, { reportingCampaignId });
+    } catch (error) {
+      console.error('Unable to link planning item with reporting row after save', error);
+      showError('Campaign saved, but planning link could not be stored.');
+    }
+  };
+
   const handleToggleReporting = () => {
     setReportingOpen((prev) => !prev);
   };
@@ -474,9 +675,12 @@ function PlanningViewInner() {
             currentDate={activeDate}
             viewMode={viewMode}
             items={filteredItems}
+            performanceByPlanningId={performanceByPlanningId}
+            pendingPerformanceByPlanningId={pendingPerformanceByPlanningId}
             onSelectItem={handleSelect}
             onDuplicate={handleDuplicate}
             onDelete={handleDelete}
+            onOpenPerformance={handleOpenPerformance}
             onMove={handleMove}
             onCreateAtDate={handleQuickCreateAtDate}
           />
@@ -516,6 +720,18 @@ function PlanningViewInner() {
         seedDraft={drawerSeed ?? undefined}
         onClose={handleCloseDrawer}
       />
+
+      {performanceModal ? (
+        <CreateCampaignModal
+          mode={performanceModal.mode}
+          initialRow={performanceModal.initialRow}
+          seed={performanceModal.seed}
+          onClose={handleClosePerformanceModal}
+          onSaved={(campaignId) => {
+            void handlePerformanceSaved(campaignId);
+          }}
+        />
+      ) : null}
     </div>
   );
 }

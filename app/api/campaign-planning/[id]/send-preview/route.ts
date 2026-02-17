@@ -13,8 +13,8 @@ const ALLOWED_ROLES = new Set(['admin', 'editor']);
 export const runtime = 'nodejs';
 
 async function createSupabaseRouteClient() {
-  const cookieStore = await cookies();
-  return createRouteHandlerClient({ cookies: () => cookieStore });
+ const cookieStore = await cookies();
+ return createRouteHandlerClient({ cookies: () => cookieStore as any });
 }
 
 async function ensureAuthorized() {

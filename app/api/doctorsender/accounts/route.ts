@@ -9,8 +9,8 @@ const ALLOWED_ROLES = new Set(['admin', 'editor']);
 type HttpError = Error & { status?: number };
 
 async function createSupabaseRouteClient() {
-  const cookieStore = await cookies();
-  return createRouteHandlerClient({ cookies: () => cookieStore });
+ const cookieStore = await cookies();
+ return createRouteHandlerClient({ cookies: () => cookieStore as any });
 }
 
 async function ensureAuthorized() {
@@ -60,3 +60,4 @@ export async function GET() {
     return NextResponse.json({ error: message }, { status });
   }
 }
+

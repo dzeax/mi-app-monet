@@ -18,6 +18,7 @@ import { es } from 'date-fns/locale';
 import type { CampaignStatus, PlanningItem } from '@/components/campaign-planning/types';
 import { CAMPAIGN_STATUSES } from '@/components/campaign-planning/types';
 import DatabaseFlag from '@/components/campaign-planning/DatabaseFlag';
+import type { CampaignRow } from '@/types/campaign';
 
 const dayLabels = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'];
 
@@ -39,9 +40,12 @@ type Props = {
   currentDate: Date;
   viewMode: ViewMode;
   items: PlanningItem[];
+  performanceByPlanningId: Record<string, CampaignRow | undefined>;
+  pendingPerformanceByPlanningId: Record<string, boolean | undefined>;
   onSelectItem: (item: PlanningItem) => void;
   onDuplicate: (item: PlanningItem) => void;
   onDelete: (item: PlanningItem) => void;
+  onOpenPerformance: (item: PlanningItem) => void;
   onMove: (id: string, date: string, duplicate: boolean) => void;
   onCreateAtDate: (date: Date) => void;
 };
@@ -109,9 +113,12 @@ export default function CampaignPlanningCalendar({
   currentDate,
   viewMode,
   items,
+  performanceByPlanningId,
+  pendingPerformanceByPlanningId,
   onSelectItem,
   onDuplicate,
   onDelete,
+  onOpenPerformance,
   onMove,
   onCreateAtDate,
 }: Props) {
@@ -154,9 +161,12 @@ export default function CampaignPlanningCalendar({
     return (
       <DayView
         items={dayItems}
+        performanceByPlanningId={performanceByPlanningId}
+        pendingPerformanceByPlanningId={pendingPerformanceByPlanningId}
         onSelectItem={onSelectItem}
         onDuplicate={onDuplicate}
         onDelete={onDelete}
+        onOpenPerformance={onOpenPerformance}
         onMove={completeDrop}
         date={currentDate}
         dragOverDate={dragOverDate}
@@ -177,9 +187,12 @@ export default function CampaignPlanningCalendar({
       <MonthView
         chunks={[weekDays]}
         items={weekItems}
+        performanceByPlanningId={performanceByPlanningId}
+        pendingPerformanceByPlanningId={pendingPerformanceByPlanningId}
         onSelectItem={onSelectItem}
         onDuplicate={onDuplicate}
         onDelete={onDelete}
+        onOpenPerformance={onOpenPerformance}
         onMove={completeDrop}
         currentDate={currentDate}
         draggingId={draggingId}
@@ -203,9 +216,12 @@ export default function CampaignPlanningCalendar({
     <MonthView
       chunks={weeks}
       items={sortedItems}
+      performanceByPlanningId={performanceByPlanningId}
+      pendingPerformanceByPlanningId={pendingPerformanceByPlanningId}
       onSelectItem={onSelectItem}
       onDuplicate={onDuplicate}
       onDelete={onDelete}
+      onOpenPerformance={onOpenPerformance}
       onMove={completeDrop}
       currentDate={currentDate}
       draggingId={draggingId}
@@ -222,9 +238,12 @@ export default function CampaignPlanningCalendar({
 function MonthView({
   chunks,
   items,
+  performanceByPlanningId,
+  pendingPerformanceByPlanningId,
   onSelectItem,
   onDuplicate,
   onDelete,
+  onOpenPerformance,
   onMove,
   currentDate,
   draggingId,
@@ -237,9 +256,12 @@ function MonthView({
 }: {
   chunks: Date[][];
   items: PlanningItem[];
+  performanceByPlanningId: Record<string, CampaignRow | undefined>;
+  pendingPerformanceByPlanningId: Record<string, boolean | undefined>;
   onSelectItem: (item: PlanningItem) => void;
   onDuplicate: (item: PlanningItem) => void;
   onDelete: (item: PlanningItem) => void;
+  onOpenPerformance: (item: PlanningItem) => void;
   onMove: (id: string, date: string, duplicate: boolean) => void;
   currentDate: Date;
   draggingId: string | null;
@@ -331,9 +353,12 @@ function MonthView({
                         <CampaignChip
                           key={item.id}
                           item={item}
+                          performance={performanceByPlanningId[item.id]}
+                          pendingPerformance={Boolean(pendingPerformanceByPlanningId[item.id])}
                           onClick={() => onSelectItem(item)}
                           onDuplicate={() => onDuplicate(item)}
                           onDelete={() => onDelete(item)}
+                          onOpenPerformance={() => onOpenPerformance(item)}
                           onDragStart={onDragStart}
                           onDragEnd={() => {
                             onDragEnd();
@@ -356,10 +381,13 @@ function MonthView({
 
 function DayView({
   items,
+  performanceByPlanningId,
+  pendingPerformanceByPlanningId,
   date,
   onSelectItem,
   onDuplicate,
   onDelete,
+  onOpenPerformance,
   onMove,
   dragOverDate,
   onDragOverDate,
@@ -367,10 +395,13 @@ function DayView({
   onCreateAtDate,
 }: {
   items: PlanningItem[];
+  performanceByPlanningId: Record<string, CampaignRow | undefined>;
+  pendingPerformanceByPlanningId: Record<string, boolean | undefined>;
   date: Date;
   onSelectItem: (item: PlanningItem) => void;
   onDuplicate: (item: PlanningItem) => void;
   onDelete: (item: PlanningItem) => void;
+  onOpenPerformance: (item: PlanningItem) => void;
   onMove: (id: string, date: string, duplicate: boolean) => void;
   dragOverDate: string | null;
   onDragOverDate: (date: Date) => void;
@@ -443,6 +474,8 @@ function DayView({
           <div className="p-3 space-y-3">
             {sortedItems.map((item) => {
               const statusTheme = resolveStatusTheme(item.status);
+              const performance = performanceByPlanningId[item.id];
+              const showPendingPerformance = Boolean(pendingPerformanceByPlanningId[item.id]);
               return (
                 <div
                   key={item.id}
@@ -468,6 +501,16 @@ function DayView({
                       </button>
                       <button
                         type="button"
+                        className="btn-ghost text-xs px-2 py-1"
+                        onClick={(event) => {
+                          event.stopPropagation();
+                          onOpenPerformance(item);
+                        }}
+                      >
+                        Performance
+                      </button>
+                      <button
+                        type="button"
                         className="btn-ghost text-xs px-2 py-1 text-[color:var(--color-accent)] hover:text-[color:var(--color-accent)]/80"
                         onClick={(event) => {
                           event.stopPropagation();
@@ -482,7 +525,14 @@ function DayView({
                     {item.partner} | {item.database} | {item.type}
                   </div>
                   <div className="flex items-center justify-between text-sm text-[color:var(--color-text)]/75">
-                    <span>{priceFormatter.format(item.price)}</span>
+                    <span className="flex items-center gap-2">
+                      <span>{priceFormatter.format(item.price)}</span>
+                      {performance ? (
+                        <span className="inline-flex items-center rounded-full border border-[color:var(--color-primary)]/30 bg-[color:var(--color-primary)]/10 px-2 py-0.5 text-[10px] font-semibold uppercase tracking-[0.14em] text-[color:var(--color-primary)]">
+                          eCPM {priceFormatter.format(performance.ecpm ?? 0)}
+                        </span>
+                      ) : null}
+                    </span>
                     <span
                       className={[
                         'inline-flex items-center gap-1 px-2 py-0.5 text-xs rounded-full font-semibold border border-transparent',
@@ -504,6 +554,11 @@ function DayView({
                         {item.dsStatus}
                       </span>
                     ) : null}
+                    {showPendingPerformance ? (
+                      <span className="inline-flex items-center gap-1 rounded-full border border-amber-200 bg-amber-100 px-2 py-0.5 text-[10px] font-semibold uppercase tracking-[0.14em] text-amber-700">
+                        Pending performance
+                      </span>
+                    ) : null}
                   </div>
                   {item.notes ? (
                     <p className="text-xs text-[color:var(--color-text)]/55 leading-relaxed">{item.notes}</p>
@@ -520,17 +575,23 @@ function DayView({
 
 function CampaignChip({
   item,
+  performance,
+  pendingPerformance,
   onClick,
   onDuplicate,
   onDelete,
+  onOpenPerformance,
   onDragStart,
   onDragEnd,
   isDragging,
 }: {
   item: PlanningItem;
+  performance?: CampaignRow;
+  pendingPerformance: boolean;
   onClick: () => void;
   onDuplicate: () => void;
   onDelete: () => void;
+  onOpenPerformance: () => void;
   onDragStart: (id: string) => void;
   onDragEnd: () => void;
   isDragging: boolean;
@@ -577,6 +638,11 @@ function CampaignChip({
     closeMenu();
     onDelete();
   };
+  const handlePerformance = (event?: ReactMouseEvent) => {
+    if (event) event.stopPropagation();
+    closeMenu();
+    onOpenPerformance();
+  };
 
   return (
     <div
@@ -608,6 +674,9 @@ function CampaignChip({
         } else if (event.key.toLowerCase() === 'd') {
           event.preventDefault();
           handleDuplicate();
+        } else if (event.key.toLowerCase() === 'p') {
+          event.preventDefault();
+          handlePerformance();
         } else if (event.key === 'Delete' || event.key === 'Backspace') {
           event.preventDefault();
           handleDelete();
@@ -695,6 +764,15 @@ function CampaignChip({
                   </button>
                   <button
                     type="button"
+                    className="flex w-full items-center justify-between px-3 py-2 text-xs text-[color:var(--color-text)] hover:bg-[color:var(--color-surface-2)]/60 focus-visible:outline-none focus-visible:bg-[color:var(--color-surface-2)]/80"
+                    role="menuitem"
+                    onClick={handlePerformance}
+                  >
+                    Performance
+                    <span className="text-[10px] uppercase tracking-[0.16em] text-[color:var(--color-text)]/45">P</span>
+                  </button>
+                  <button
+                    type="button"
                     className="flex w-full items-center justify-between px-3 py-2 text-xs text-[color:var(--color-accent)] hover:bg-[color:var(--color-surface-2)]/60 focus-visible:outline-none focus-visible:bg-[color:var(--color-surface-2)]/80"
                     role="menuitem"
                     onClick={handleDelete}
@@ -708,6 +786,11 @@ function CampaignChip({
           </div>
           <div className="mt-3 flex flex-wrap items-center gap-2 text-sm text-[color:var(--color-text)]/75">
             <span className="font-semibold text-[color:var(--color-text)]">{priceFormatter.format(item.price)}</span>
+            {performance ? (
+              <span className="inline-flex items-center rounded-full border border-[color:var(--color-primary)]/30 bg-[color:var(--color-primary)]/10 px-2.5 py-1 text-[10px] font-semibold uppercase tracking-[0.18em] text-[color:var(--color-primary)]">
+                eCPM {priceFormatter.format(performance.ecpm ?? 0)}
+              </span>
+            ) : null}
             <span className="inline-flex items-center gap-1 rounded-full border border-[color:var(--color-border)] bg-[color:var(--color-surface-2)]/70 px-2.5 py-1 text-[10px] font-semibold uppercase tracking-[0.18em] text-[color:var(--color-text)]/70">
               {item.type}
             </span>
@@ -737,6 +820,11 @@ function CampaignChip({
         ) : item.dsStatus ? (
           <span className="inline-flex items-center gap-1 rounded-full border border-[color:var(--color-border)] bg-[color:var(--color-surface-2)]/70 px-3 py-1 text-[10px] font-semibold uppercase tracking-[0.16em] text-[color:var(--color-text)]/70">
             {item.dsStatus}
+          </span>
+        ) : null}
+        {pendingPerformance ? (
+          <span className="inline-flex items-center gap-1 rounded-full border border-amber-200 bg-amber-100 px-3 py-1 text-[10px] font-semibold uppercase tracking-[0.16em] text-amber-700">
+            Pending performance
           </span>
         ) : null}
       </div>

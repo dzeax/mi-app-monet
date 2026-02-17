@@ -18,6 +18,11 @@ export const runtime = "nodejs";
 
 const normalizeAlias = (value: string) => value.trim().toLowerCase();
 
+type PersonAliasRow = {
+  alias?: string | null;
+  person_id?: string | null;
+};
+
 const resolvePersonId = async (
   supabase: ReturnType<typeof createRouteHandlerClient>,
   clientSlug: string,
@@ -28,16 +33,17 @@ const resolvePersonId = async (
     .select("alias, person_id")
     .eq("client_slug", clientSlug);
   const key = normalizeAlias(owner);
-  const match = (data ?? []).find(
-    (row: { alias?: string | null; person_id?: string | null }) =>
+  const aliasRows = (data ?? []) as PersonAliasRow[];
+  const match = aliasRows.find(
+    (row) =>
       row.alias && row.person_id && normalizeAlias(row.alias) === key,
   );
   return match?.person_id ?? null;
 };
 
 export async function GET(request: Request) {
-  const cookieStore = await cookies();
-  const supabase = createRouteHandlerClient({ cookies: () => cookieStore });
+ const cookieStore = await cookies();
+ const supabase = createRouteHandlerClient({ cookies: () => cookieStore as any });
 
   const { searchParams } = new URL(request.url);
   const client = searchParams.get("client") || DEFAULT_CLIENT;
@@ -108,8 +114,8 @@ export async function GET(request: Request) {
 }
 
 export async function POST(request: Request) {
-  const cookieStore = await cookies();
-  const supabase = createRouteHandlerClient({ cookies: () => cookieStore });
+ const cookieStore = await cookies();
+ const supabase = createRouteHandlerClient({ cookies: () => cookieStore as any });
 
   try {
     const body = await request.json();
@@ -157,9 +163,19 @@ export async function POST(request: Request) {
       created_by: userId,
     };
 
+    const { error: upsertError } = await supabase
+      .from("crm_owner_rates")
+      .upsert(payload, { onConflict: "client_slug,owner,year" });
+
+    if (upsertError) {
+      return NextResponse.json(
+        { error: upsertError.message || "Upsert failed" },
+        { status: 500 },
+      );
+    }
+
     const { data, error } = await supabase
       .from("crm_owner_rates")
-      .upsert(payload, { onConflict: "client_slug,owner,year" })
       .select("*")
       .eq("client_slug", clientSlug)
       .eq("owner", owner)
@@ -194,8 +210,8 @@ export async function POST(request: Request) {
 }
 
 export async function DELETE(request: Request) {
-  const cookieStore = await cookies();
-  const supabase = createRouteHandlerClient({ cookies: () => cookieStore });
+ const cookieStore = await cookies();
+ const supabase = createRouteHandlerClient({ cookies: () => cookieStore as any });
   const { searchParams } = new URL(request.url);
   const id = searchParams.get("id");
   if (!id) {
@@ -230,3 +246,4 @@ export async function DELETE(request: Request) {
     return NextResponse.json({ error: msg }, { status: 500 });
   }
 }
+

@@ -14,8 +14,8 @@ const parseYear = (value: string | null) => {
 export const runtime = "nodejs";
 
 export async function GET(request: Request) {
-  const cookieStore = await cookies();
-  const supabase = createRouteHandlerClient({ cookies: () => cookieStore });
+ const cookieStore = await cookies();
+ const supabase = createRouteHandlerClient({ cookies: () => cookieStore as any });
 
   const {
     data: { session },
@@ -36,3 +36,4 @@ export async function GET(request: Request) {
     return NextResponse.json({ error: msg }, { status: 500 });
   }
 }
+

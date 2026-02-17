@@ -29,6 +29,8 @@ create table if not exists public.campaign_planning (
   ds_status text,
   ds_last_sync_at timestamptz,
   ds_error text,
+  reporting_campaign_id uuid references public.campaigns (id) on delete set null,
+  programmed_at timestamptz,
   created_by uuid references auth.users (id) on delete set null,
   created_at timestamptz not null default timezone('utc', now()),
   updated_at timestamptz not null default timezone('utc', now())
@@ -48,12 +50,16 @@ alter table public.campaign_planning
   add column if not exists ds_campaign_id text,
   add column if not exists ds_status text,
   add column if not exists ds_last_sync_at timestamptz,
-  add column if not exists ds_error text;
+  add column if not exists ds_error text,
+  add column if not exists reporting_campaign_id uuid references public.campaigns (id) on delete set null,
+  add column if not exists programmed_at timestamptz;
 
 comment on table public.campaign_planning is 'Planning board items for campaign scheduling.';
 comment on column public.campaign_planning.geo is 'ISO country code derived from database selection.';
 comment on column public.campaign_planning.type is 'Commercial model (e.g. CPL, CPM, CPC, CPA).';
 comment on column public.campaign_planning.status is 'Workflow state (Planning, Refining, Validation, Approved, Programmed, Profit).';
+comment on column public.campaign_planning.reporting_campaign_id is 'Linked campaign row in reporting once performance is recorded.';
+comment on column public.campaign_planning.programmed_at is 'Timestamp when status switched to Programmed.';
 
 -- Updated_at helper
 create or replace function public.set_updated_at()

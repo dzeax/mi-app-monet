@@ -25,8 +25,8 @@ const normalizeStatus = (value?: string | null) => {
 };
 
 export async function PATCH(request: Request) {
-  const cookieStore = await cookies();
-  const supabase = createRouteHandlerClient({ cookies: () => cookieStore });
+ const cookieStore = await cookies();
+ const supabase = createRouteHandlerClient({ cookies: () => cookieStore as any });
   const admin = supabaseAdmin();
 
   try {
@@ -129,3 +129,4 @@ export async function PATCH(request: Request) {
     return NextResponse.json({ error: message }, { status: 500 });
   }
 }
+

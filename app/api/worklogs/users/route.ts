@@ -5,8 +5,8 @@ import { createRouteHandlerClient } from "@supabase/auth-helpers-nextjs";
 export const runtime = "nodejs";
 
 export async function GET() {
-  const cookieStore = await cookies();
-  const supabase = createRouteHandlerClient({ cookies: () => cookieStore });
+ const cookieStore = await cookies();
+ const supabase = createRouteHandlerClient({ cookies: () => cookieStore as any });
 
   const { data: userData, error: userError } = await supabase.auth.getUser();
   if (userError || !userData?.user) {
@@ -69,3 +69,4 @@ export async function GET() {
 
   return NextResponse.json({ users });
 }
+

@@ -145,10 +145,9 @@ export default function OperationsHub() {
               const roles = Array.isArray(payload?.roles) ? payload.roles : [];
               const spendByPerson = payload?.spendByPerson ?? {};
               const budgetTotal = sumBudgetRoles(roles);
-              const spentTotal = Object.values(spendByPerson).reduce(
-                (acc, value) => acc + Number(value ?? 0),
-                0
-              );
+              const spentTotal = Object.values(
+                spendByPerson as Record<string, number | null>,
+              ).reduce<number>((acc, value) => acc + Number(value ?? 0), 0);
               return { budgetTotal, spentTotal };
             } catch (error) {
               console.warn('[hub] CRM budget fetch failed', {

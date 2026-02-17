@@ -35,8 +35,8 @@ export default async function CrmModulePage({ params }: Props) {
     notFound();
   }
   if (moduleConfig.type === 'budget' || moduleConfig.type === 'budget_execution') {
-    const cookieStore = await cookies();
-    const supabase = createServerComponentClient({ cookies: () => cookieStore });
+ const cookieStore = await cookies();
+ const supabase = createServerComponentClient({ cookies: () => cookieStore as any });
     const { data: authData, error: authError } = await supabase.auth.getUser();
     if (authError || !authData?.user) {
       redirect('/login');

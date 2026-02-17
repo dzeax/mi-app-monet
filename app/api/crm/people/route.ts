@@ -95,8 +95,8 @@ const resolveAvatarByPeople = async (
 };
 
 export async function GET(request: Request) {
-  const cookieStore = await cookies();
-  const supabase = createRouteHandlerClient({ cookies: () => cookieStore });
+ const cookieStore = await cookies();
+ const supabase = createRouteHandlerClient({ cookies: () => cookieStore as any });
   const { searchParams } = new URL(request.url);
   const client = searchParams.get("client") || DEFAULT_CLIENT;
   const includeInactive =
@@ -165,8 +165,8 @@ export async function GET(request: Request) {
 }
 
 export async function POST(request: Request) {
-  const cookieStore = await cookies();
-  const supabase = createRouteHandlerClient({ cookies: () => cookieStore });
+ const cookieStore = await cookies();
+ const supabase = createRouteHandlerClient({ cookies: () => cookieStore as any });
 
   try {
     const body = await request.json();
@@ -264,8 +264,8 @@ export async function POST(request: Request) {
 }
 
 export async function PATCH(request: Request) {
-  const cookieStore = await cookies();
-  const supabase = createRouteHandlerClient({ cookies: () => cookieStore });
+ const cookieStore = await cookies();
+ const supabase = createRouteHandlerClient({ cookies: () => cookieStore as any });
 
   try {
     const body = await request.json();
@@ -384,3 +384,4 @@ export async function PATCH(request: Request) {
     return NextResponse.json({ error: msg }, { status: 500 });
   }
 }
+

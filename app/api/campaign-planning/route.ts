@@ -11,8 +11,8 @@ const ALLOWED_ROLES = new Set(['admin', 'editor']);
 export const runtime = 'nodejs';
 
 async function createSupabaseRouteClient() {
-  const cookieStore = await cookies();
-  return createRouteHandlerClient({ cookies: () => cookieStore });
+ const cookieStore = await cookies();
+ return createRouteHandlerClient({ cookies: () => cookieStore as any });
 }
 
 export async function GET() {
@@ -111,6 +111,7 @@ export async function POST(request: Request) {
       previewRecipients: payload.previewRecipients ?? [],
     };
     const insertPayload = mapPlanningToInsert(basePayload, user.id);
+    insertPayload.programmed_at = payload.status === 'Programmed' ? new Date().toISOString() : null;
 
     const { data: inserted, error: insertError } = await admin
       .from('campaign_planning')
@@ -131,3 +132,4 @@ export async function POST(request: Request) {
     return NextResponse.json({ error: message }, { status: 500 });
   }
 }
+

@@ -6,10 +6,8 @@ import type { UseReportDataResult } from '@/hooks/useReportData';
 import {
   ResponsiveContainer, LineChart, Line, CartesianGrid, XAxis, YAxis, Tooltip, LabelList,
 } from 'recharts';
-import type { NameType, ValueType } from 'recharts/types/component/DefaultTooltipContent';
-import type { TooltipProps } from 'recharts';
+import type { ValueType } from 'recharts/types/component/DefaultTooltipContent';
 import type { LabelProps } from 'recharts';
-import type { AxisDomain } from 'recharts/types/util/types';
 
 type MetricOpt = 'ecpm' | 'turnover' | 'margin' | 'marginPct' | 'routingCosts' | 'vSent';
 type GroupOpt = 'none' | 'database' | 'partner' | 'geo';
@@ -63,13 +61,30 @@ const formatAxisTick = (metric: MetricOpt, value: number) => {
   return formatCurrencyCompact(value);
 };
 
-type CompactTooltipProps = TooltipProps<ValueType, NameType> & { metric: MetricOpt };
+type CompactTooltipProps = {
+  active?: boolean;
+  payload?: Array<{
+    dataKey?: string | number;
+    name?: string | number;
+    color?: string;
+    value?: ValueType;
+  }>;
+  label?: string | number;
+  metric: MetricOpt;
+};
+
+type CompactTooltipEntry = {
+  dataKey?: string | number;
+  name?: string | number;
+  color?: string;
+  value: ValueType;
+};
 
 function CompactTooltip({ active, payload, label, metric }: CompactTooltipProps) {
   if (!active || !payload || payload.length === 0) return null;
 
   const sortedItems = payload
-    .filter((entry) => entry != null && entry.value != null && normalizeValue(entry.value) !== 0)
+    .filter((entry): entry is CompactTooltipEntry => entry != null && entry.value != null && normalizeValue(entry.value) !== 0)
     .sort((a, b) => normalizeValue(b.value) - normalizeValue(a.value));
 
   if (sortedItems.length === 0) return null;
@@ -165,7 +180,7 @@ export default function ReportsTimeSeries({
   }, []);
 
   const handleChartMouseMove = useCallback(
-    (state: { activePayload?: Array<{ dataKey?: string | number; value?: ValueType }> } | undefined) => {
+    (state: any) => {
       if (legendHoveringRef.current) return;
       const payload = state?.activePayload;
       if (!payload || payload.length === 0) {
@@ -220,9 +235,10 @@ export default function ReportsTimeSeries({
     };
   }, [data, activeKeys]);
 
-  const yAxisDomain = useMemo<[AxisDomain, AxisDomain]>(() => (
-    yStats ? yStats.domain : ['auto', 'auto']
-  ), [yStats]);
+  const yAxisDomain = useMemo<[number, number] | undefined>(
+    () => (yStats ? yStats.domain : undefined),
+    [yStats],
+  );
 
   const endLabelMeta = useMemo(() => {
     const map = new Map<string, { text: string; offset: number }>();
@@ -466,12 +482,12 @@ function colorFor(key: string) {
 function renderEndLabel(props: LabelProps, meta: { map: Map<string, { text: string; offset: number }>; lastIndex: number }) {
   const { map, lastIndex } = meta;
   if (props.index !== lastIndex) return null;
-  const key = props.dataKey != null ? String(props.dataKey) : '';
+  const key = (props as any).dataKey != null ? String((props as any).dataKey) : '';
   if (!key) return null;
   const entry = map.get(key);
   if (!entry) return null;
-  const x = (props.x ?? 0) + 8;
-  const y = (props.y ?? 0) + entry.offset;
+  const x = Number(props.x ?? 0) + 8;
+  const y = Number(props.y ?? 0) + entry.offset;
   const color = colorFor(key);
 
   return (

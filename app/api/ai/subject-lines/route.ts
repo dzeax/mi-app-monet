@@ -19,7 +19,7 @@ const metadataSchema = z
     objectives: z.array(z.string()).optional(),
     keywords: z.array(z.string()).optional(),
   })
-  .default({});
+  .default({ language: 'English' });
 
 const requestSchema = z.object({
   html: z.string().min(1, 'HTML content is required'),

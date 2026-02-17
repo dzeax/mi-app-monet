@@ -24,6 +24,13 @@ type AuthProfile = {
   email: string | null;
 };
 
+type AppUserAuthRow = {
+  role?: string | null;
+  is_active?: boolean | null;
+  display_name?: string | null;
+  email?: string | null;
+};
+
 const EntryZ = z.object({
   effortDate: z.string().min(1),
   personId: z.string().uuid(),
@@ -160,11 +167,12 @@ const requireAuthProfile = async (
     return { error: NextResponse.json({ error: "Not authenticated" }, { status: 401 }) };
   }
 
-  const { data: appUser, error: appUserError } = await supabase
+  const { data: appUserData, error: appUserError } = await supabase
     .from("app_users")
     .select("role,is_active,display_name,email")
     .eq("user_id", userData.user.id)
     .maybeSingle();
+  const appUser = (appUserData ?? null) as AppUserAuthRow | null;
 
   if (appUserError) {
     return { error: NextResponse.json({ error: appUserError.message }, { status: 500 }) };
@@ -215,8 +223,8 @@ const resolveEditorPersonIds = async (
 };
 
 export async function GET(request: Request) {
-  const cookieStore = await cookies();
-  const supabase = createRouteHandlerClient({ cookies: () => cookieStore });
+ const cookieStore = await cookies();
+ const supabase = createRouteHandlerClient({ cookies: () => cookieStore as any });
   const { searchParams } = new URL(request.url);
   const client = searchParams.get("client") || DEFAULT_CLIENT;
   const from = searchParams.get("from");
@@ -305,8 +313,8 @@ export async function GET(request: Request) {
 }
 
 export async function POST(request: Request) {
-  const cookieStore = await cookies();
-  const supabase = createRouteHandlerClient({ cookies: () => cookieStore });
+ const cookieStore = await cookies();
+ const supabase = createRouteHandlerClient({ cookies: () => cookieStore as any });
 
   try {
     const auth = await requireAuthProfile(supabase);
@@ -403,8 +411,8 @@ export async function POST(request: Request) {
 }
 
 export async function PUT(request: Request) {
-  const cookieStore = await cookies();
-  const supabase = createRouteHandlerClient({ cookies: () => cookieStore });
+ const cookieStore = await cookies();
+ const supabase = createRouteHandlerClient({ cookies: () => cookieStore as any });
   const url = new URL(request.url);
   const clientSlug = url.searchParams.get("client") || DEFAULT_CLIENT;
 
@@ -641,8 +649,8 @@ export async function PUT(request: Request) {
 }
 
 export async function PATCH(request: Request) {
-  const cookieStore = await cookies();
-  const supabase = createRouteHandlerClient({ cookies: () => cookieStore });
+ const cookieStore = await cookies();
+ const supabase = createRouteHandlerClient({ cookies: () => cookieStore as any });
 
   try {
     const auth = await requireAuthProfile(supabase);
@@ -764,8 +772,8 @@ export async function PATCH(request: Request) {
 }
 
 export async function DELETE(request: Request) {
-  const cookieStore = await cookies();
-  const supabase = createRouteHandlerClient({ cookies: () => cookieStore });
+ const cookieStore = await cookies();
+ const supabase = createRouteHandlerClient({ cookies: () => cookieStore as any });
   const admin = supabaseAdmin();
   const { searchParams } = new URL(request.url);
   const id = searchParams.get("id");
@@ -822,3 +830,4 @@ export async function DELETE(request: Request) {
     return NextResponse.json({ error: msg }, { status: 500 });
   }
 }
+

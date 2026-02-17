@@ -17,10 +17,8 @@ type SupabaseAuthEvent =
   | 'MFA_CHALLENGE_FAILED';
 
 export async function POST(request: Request) {
-  const cookieStore = await cookies();
-  const supabase = createRouteHandlerClient({
-    cookies: () => cookieStore,
-  });
+ const cookieStore = await cookies();
+ const supabase = createRouteHandlerClient({ cookies: () => cookieStore as any });
   const {
     event,
     session,
@@ -49,3 +47,4 @@ export async function POST(request: Request) {
 
   return NextResponse.json({ ok: true });
 }
+

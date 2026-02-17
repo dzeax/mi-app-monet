@@ -344,7 +344,9 @@ function MultiSelect({
             {options.map((opt, idx) => (
               <label
                 key={opt.value}
-                ref={(el) => (itemRefs.current[idx] = el)}
+                ref={(el) => {
+                  itemRefs.current[idx] = el;
+                }}
                 className={`flex cursor-pointer items-center gap-2 px-3 py-2 text-sm hover:bg-[color:var(--color-surface-2)] ${activeIdx === idx ? "bg-[color:var(--color-surface-2)]" : ""}`}
               >
                 <input
@@ -1143,15 +1145,13 @@ export default function CrmDataQualityView() {
     }
     setVisibleCols(new Set(next));
     setColumnsReady(true);
-    if (COLVIS_STORAGE_KEY !== LEGACY_COLVIS_STORAGE_KEY) {
-      try {
-        window.localStorage.setItem(
-          COLVIS_STORAGE_KEY,
-          JSON.stringify(next),
-        );
-      } catch {
-        /* ignore storage errors */
-      }
+    try {
+      window.localStorage.setItem(
+        COLVIS_STORAGE_KEY,
+        JSON.stringify(next),
+      );
+    } catch {
+      /* ignore storage errors */
     }
   }, [authLoading, defaultVisible, validColumnIds, isEditor, isAdmin]);
 
@@ -1693,7 +1693,7 @@ export default function CrmDataQualityView() {
               .filter((p: PersonDirectoryItem) => Boolean(p.personId) && Boolean(p.displayName));
             setPeopleDirectory(people);
             setOwnerItems(
-              people.map((p) => ({
+              people.map((p: PersonDirectoryItem) => ({
                 id: p.personId,
                 label: p.displayName,
                 personId: p.personId,
@@ -2378,6 +2378,7 @@ export default function CrmDataQualityView() {
           personId: defaultContributionOwner?.personId ?? null,
           workHours: "",
           prepHours: "",
+          prepIsManual: false,
           workstream: DEFAULT_WORKSTREAM,
         },
       ]);

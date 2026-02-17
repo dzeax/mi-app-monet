@@ -384,7 +384,7 @@ export async function getBudgetExecutionData({
   let actualTotal = 0;
   let totalHours = 0;
   let totalDays = 0;
-  let lastDate: Date | null = null;
+  let lastDate: string | null = null;
   let unmappedTotal = 0;
 
   type ProductionMetric = { budget: number; hours: number; days: number; units: number };
@@ -593,7 +593,7 @@ export async function getBudgetExecutionData({
           ensureEntityRoleScopeSeries(entityKey, "unassigned", scopeKey)[idx] += amount;
         }
       }
-      if (!lastDate || d > lastDate) lastDate = d;
+      if (!lastDate || dateValue > lastDate) lastDate = dateValue;
     }
     return {
       personKey: resolvedPersonId ?? UNMAPPED_KEY,
@@ -845,6 +845,7 @@ export async function getBudgetExecutionData({
       : rateCurrencySet.size === 1
       ? Array.from(rateCurrencySet)[0]
       : "EUR";
+  const asOfDate = lastDate;
 
   return {
     year,
@@ -853,7 +854,7 @@ export async function getBudgetExecutionData({
     actualTotal,
     remaining,
     utilization,
-    asOfDate: lastDate ? lastDate.toISOString().slice(0, 10) : null,
+    asOfDate,
     monthlyActual,
     entityByPerson,
     entityPlan: entityPlanPayload,

@@ -13,8 +13,8 @@ const ALLOWED_ROLES = new Set(['admin', 'editor']);
 export const runtime = 'nodejs';
 
 async function createSupabaseRouteClient() {
-  const cookieStore = await cookies();
-  return createRouteHandlerClient({ cookies: () => cookieStore });
+ const cookieStore = await cookies();
+ return createRouteHandlerClient({ cookies: () => cookieStore as any });
 }
 
 async function ensureAuthorized() {
@@ -83,6 +83,7 @@ function buildDbPatch(patch: Partial<PlanningDraft>): PlanningDbPatch {
   if (patch.dsStatus !== undefined) raw.ds_status = patch.dsStatus ?? null;
   if (patch.dsLastSyncAt !== undefined) raw.ds_last_sync_at = patch.dsLastSyncAt ?? null;
   if (patch.dsError !== undefined) raw.ds_error = patch.dsError ?? null;
+  if (patch.reportingCampaignId !== undefined) raw.reporting_campaign_id = patch.reportingCampaignId ?? null;
   return mapPlanningPatch(raw);
 }
 
@@ -100,6 +101,26 @@ export async function PATCH(request: Request, context: { params: Promise<{ id: s
     }
 
     const dbPatch = buildDbPatch(patchInput);
+    if (patchInput.status !== undefined) {
+      const { data: current, error: currentError } = await admin
+        .from('campaign_planning')
+        .select('status, programmed_at')
+        .eq('id', id)
+        .maybeSingle();
+      if (currentError) {
+        return NextResponse.json({ error: currentError.message }, { status: 500 });
+      }
+      const currentStatus = String(current?.status ?? '');
+      const currentProgrammedAt = current?.programmed_at ?? null;
+      if (patchInput.status === 'Programmed') {
+        if (currentStatus !== 'Programmed' || !currentProgrammedAt) {
+          dbPatch.programmed_at = new Date().toISOString();
+        }
+      } else if (currentStatus === 'Programmed' || currentProgrammedAt) {
+        dbPatch.programmed_at = null;
+      }
+    }
+
     const { data, error } = await admin
       .from('campaign_planning')
       .update(dbPatch)

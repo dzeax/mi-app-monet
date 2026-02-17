@@ -200,8 +200,8 @@ const resolveContributionIdentity = (
 };
 
 export async function GET(request: Request) {
-  const cookieStore = await cookies();
-  const supabase = createRouteHandlerClient({ cookies: () => cookieStore });
+ const cookieStore = await cookies();
+ const supabase = createRouteHandlerClient({ cookies: () => cookieStore as any });
   const admin = supabaseAdmin();
   const {
     data: { session },
@@ -255,11 +255,20 @@ export async function GET(request: Request) {
       appStatus: row.app_status ?? null,
       appStatusUpdatedAt: row.app_status_updated_at ?? null,
       appStatusUpdatedBy: row.app_status_updated_by ?? null,
-      jiraAssignee: row.jira_assignee ?? null,
       createdAt: row.created_at,
       updatedAt: row.updated_at,
       contributions: [] as Contribution[],
       hasContributions: false,
+      needsEffort: null as {
+        state: string | null;
+        dismissReason: string | null;
+        dismissedAt: string | null;
+        dismissedBy: string | null;
+        clearedAt: string | null;
+        clearedBy: string | null;
+        lastDetectedAt: string | null;
+        lastDetectedStatus: string | null;
+      } | null,
     }));
 
     const ids = tickets.map((t) => t.id);
@@ -373,8 +382,8 @@ export async function GET(request: Request) {
 }
 
 export async function POST(request: Request) {
-  const cookieStore = await cookies();
-  const supabase = createRouteHandlerClient({ cookies: () => cookieStore });
+ const cookieStore = await cookies();
+ const supabase = createRouteHandlerClient({ cookies: () => cookieStore as any });
 
   try {
     const body = await request.json();
@@ -516,8 +525,8 @@ export async function POST(request: Request) {
 }
 
 export async function PUT(request: Request) {
-  const cookieStore = await cookies();
-  const supabase = createRouteHandlerClient({ cookies: () => cookieStore });
+ const cookieStore = await cookies();
+ const supabase = createRouteHandlerClient({ cookies: () => cookieStore as any });
   const url = new URL(request.url);
   const clientSlug = url.searchParams.get("client") || DEFAULT_CLIENT;
 
@@ -619,8 +628,8 @@ export async function PUT(request: Request) {
 }
 
 export async function PATCH(request: Request) {
-  const cookieStore = await cookies();
-  const supabase = createRouteHandlerClient({ cookies: () => cookieStore });
+ const cookieStore = await cookies();
+ const supabase = createRouteHandlerClient({ cookies: () => cookieStore as any });
 
   try {
     const body = await request.json();
@@ -689,9 +698,16 @@ export async function PATCH(request: Request) {
       updatePayload.app_status_updated_by = userId;
     }
 
+    const { error: upsertError } = await supabase
+      .from("crm_data_quality_tickets")
+      .upsert(updatePayload, { onConflict: "client_slug,ticket_id" });
+
+    if (upsertError) {
+      return NextResponse.json({ error: upsertError.message || "Update failed" }, { status: 500 });
+    }
+
     const { data, error } = await supabase
       .from("crm_data_quality_tickets")
-      .upsert(updatePayload, { onConflict: "client_slug,ticket_id" })
       .select("*")
       .eq("ticket_id", ticketId)
       .eq("client_slug", clientSlug)
@@ -783,8 +799,8 @@ export async function PATCH(request: Request) {
 }
 
 export async function DELETE(request: Request) {
-  const cookieStore = await cookies();
-  const supabase = createRouteHandlerClient({ cookies: () => cookieStore });
+ const cookieStore = await cookies();
+ const supabase = createRouteHandlerClient({ cookies: () => cookieStore as any });
   const { searchParams } = new URL(request.url);
   const clientSlug = searchParams.get("client") || DEFAULT_CLIENT;
   const ticketId = (searchParams.get("ticketId") || "").trim();
@@ -821,3 +837,4 @@ export async function DELETE(request: Request) {
     return NextResponse.json({ error: msg }, { status: 500 });
   }
 }
+

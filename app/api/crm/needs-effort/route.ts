@@ -29,8 +29,8 @@ const ActionPayloadZ = z
   });
 
 async function ensureAdmin() {
-  const cookieStore = await cookies();
-  const supabase = createRouteHandlerClient({ cookies: () => cookieStore });
+ const cookieStore = await cookies();
+ const supabase = createRouteHandlerClient({ cookies: () => cookieStore as any });
 
   const { data: userData, error: userError } = await supabase.auth.getUser();
   if (userError) {
@@ -154,4 +154,5 @@ export async function PATCH(request: Request) {
     return NextResponse.json({ error: message }, { status: 500 });
   }
 }
+
 

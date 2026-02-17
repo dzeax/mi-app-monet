@@ -376,9 +376,11 @@ const workloadChartPalette: WorkloadChartColor[] = [
   { bar: 'bg-indigo-500', dot: 'bg-indigo-500' },
 ];
 
-const workloadChartOtherColor: WorkloadChartColor = {
+const workloadChartOtherColor: WorkloadClientColor = {
   bar: 'bg-slate-300 dark:bg-slate-600',
   dot: 'bg-slate-400 dark:bg-slate-500',
+  chip: 'bg-slate-100 text-slate-700 dark:bg-slate-800/40 dark:text-slate-200',
+  border: 'border-slate-200/70 dark:border-slate-700/60',
 };
 
 const CLIENT_LOGOS: Record<string, ClientLogo> = {
@@ -1104,7 +1106,13 @@ export default function TeamCapacityPage() {
     return sorted.find((holiday) => holiday.date >= todayKey) ?? sorted[0] ?? null;
   }, [holidaysForCalendar]);
 
-  const timeOffStats = useMemo(() => {
+  const timeOffStats = useMemo<{
+    total: number;
+    vacation: number;
+    sick: number;
+    other: number;
+    nextEntry: TimeOffEntry | null;
+  }>(() => {
     const counts = { total: 0, vacation: 0, sick: 0, other: 0 };
     const todayKey = toDateInput(new Date());
     let nextEntry: TimeOffEntry | null = null;

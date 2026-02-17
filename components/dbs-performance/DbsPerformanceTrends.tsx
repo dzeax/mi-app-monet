@@ -53,7 +53,7 @@ const METRIC_OPTIONS: KpiKey[] = ['turnover', 'margin', 'marginPct', 'vSent', 'e
 
 export default function DbsPerformanceTrends({ trend, metric, onMetricChange, loading = false }: Props) {
   const chartData = useMemo<ChartDatum[]>(() => {
-    const base = trend.points.map((point, index) => ({
+    const base: ChartDatum[] = trend.points.map((point, index): ChartDatum => ({
       key: point.key || `${index}`,
       label: point.label,
       current: toNumber(point.current[metric] as number | null | undefined),

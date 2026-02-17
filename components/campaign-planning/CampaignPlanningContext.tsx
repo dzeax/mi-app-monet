@@ -120,7 +120,9 @@ export function CampaignPlanningProvider({ children }: CampaignPlanningProviderP
       const original = itemsRef.current.find((entry) => entry.id === id);
       if (!original) return;
       const { id: _ignoredId, createdAt: _ignoredCreatedAt, updatedAt: _ignoredUpdatedAt, ...rest } = original;
-      void (_ignoredId, _ignoredCreatedAt, _ignoredUpdatedAt);
+      void _ignoredId;
+      void _ignoredCreatedAt;
+      void _ignoredUpdatedAt;
       const draft: PlanningDraft = {
         ...rest,
         status: 'Planning',
@@ -130,6 +132,7 @@ export function CampaignPlanningProvider({ children }: CampaignPlanningProviderP
         dsStatus: null,
         dsLastSyncAt: null,
         dsError: null,
+        reportingCampaignId: null,
       };
       await addItem(draft);
     },

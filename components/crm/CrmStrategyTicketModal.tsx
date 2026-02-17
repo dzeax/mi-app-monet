@@ -162,10 +162,8 @@ export default function CrmStrategyTicketModal({
     const el = createdDateInputRef.current;
     if (!el) return;
     el.focus();
-    // @ts-expect-error showPicker is not yet in lib.dom.d.ts everywhere
     if (typeof el.showPicker === "function") {
       try {
-        // @ts-expect-error showPicker is not yet in lib.dom.d.ts everywhere
         el.showPicker();
       } catch {
         el.click();
@@ -179,10 +177,8 @@ export default function CrmStrategyTicketModal({
     const el = dueDateInputRef.current;
     if (!el) return;
     el.focus();
-    // @ts-expect-error showPicker is not yet in lib.dom.d.ts everywhere
     if (typeof el.showPicker === "function") {
       try {
-        // @ts-expect-error showPicker is not yet in lib.dom.d.ts everywhere
         el.showPicker();
       } catch {
         el.click();
@@ -196,10 +192,8 @@ export default function CrmStrategyTicketModal({
     const el = effortDateInputRefs.current[idx];
     if (!el) return;
     el.focus();
-    // @ts-expect-error showPicker is not yet in lib.dom.d.ts everywhere
     if (typeof el.showPicker === "function") {
       try {
-        // @ts-expect-error showPicker is not yet in lib.dom.d.ts everywhere
         el.showPicker();
       } catch {
         if (!fromInputClick) el.click();

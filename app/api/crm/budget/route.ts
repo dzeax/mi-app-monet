@@ -33,8 +33,8 @@ const fetchPaged = async <T,>(buildQuery: (from: number, to: number) => any) => 
 export const runtime = "nodejs";
 
 export async function GET(request: Request) {
-  const cookieStore = await cookies();
-  const supabase = createRouteHandlerClient({ cookies: () => cookieStore });
+ const cookieStore = await cookies();
+ const supabase = createRouteHandlerClient({ cookies: () => cookieStore as any });
 
   const { data: userData, error: userError } = await supabase.auth.getUser();
   const user = userData.user;
@@ -303,3 +303,4 @@ export async function GET(request: Request) {
     return NextResponse.json({ error: msg }, { status: 500 });
   }
 }
+

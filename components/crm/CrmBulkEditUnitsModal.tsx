@@ -59,10 +59,8 @@ export default function CrmBulkEditUnitsModal({
     const el = sendDateInputRef.current;
     if (!el) return;
     el.focus();
-    // @ts-expect-error showPicker is not yet in lib.dom.d.ts everywhere
     if (typeof el.showPicker === "function") {
       try {
-        // @ts-expect-error showPicker is not yet in lib.dom.d.ts everywhere
         el.showPicker();
       } catch {
         el.click();

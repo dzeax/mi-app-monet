@@ -12,8 +12,8 @@ type HttpError = Error & { status?: number };
 export const runtime = 'nodejs';
 
 async function createSupabaseRouteClient() {
-  const cookieStore = await cookies();
-  return createRouteHandlerClient({ cookies: () => cookieStore });
+ const cookieStore = await cookies();
+ return createRouteHandlerClient({ cookies: () => cookieStore as any });
 }
 
 async function ensureAuthorized() {
@@ -99,3 +99,4 @@ export async function DELETE(_request: Request, { params }: { params: { id: stri
     return NextResponse.json({ error: message }, { status });
   }
 }
+

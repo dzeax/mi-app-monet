@@ -1,7 +1,7 @@
 /* eslint-disable react-hooks/exhaustive-deps */
 'use client';
 
-import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import { format } from 'date-fns';
 
 import { useCatalogOverrides } from '@/context/CatalogOverridesContext';
@@ -251,7 +251,7 @@ export default function DatabaseRoutingView() {
     } finally {
       setSaving(false);
     }
-  }, [selectedDatabase, loadingConfig, saving, isDirty, formState, baselineForm, selectedDatabaseName]);
+  }, [selectedDatabase, loadingConfig, saving, isDirty, formState, baselineForm]);
 
   useEffect(() => {
     const handleShortcut = (event: KeyboardEvent) => {

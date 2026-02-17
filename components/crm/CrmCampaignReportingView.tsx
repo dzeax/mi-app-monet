@@ -258,7 +258,9 @@ function MultiSelect({
             {options.map((opt, idx) => (
               <label
                 key={opt.value}
-                ref={(el) => (itemRefs.current[idx] = el)}
+                ref={(el) => {
+                  itemRefs.current[idx] = el;
+                }}
                 className={`flex cursor-pointer items-center gap-2 px-3 py-2 text-sm hover:bg-[color:var(--color-surface-2)] ${activeIdx === idx ? "bg-[color:var(--color-surface-2)]" : ""}`}
               >
                 <input
@@ -417,6 +419,10 @@ export default function CrmCampaignReportingView() {
   const defaultVisible = useMemo(
     () => columnOptions.map((c) => c.id),
     [columnOptions],
+  );
+  const defaultVisibleSet = useMemo(
+    () => new Set(defaultVisible as readonly string[]),
+    [defaultVisible],
   );
   const [showColumnPicker, setShowColumnPicker] = useState(false);
   const [visibleCols, setVisibleCols] = useState<Set<string>>(
@@ -755,18 +761,18 @@ export default function CrmCampaignReportingView() {
       ? localStorage.getItem(COLVIS_STORAGE_KEY)
       : null;
     if (!raw) return;
-    try {
-      const parsed = JSON.parse(raw);
-      if (Array.isArray(parsed) && parsed.length > 0) {
-        const valid = parsed.filter((id: unknown) =>
-          typeof id === "string" && defaultVisible.includes(id),
-        );
-        if (valid.length > 0) setVisibleCols(new Set(valid));
+      try {
+        const parsed = JSON.parse(raw);
+        if (Array.isArray(parsed) && parsed.length > 0) {
+          const valid = parsed.filter((id: unknown) =>
+            typeof id === "string" && defaultVisibleSet.has(id),
+          );
+          if (valid.length > 0) setVisibleCols(new Set(valid));
+        }
+      } catch {
+        /* ignore */
       }
-    } catch {
-      /* ignore */
-    }
-  }, [COLVIS_STORAGE_KEY, defaultVisible]);
+  }, [COLVIS_STORAGE_KEY, defaultVisibleSet]);
 
   useEffect(() => {
     if (typeof window === "undefined") return;

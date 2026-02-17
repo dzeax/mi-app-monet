@@ -7,6 +7,7 @@ import type { CampaignStatus } from '@/components/campaign-planning/types';
 export type PlanningFilters = {
   statuses: CampaignStatus[];
   databases: string[];
+  onlyPendingPerformance: boolean;
 };
 
 type Props = {
@@ -27,12 +28,20 @@ export default function CampaignPlanningFiltersBar({ filters, onChange, availabl
   const [dbMenuOpen, setDbMenuOpen] = useState(false);
   const menuRef = useRef<HTMLDivElement | null>(null);
 
-  const hasActive = filters.databases.length + filters.statuses.length > 0;
+  const hasActive =
+    filters.databases.length + filters.statuses.length > 0 || filters.onlyPendingPerformance;
 
-  const handleToggle = <K extends keyof PlanningFilters>(key: K, value: PlanningFilters[K][number]) => {
+  const handleToggleStatus = (status: CampaignStatus) => {
     onChange({
       ...filters,
-      [key]: toggle(filters[key], value),
+      statuses: toggle(filters.statuses, status),
+    });
+  };
+
+  const handleToggleDatabase = (database: string) => {
+    onChange({
+      ...filters,
+      databases: toggle(filters.databases, database),
     });
   };
 
@@ -130,7 +139,7 @@ export default function CampaignPlanningFiltersBar({ filters, onChange, availabl
                             type="checkbox"
                             className="accent-[color:var(--color-primary)]"
                             checked={active}
-                            onChange={() => handleToggle('databases', db)}
+                            onChange={() => handleToggleDatabase(db)}
                           />
                         </label>
                       );
@@ -154,7 +163,7 @@ export default function CampaignPlanningFiltersBar({ filters, onChange, availabl
                   <button
                     key={status}
                     type="button"
-                    onClick={() => handleToggle('statuses', status)}
+                    onClick={() => handleToggleStatus(status)}
                     className={[
                       'px-3 py-1 rounded-full text-xs font-semibold transition whitespace-nowrap',
                       active
@@ -166,6 +175,23 @@ export default function CampaignPlanningFiltersBar({ filters, onChange, availabl
                   </button>
                 );
               })}
+              <button
+                type="button"
+                onClick={() =>
+                  onChange({
+                    ...filters,
+                    onlyPendingPerformance: !filters.onlyPendingPerformance,
+                  })
+                }
+                className={[
+                  'px-3 py-1 rounded-full text-xs font-semibold transition whitespace-nowrap',
+                  filters.onlyPendingPerformance
+                    ? 'bg-amber-500 text-white shadow-sm'
+                    : 'bg-amber-100 text-amber-700 hover:bg-amber-200',
+                ].join(' ')}
+              >
+                Only pending performance
+              </button>
             </div>
           </div>
         </div>
@@ -206,6 +232,22 @@ export default function CampaignPlanningFiltersBar({ filters, onChange, availabl
               <span aria-hidden>×</span>
             </button>
           ))}
+          {filters.onlyPendingPerformance ? (
+            <button
+              type="button"
+              onClick={() =>
+                onChange({
+                  ...filters,
+                  onlyPendingPerformance: false,
+                })
+              }
+              className="inline-flex items-center gap-1 rounded-full bg-white px-2.5 py-1 text-xs font-semibold text-[color:var(--color-text)] shadow-sm"
+            >
+              <span>Pending:</span>
+              Only pending performance
+              <span aria-hidden>x</span>
+            </button>
+          ) : null}
         </div>
       ) : null}
     </section>

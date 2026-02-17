@@ -359,9 +359,7 @@ export default function CreateCampaignModal({
   const watchMargin = watch('margin');
   const watchMarginPct = watch('marginPct');
   const watchEcpm = watch('ecpm');
-  const marginPctValue = Number.isFinite(watchMarginPct)
-    ? watchMarginPct
-    : Number(watchMarginPct) || 0;
+  const marginPctValue = Number(watchMarginPct ?? 0) || 0;
   const marginBadgeClass =
     marginPctValue >= 0.6
       ? 'bg-emerald-100 text-emerald-700'

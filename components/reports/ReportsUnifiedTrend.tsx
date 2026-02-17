@@ -18,10 +18,8 @@ import {
   Tooltip,
   LabelList,
 } from 'recharts';
-import type { NameType, ValueType } from 'recharts/types/component/DefaultTooltipContent';
-import type { TooltipProps } from 'recharts';
+import type { ValueType } from 'recharts/types/component/DefaultTooltipContent';
 import type { LabelProps } from 'recharts';
-import type { AxisDomain } from 'recharts/types/util/types';
 
 type TrendMetric = 'ecpm' | 'turnover' | 'margin' | 'marginPct' | 'routingCosts' | 'vSent';
 type GroupBy = 'none' | 'database' | 'partner' | 'geo' | 'type' | 'databaseType';
@@ -102,13 +100,27 @@ const formatAxisTick = (metric: TrendMetric, value: number) => {
   return formatCurrencyCompact(value);
 };
 
-type CompactTooltipProps = TooltipProps<ValueType, NameType> & { metric: TrendMetric };
+type CompactTooltipEntry = {
+  dataKey?: string | number;
+  name?: string | number;
+  color?: string;
+  value?: ValueType | number | null;
+};
+
+type CompactTooltipProps = {
+  active?: boolean;
+  payload?: CompactTooltipEntry[];
+  label?: string | number;
+  metric: TrendMetric;
+};
 
 function CompactTooltip({ active, payload, label, metric }: CompactTooltipProps) {
   if (!active || !payload || payload.length === 0) return null;
 
   const sortedItems = payload
-    .filter((entry) => entry != null && entry.value != null && normalizeValue(entry.value) !== 0)
+    .filter((entry): entry is CompactTooltipEntry & { value: ValueType | number } => (
+      entry != null && entry.value != null && normalizeValue(entry.value) !== 0
+    ))
     .sort((a, b) => normalizeValue(b.value) - normalizeValue(a.value));
 
   if (sortedItems.length === 0) return null;
@@ -204,10 +216,10 @@ export default function ReportsUnifiedTrend({
   }, [focusKey]);
 
   const handleChartMouseMove = useCallback(
-    (state: { activePayload?: Array<{ dataKey?: string | number; value?: ValueType }> } | undefined) => {
+    (state: any) => {
       if (legendHoveringRef.current) return;
-      const payload = state?.activePayload;
-      if (!payload || payload.length === 0) {
+      const payload = (state?.activePayload ?? []) as CompactTooltipEntry[];
+      if (payload.length === 0) {
         setHoveredKey(focusKey ?? null);
         return;
       }
@@ -257,9 +269,10 @@ export default function ReportsUnifiedTrend({
     };
   }, [data, visibleKeys]);
 
-  const yAxisDomain = useMemo<[AxisDomain, AxisDomain]>(() => (
-    yStats ? yStats.domain : ['auto', 'auto']
-  ), [yStats]);
+  const yAxisDomain = useMemo(
+    () => (yStats ? yStats.domain : (['auto', 'auto'] as const)),
+    [yStats],
+  );
 
   const endLabelMeta = useMemo(() => {
     const map = new Map<string, { text: string; offset: number }>();
@@ -457,12 +470,13 @@ export default function ReportsUnifiedTrend({
 function renderEndLabel(props: LabelProps, meta: { map: Map<string, { text: string; offset: number }>; lastIndex: number }) {
   const { map, lastIndex } = meta;
   if (props.index !== lastIndex) return null;
-  const key = props.dataKey != null ? String(props.dataKey) : '';
+  const resolvedProps = props as LabelProps & { dataKey?: string | number };
+  const key = resolvedProps.dataKey != null ? String(resolvedProps.dataKey) : '';
   if (!key) return null;
   const entry = map.get(key);
   if (!entry) return null;
-  const x = (props.x ?? 0) + 8;
-  const y = (props.y ?? 0) + entry.offset;
+  const x = Number(props.x ?? 0) + 8;
+  const y = Number(props.y ?? 0) + entry.offset;
   const color = colorFor(key);
 
   return (

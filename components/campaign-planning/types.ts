@@ -46,6 +46,8 @@ export type PlanningItem = {
   dsStatus?: string | null;
   dsLastSyncAt?: string | null;
   dsError?: string | null;
+  reportingCampaignId?: string | null;
+  programmedAt?: string | null;
   createdAt: string;
   updatedAt: string;
 };
@@ -74,6 +76,7 @@ export type PlanningDraft = {
   dsStatus?: string | null;
   dsLastSyncAt?: string | null;
   dsError?: string | null;
+  reportingCampaignId?: string | null;
 };
 
 export type CampaignPlanningContextValue = {

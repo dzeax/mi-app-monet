@@ -25,6 +25,8 @@ export type PlanningDbRow = {
   ds_status: string | null;
   ds_last_sync_at: string | null;
   ds_error: string | null;
+  reporting_campaign_id: string | null;
+  programmed_at: string | null;
   created_by: string | null;
   created_at: string;
   updated_at: string;
@@ -55,6 +57,8 @@ export type PlanningDbInsert = {
   ds_status?: string | null;
   ds_last_sync_at?: string | null;
   ds_error?: string | null;
+  reporting_campaign_id?: string | null;
+  programmed_at?: string | null;
   created_by?: string | null;
 };
 
@@ -91,6 +95,8 @@ export function mapPlanningFromDb(row: PlanningDbRow): PlanningItem {
     dsStatus: row.ds_status,
     dsLastSyncAt: row.ds_last_sync_at,
     dsError: row.ds_error,
+    reportingCampaignId: row.reporting_campaign_id,
+    programmedAt: row.programmed_at,
     createdAt: row.created_at,
     updatedAt: row.updated_at,
   };
@@ -122,6 +128,8 @@ export function mapPlanningToInsert(payload: PlanningItem | Omit<PlanningItem, '
     ds_status: payload.dsStatus ?? null,
     ds_last_sync_at: payload.dsLastSyncAt ?? null,
     ds_error: payload.dsError ?? null,
+    reporting_campaign_id: payload.reportingCampaignId ?? null,
+    programmed_at: payload.programmedAt ?? null,
     created_by: userId ?? null,
   };
 }
@@ -151,5 +159,7 @@ export function mapPlanningPatch(patch: PlanningDbPatch): PlanningDbPatch {
   if (patch.ds_status !== undefined) normalised.ds_status = patch.ds_status ?? null;
   if (patch.ds_last_sync_at !== undefined) normalised.ds_last_sync_at = patch.ds_last_sync_at ?? null;
   if (patch.ds_error !== undefined) normalised.ds_error = patch.ds_error ?? null;
+  if (patch.reporting_campaign_id !== undefined) normalised.reporting_campaign_id = patch.reporting_campaign_id ?? null;
+  if (patch.programmed_at !== undefined) normalised.programmed_at = patch.programmed_at ?? null;
   return normalised;
 }

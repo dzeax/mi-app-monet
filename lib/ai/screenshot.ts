@@ -2,7 +2,7 @@ import { existsSync } from 'node:fs';
 import { join } from 'node:path';
 
 import chromium from '@sparticuz/chromium';
-import type { Browser, PuppeteerLaunchOptions } from 'puppeteer-core';
+import type { Browser, LaunchOptions } from 'puppeteer-core';
 import puppeteerCore from 'puppeteer-core';
 
 type PuppeteerModule = typeof import('puppeteer');
@@ -96,7 +96,7 @@ async function launchLocalChrome(): Promise<Browser | null> {
 
     const executablePath = resolveLocalChromeExecutable() ?? resolveBundledChromiumExecutable(puppeteer) ?? undefined;
 
-    const launchOptions: PuppeteerLaunchOptions = {
+    const launchOptions: LaunchOptions = {
       headless: true,
       defaultViewport: {
         width: VIEWPORT_WIDTH,
@@ -125,7 +125,7 @@ async function launchBrowser(): Promise<Browser | null> {
       return null;
     }
 
-    const launchOptions: PuppeteerLaunchOptions = {
+    const launchOptions: LaunchOptions = {
       args: chromium.args,
       defaultViewport: {
         width: VIEWPORT_WIDTH,
@@ -133,7 +133,7 @@ async function launchBrowser(): Promise<Browser | null> {
         deviceScaleFactor: 1,
       },
       executablePath,
-      headless: chromium.headless,
+      headless: true,
     };
 
     return await puppeteerCore.launch(launchOptions);
@@ -174,7 +174,7 @@ export async function captureEmailScreenshot(html: string): Promise<string | nul
     try {
       await page.waitForNetworkIdle({ idleTime: 500, timeout: 5000 });
     } catch {
-      await page.waitForTimeout(500);
+      await new Promise((resolve) => setTimeout(resolve, 500));
     }
 
     const { contentHeight } = await page.evaluate(() => {
@@ -225,7 +225,7 @@ export async function captureEmailScreenshot(html: string): Promise<string | nul
     });
 
     await page.close();
-    return typeof screenshot === 'string' ? screenshot : screenshot.toString('base64');
+    return screenshot;
   } catch (error) {
     console.warn('[ai:screenshot] Failed to capture HTML preview', error);
     return null;

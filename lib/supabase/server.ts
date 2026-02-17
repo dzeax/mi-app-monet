@@ -2,7 +2,8 @@ import { cookies } from 'next/headers';
 import { createServerComponentClient } from '@supabase/auth-helpers-nextjs';
 
 export async function createServerSupabase() {
-  const store = await cookies();
   // Next 15: evitar uso sincrono de cookies()
-  return createServerComponentClient({ cookies: () => store });
+ const cookieStore = await cookies();
+ return createServerComponentClient({ cookies: () => cookieStore as any });
 }
+

@@ -4,7 +4,9 @@ import { escapeXml, decodeXmlEntities } from '@/lib/doctorsender/utils';
 import { writeDoctorSenderDebugFile } from '@/lib/doctorsender/debug';
 
 type SoapPrimitive = string | number | boolean | null | undefined;
-type SoapValue = SoapPrimitive | SoapPrimitive[] | Record<string, SoapPrimitive>;
+type SoapObject = Record<string, SoapPrimitive>;
+type SoapArrayItem = SoapPrimitive | SoapObject;
+type SoapValue = SoapPrimitive | SoapArrayItem[] | SoapObject;
 
 function serializePrimitive(value: SoapPrimitive) {
   if (value === null || value === undefined) {
@@ -25,11 +27,13 @@ function serializePrimitive(value: SoapPrimitive) {
   return `<item xsi:type="xsd:string">${escapeXml(String(value))}</item>`;
 }
 
-function serializeArray(values: SoapPrimitive[]) {
-  const allObjects = values.every((value) => value && typeof value === 'object' && !Array.isArray(value));
+function serializeArray(values: SoapArrayItem[]) {
+  const allObjects = values.every(
+    (value): value is SoapObject => value !== null && typeof value === 'object' && !Array.isArray(value),
+  );
 
   if (allObjects) {
-    const items = (values as Record<string, SoapPrimitive>[])
+    const items = values
       .map((obj) => {
         const entries = Object.entries(obj ?? {})
           .map(([key, val]) => {

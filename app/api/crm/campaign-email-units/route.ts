@@ -141,6 +141,15 @@ type CampaignUnitInsert = {
   created_by?: string;
 };
 
+type CampaignUnitRow = CampaignUnitInsert & {
+  id?: string;
+  hours_total?: number | null;
+  days_total?: number | null;
+  budget_eur?: number | null;
+  created_at?: string | null;
+  updated_at?: string | null;
+};
+
 const sumHours = (rule: EffortRule) =>
   (rule.hours_master_template ?? 0) +
   (rule.hours_translations ?? 0) +
@@ -183,8 +192,8 @@ const ruleMatches = (
 };
 
 export async function GET(request: Request) {
-  const cookieStore = await cookies();
-  const supabase = createRouteHandlerClient({ cookies: () => cookieStore });
+ const cookieStore = await cookies();
+ const supabase = createRouteHandlerClient({ cookies: () => cookieStore as any });
   const { searchParams } = new URL(request.url);
   const client = searchParams.get("client") || DEFAULT_CLIENT;
   const from = normalizeDate(searchParams.get("from"));
@@ -200,7 +209,7 @@ export async function GET(request: Request) {
     // Pagination loop to bypass PostgREST row limits
     const chunkSize = 1000;
     let offset = 0;
-    const all: CampaignUnitInsert[] = [];
+    const all: CampaignUnitRow[] = [];
 
     const buildBase = () => {
       let q = supabase
@@ -222,7 +231,7 @@ export async function GET(request: Request) {
     while (true) {
       const { data, error } = await buildBase().range(offset, offset + chunkSize - 1);
       if (error) return NextResponse.json({ error: error.message }, { status: 500 });
-      const batch = data ?? [];
+      const batch = (data ?? []) as CampaignUnitRow[];
       all.push(...batch);
       if (batch.length < chunkSize) break;
       offset += chunkSize;
@@ -269,8 +278,8 @@ export async function GET(request: Request) {
 }
 
 export async function POST(request: Request) {
-  const cookieStore = await cookies();
-  const supabase = createRouteHandlerClient({ cookies: () => cookieStore });
+ const cookieStore = await cookies();
+ const supabase = createRouteHandlerClient({ cookies: () => cookieStore as any });
 
     const fetchEffortRules = async (clientSlug: string): Promise<EffortRule[]> => {
       const { data, error } = await supabase
@@ -284,13 +293,13 @@ export async function POST(request: Request) {
       console.error("Failed to load effort rules", error.message);
       return [];
     }
-    return (data ?? []).map((r: Record<string, unknown>) => ({
-      id: r.id,
+    return (data ?? []).map((r: Record<string, unknown>): EffortRule => ({
+      id: typeof r.id === "string" ? r.id : undefined,
       priority: Number(r.priority ?? 100),
-      brand: r.brand ?? null,
-      scope: r.scope ?? null,
-      touchpoint: r.touchpoint ?? null,
-      markets: Array.isArray(r.markets) ? r.markets : toList(r.markets),
+      brand: typeof r.brand === "string" ? r.brand : null,
+      scope: typeof r.scope === "string" ? r.scope : null,
+      touchpoint: typeof r.touchpoint === "string" ? r.touchpoint : null,
+      markets: Array.isArray(r.markets) ? r.markets.map((value) => String(value)) : toList(r.markets),
       hours_master_template: Number(r.hours_master_template ?? 0),
       hours_translations: Number(r.hours_translations ?? 0),
       hours_copywriting: Number(r.hours_copywriting ?? 0),
@@ -298,7 +307,7 @@ export async function POST(request: Request) {
       hours_revisions: Number(r.hours_revisions ?? 0),
       hours_build: Number(r.hours_build ?? 0),
       hours_prep: Number(r.hours_prep ?? 0),
-      active: r.active ?? true,
+      active: typeof r.active === "boolean" ? r.active : true,
     }));
   };
 
@@ -464,8 +473,8 @@ export async function POST(request: Request) {
 }
 
 export async function PUT(request: Request) {
-  const cookieStore = await cookies();
-  const supabase = createRouteHandlerClient({ cookies: () => cookieStore });
+ const cookieStore = await cookies();
+ const supabase = createRouteHandlerClient({ cookies: () => cookieStore as any });
   const url = new URL(request.url);
   const clientSlug = url.searchParams.get("client") || DEFAULT_CLIENT;
 
@@ -527,11 +536,11 @@ export async function PUT(request: Request) {
         year,
         campaign_name: campaignName,
         brand,
-        send_date: sendDate,
+        send_date: sendDate ?? "",
         market,
         scope,
         segment: r.segment ? String(r.segment).trim() : null,
-        touchpoint: touchpoint || null,
+        touchpoint: touchpoint || "",
         variant,
         owner,
         jira_ticket: jira,
@@ -615,8 +624,8 @@ export async function PUT(request: Request) {
 }
 
 export async function DELETE(request: Request) {
-  const cookieStore = await cookies();
-  const supabase = createRouteHandlerClient({ cookies: () => cookieStore });
+ const cookieStore = await cookies();
+ const supabase = createRouteHandlerClient({ cookies: () => cookieStore as any });
 
   try {
     const body = await request.json().catch(() => null);
@@ -643,8 +652,8 @@ export async function DELETE(request: Request) {
 }
 
 export async function PATCH(request: Request) {
-  const cookieStore = await cookies();
-  const supabase = createRouteHandlerClient({ cookies: () => cookieStore });
+ const cookieStore = await cookies();
+ const supabase = createRouteHandlerClient({ cookies: () => cookieStore as any });
 
   try {
     const body = await request.json().catch(() => null);
@@ -689,3 +698,4 @@ export async function PATCH(request: Request) {
     return NextResponse.json({ error: msg }, { status: 500 });
   }
 }
+

@@ -5,7 +5,7 @@ import MiniModal from "@/components/ui/MiniModal";
 import { showError, showSuccess } from "@/utils/toast";
 
 type Rule = {
-  id: string;
+  id?: string;
   priority: number;
   brand: string;
   scope: string;
@@ -406,14 +406,14 @@ export default function CrmEffortRulesModal({ clientSlug, onClose }: Props) {
         });
         throw new Error(body?.error || `Failed (${res.status})`);
       }
-      setRuleNotices((prev) => ({ ...prev, [key]: { type: "success", text: "Saved" } }));
+      setRuleNotices((prev) => ({ ...prev, [key]: { type: "success" as const, text: "Saved" } }));
       showSuccess("Effort rule saved");
       await fetchRules();
     } catch (err) {
       console.error("Effort rules save error", err);
       const msg = err instanceof Error ? err.message : "Unable to save rules";
       showError(msg);
-      setRuleNotices((prev) => ({ ...prev, [key]: { type: "error", text: msg } }));
+      setRuleNotices((prev) => ({ ...prev, [key]: { type: "error" as const, text: msg } }));
     } finally {
       setSavingRuleId(null);
     }

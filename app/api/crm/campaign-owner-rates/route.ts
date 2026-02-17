@@ -12,8 +12,8 @@ const parseYear = (value: string | null) => {
 };
 
 export async function GET(request: Request) {
-  const cookieStore = await cookies();
-  const supabase = createRouteHandlerClient({ cookies: () => cookieStore });
+ const cookieStore = await cookies();
+ const supabase = createRouteHandlerClient({ cookies: () => cookieStore as any });
   const { searchParams } = new URL(request.url);
   const client = searchParams.get("client") || DEFAULT_CLIENT;
   const year = parseYear(searchParams.get("year"));
@@ -35,3 +35,4 @@ export async function GET(request: Request) {
     }, {}) ?? {};
   return NextResponse.json({ rates });
 }
+

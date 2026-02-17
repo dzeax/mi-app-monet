@@ -4,8 +4,8 @@ import { createServerComponentClient } from '@supabase/auth-helpers-nextjs';
 type AppUserRow = { role: 'admin' | 'editor'; is_active: boolean } | null;
 
 export async function getUserAndAppUser() {
-  const store = await cookies();
-  const supabase = createServerComponentClient({ cookies: () => store });
+ const cookieStore = await cookies();
+ const supabase = createServerComponentClient({ cookies: () => cookieStore as any });
   const { data: userData, error: userError } = await supabase.auth.getUser();
   const user = userData?.user ?? null;
 
@@ -28,3 +28,4 @@ export async function getUserAndAppUser() {
 
   return { user, appUser };
 }
+

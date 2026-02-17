@@ -126,7 +126,10 @@ function MultiSelectDropdown({
     // Use capture so we still get the event even if the modal stops propagation on mousedown.
     // Prefer pointer events when available.
     const opts: AddEventListenerOptions = { capture: true };
-    if (typeof window !== "undefined" && "PointerEvent" in window) {
+    const supportsPointer =
+      typeof window !== "undefined" &&
+      typeof window.PointerEvent !== "undefined";
+    if (supportsPointer) {
       window.addEventListener("pointerdown", handler, opts);
       return () => {
         window.removeEventListener("pointerdown", handler, opts);
@@ -343,7 +346,9 @@ export default function CrmGenerateUnitsModal({ clientSlug, onClose }: Props) {
           const labels = bodyPeople.people
             .map((p: { displayName?: string | null }) => String(p?.displayName ?? "").trim())
             .filter(Boolean);
-          setOwnersCatalog(Array.from(new Set(labels)).sort((a, b) => a.localeCompare(b)));
+          setOwnersCatalog(
+            Array.from(new Set<string>(labels)).sort((a, b) => a.localeCompare(b)),
+          );
           return;
         }
 
@@ -353,7 +358,9 @@ export default function CrmGenerateUnitsModal({ clientSlug, onClose }: Props) {
 
         if (res.ok && Array.isArray(ownersFromRates) && ownersFromRates.length > 0 && active) {
           const labels = ownersFromRates.map((o: string) => String(o ?? "").trim()).filter(Boolean);
-          setOwnersCatalog(Array.from(new Set(labels)).sort((a, b) => a.localeCompare(b)));
+          setOwnersCatalog(
+            Array.from(new Set<string>(labels)).sort((a, b) => a.localeCompare(b)),
+          );
           return;
         }
 
@@ -363,7 +370,9 @@ export default function CrmGenerateUnitsModal({ clientSlug, onClose }: Props) {
           const labels = fallbackBody.items
             .map((i: { label?: string | null }) => String(i?.label ?? "").trim())
             .filter(Boolean);
-          setOwnersCatalog(Array.from(new Set(labels)).sort((a, b) => a.localeCompare(b)));
+          setOwnersCatalog(
+            Array.from(new Set<string>(labels)).sort((a, b) => a.localeCompare(b)),
+          );
         }
 
       } catch {
@@ -661,7 +670,7 @@ const currentProfile = TIME_PROFILES[profileKey] ?? TIME_PROFILES.standard;
         throw new Error(msg);
       }
 
-      const imported = body?.imported ?? rowsCount;
+      const imported = (body as { imported?: number } | null)?.imported ?? rowsCount;
 
       showSuccess(`Generated ${imported} email units.`);
 
@@ -694,10 +703,8 @@ const currentProfile = TIME_PROFILES[profileKey] ?? TIME_PROFILES.standard;
     const el = sendDateInputRef.current;
     if (!el) return;
     // Prefer native picker when available; otherwise focus the field.
-    // @ts-expect-error showPicker is not yet in lib.dom.d.ts everywhere
     if (typeof el.showPicker === "function") {
       try {
-        // @ts-expect-error showPicker is not yet in lib.dom.d.ts everywhere
         el.showPicker();
         return;
       } catch {
@@ -710,10 +717,8 @@ const currentProfile = TIME_PROFILES[profileKey] ?? TIME_PROFILES.standard;
   const openTouchpointDatePicker = (tp: string) => {
     const el = touchpointDateRefs.current[tp];
     if (!el) return;
-    // @ts-expect-error showPicker is not yet in lib.dom.d.ts everywhere
     if (typeof el.showPicker === "function") {
       try {
-        // @ts-expect-error showPicker is not yet in lib.dom.d.ts everywhere
         el.showPicker();
         return;
       } catch {

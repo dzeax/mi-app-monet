@@ -728,7 +728,9 @@ function MultiSelect({
             {options.map((opt, idx) => (
               <label
                 key={opt.value}
-                ref={(el) => (itemRefs.current[idx] = el)}
+                ref={(el) => {
+                  itemRefs.current[idx] = el;
+                }}
                 className={`flex cursor-pointer items-center gap-2 px-3 py-2 text-sm hover:bg-[color:var(--color-surface-2)] ${
                   activeIdx === idx ? "bg-[color:var(--color-surface-2)]" : ""
                 }`}
@@ -1370,7 +1372,7 @@ export default function CrmDqTicketsAnalyticsView({
   }, [filteredRows, p1AckCutoffAt]);
 
   const p1AckDrilldown = useMemo(() => {
-    const order = { missing: 0, late: 1, on_time: 2, pending: 3 } as const;
+    const order: Record<string, number> = { missing: 0, late: 1, on_time: 2, pending: 3 };
     const items = p1AckMetrics.details.map((detail) => {
       const row = detail.row;
       const readyAt = getReadyAt(row);

@@ -64,7 +64,7 @@ type ManualEffortRow = {
   hours: number | null;
 };
 
-type PagedQueryResult<T> = Promise<{
+type PagedQueryResult<T> = PromiseLike<{
   data: T[] | null;
   error: { message: string } | null;
 }>;
@@ -113,8 +113,8 @@ const fetchPaged = async <T,>(buildQuery: (from: number, to: number) => PagedQue
 };
 
 export async function GET(request: Request) {
-  const cookieStore = await cookies();
-  const supabase = createRouteHandlerClient({ cookies: () => cookieStore });
+ const cookieStore = await cookies();
+ const supabase = createRouteHandlerClient({ cookies: () => cookieStore as any });
 
   const {
     data: { user },
@@ -285,7 +285,7 @@ export async function GET(request: Request) {
       if (!metricsByClient[clientSlug]) return;
       const work = Number(row.work_hours ?? 0);
       const prepRaw = row.prep_hours;
-      const prep = prepRaw == null || prepRaw === "" ? work * 0.35 : Number(prepRaw);
+      const prep = prepRaw == null ? work * 0.35 : Number(prepRaw);
       const totalHours = work + (Number.isFinite(prep) ? prep : 0);
       addSpend(
         clientSlug,
@@ -338,3 +338,4 @@ export async function GET(request: Request) {
     return NextResponse.json({ error: message }, { status: 500 });
   }
 }
+

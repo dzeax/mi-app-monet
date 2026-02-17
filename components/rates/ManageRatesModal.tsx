@@ -608,7 +608,9 @@ export default function ManageRatesModal({ clientSlug, onClose }: Props) {
                   initialRate={Number(row.dailyRate ?? 0)}
                   personId={row.personId}
                   isInactive={Boolean(row.isInactive)}
-                  onSave={(nextRate) => handleSave(row.ownerForSave, nextRate, row.personId)}
+                  onSave={async (nextRate) => {
+                    await handleSave(row.ownerForSave, nextRate, row.personId);
+                  }}
                 />
               ))
             )}

@@ -2,6 +2,11 @@ import { createHash } from 'node:crypto';
 import { mkdirSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import OpenAI from 'openai';
+import type {
+  EasyInputMessage,
+  ResponseCreateParamsNonStreaming,
+  ResponseInputContent,
+} from 'openai/resources/responses/responses';
 
 import { captureEmailScreenshot } from '@/lib/ai/screenshot';
 
@@ -340,34 +345,30 @@ export async function generateSubjectLines({
       ? 'You are an elite performance email copywriter. Your workflow: (1) study the supplied campaign assets (screenshot plus text excerpt) to understand the offer, positioning, CTA, urgency, and tone; (2) extract the most compelling hooks and differentiators; (3) write compliant, brand-safe sender + subject pairs that maximise opens, stay concise, and feel fresh. Sender policy: 1-2 natural words (prefer two-word combinations) that sound like a real team/desk/service, no emojis, no brand names, no generic promo nouns such as ahorro, gratis, regalo, ofertas, precio, gana. Ground every idea in the provided assets - no hallucinated claims.'
       : 'You are an elite performance email copywriter. Your workflow: (1) study the supplied campaign assets (screenshot plus text excerpt) to understand the offer, positioning, CTA, urgency, and tone; (2) extract the most compelling hooks and differentiators; (3) write compliant, brand-safe subject lines that maximise opens, stay concise, and feel fresh. Ground every idea in the provided assets - no hallucinated claims.';
 
-  const openAiRequest = {
+  const userContent: ResponseInputContent[] = [{ type: 'input_text', text: prompt }];
+  if (screenshotBase64) {
+    userContent.push({
+      type: 'input_image',
+      detail: 'auto',
+      image_url: `data:image/png;base64,${screenshotBase64}`,
+    });
+  }
+
+  const input: EasyInputMessage[] = [
+    {
+      role: 'system',
+      content: [{ type: 'input_text', text: systemInstruction }],
+    },
+    {
+      role: 'user',
+      content: userContent,
+    },
+  ];
+
+  const openAiRequest: ResponseCreateParamsNonStreaming = {
     model: selectedModel,
-    input: [
-      {
-        role: 'system',
-        content: [
-          {
-            type: 'input_text',
-            text: systemInstruction,
-          },
-        ],
-      },
-      {
-        role: 'user',
-        content: [
-          { type: 'input_text', text: prompt },
-          ...(screenshotBase64
-            ? [
-                {
-                  type: 'input_image',
-                  image_url: `data:image/png;base64,${screenshotBase64}`,
-                } as const,
-              ]
-            : []),
-        ],
-      },
-    ],
-  } as const;
+    input,
+  };
 
   let debugScreenshotPath: string | null = null;
   if (SUBJECT_LINES_DEBUG) {

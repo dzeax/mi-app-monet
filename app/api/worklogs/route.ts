@@ -30,6 +30,18 @@ const UpdatePayloadZ = z.object({
   comments: z.string().optional().nullable(),
 });
 
+type AppUserRoleRow = {
+  role?: string | null;
+  is_active?: boolean | null;
+};
+
+type AppUserListRow = {
+  user_id?: string | null;
+  display_name?: string | null;
+  email?: string | null;
+  avatar_url?: string | null;
+};
+
 export const runtime = "nodejs";
 
 const computeHours = (unit: "hours" | "days", value: number) =>
@@ -52,11 +64,12 @@ async function requireUser(
   if (userError || !userData?.user) {
     return { error: NextResponse.json({ error: "Unauthorized" }, { status: 401 }) };
   }
-  const { data: currentUser, error: currentUserError } = await supabase
+  const { data: currentUserData, error: currentUserError } = await supabase
     .from("app_users")
     .select("role,is_active")
     .eq("user_id", userData.user.id)
     .maybeSingle();
+  const currentUser = (currentUserData ?? null) as AppUserRoleRow | null;
   if (currentUserError) {
     return { error: NextResponse.json({ error: currentUserError.message }, { status: 500 }) };
   }
@@ -79,7 +92,8 @@ async function loadUserMap(
     .in("user_id", userIds);
   if (error) throw new Error(error.message);
   const map = new Map<string, { display_name?: string | null; email?: string | null; avatar_url?: string | null }>();
-  (data ?? []).forEach((row) => {
+  const typedRows = (data ?? []) as AppUserListRow[];
+  typedRows.forEach((row) => {
     if (!row?.user_id) return;
     map.set(String(row.user_id), {
       display_name: row.display_name,
@@ -91,8 +105,8 @@ async function loadUserMap(
 }
 
 export async function GET(request: Request) {
-  const cookieStore = await cookies();
-  const supabase = createRouteHandlerClient({ cookies: () => cookieStore });
+ const cookieStore = await cookies();
+ const supabase = createRouteHandlerClient({ cookies: () => cookieStore as any });
   const auth = await requireUser(supabase);
   if (auth.error) return auth.error;
 
@@ -169,8 +183,8 @@ export async function GET(request: Request) {
 }
 
 export async function POST(request: Request) {
-  const cookieStore = await cookies();
-  const supabase = createRouteHandlerClient({ cookies: () => cookieStore });
+ const cookieStore = await cookies();
+ const supabase = createRouteHandlerClient({ cookies: () => cookieStore as any });
   const auth = await requireUser(supabase);
   if (auth.error) return auth.error;
 
@@ -247,8 +261,8 @@ export async function POST(request: Request) {
 }
 
 export async function PATCH(request: Request) {
-  const cookieStore = await cookies();
-  const supabase = createRouteHandlerClient({ cookies: () => cookieStore });
+ const cookieStore = await cookies();
+ const supabase = createRouteHandlerClient({ cookies: () => cookieStore as any });
   const auth = await requireUser(supabase);
   if (auth.error) return auth.error;
 
@@ -352,8 +366,8 @@ export async function PATCH(request: Request) {
 }
 
 export async function DELETE(request: Request) {
-  const cookieStore = await cookies();
-  const supabase = createRouteHandlerClient({ cookies: () => cookieStore });
+ const cookieStore = await cookies();
+ const supabase = createRouteHandlerClient({ cookies: () => cookieStore as any });
   const auth = await requireUser(supabase);
   if (auth.error) return auth.error;
 
@@ -378,3 +392,4 @@ export async function DELETE(request: Request) {
 
   return NextResponse.json({ success: true });
 }
+

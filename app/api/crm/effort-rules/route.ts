@@ -30,8 +30,8 @@ const PayloadZ = z.object({
 });
 
 export async function GET(request: Request) {
-  const cookieStore = await cookies();
-  const supabase = createRouteHandlerClient({ cookies: () => cookieStore });
+ const cookieStore = await cookies();
+ const supabase = createRouteHandlerClient({ cookies: () => cookieStore as any });
   const { searchParams } = new URL(request.url);
   const client = searchParams.get("client") || DEFAULT_CLIENT;
   try {
@@ -51,8 +51,8 @@ export async function GET(request: Request) {
 }
 
 export async function PUT(request: Request) {
-  const cookieStore = await cookies();
-  const supabase = createRouteHandlerClient({ cookies: () => cookieStore });
+ const cookieStore = await cookies();
+ const supabase = createRouteHandlerClient({ cookies: () => cookieStore as any });
   try {
     const body = await request.json();
     const parsed = PayloadZ.parse(body);
@@ -93,3 +93,4 @@ export async function PUT(request: Request) {
     return NextResponse.json({ error: msg }, { status: 500 });
   }
 }
+

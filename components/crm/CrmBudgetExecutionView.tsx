@@ -318,9 +318,9 @@ function riskLabel(row: TableRow, plan: number, actual: number, utilization: num
 }
 
 type MarketYAxisTickProps = {
-  x: number;
-  y: number;
-  payload: { value: string };
+  x?: number;
+  y?: number;
+  payload?: { value?: string };
 };
 
 type BrandYAxisTickProps = MarketYAxisTickProps;
@@ -350,7 +350,7 @@ const BRAND_SLICE_SIZE = 26;
 const DONUT_LABEL_OFFSET = 14;
 const DONUT_LINE_OFFSET = 12;
 
-function MarketYAxisTick({ x, y, payload }: MarketYAxisTickProps) {
+function MarketYAxisTick({ x = 0, y = 0, payload }: MarketYAxisTickProps) {
   const label = String(payload?.value ?? "");
   const trimmed = label.trim();
   const showFlag = /^[A-Za-z]{2,3}$/.test(trimmed) && trimmed.toLowerCase() !== "other";
@@ -377,7 +377,7 @@ function MarketYAxisTick({ x, y, payload }: MarketYAxisTickProps) {
   );
 }
 
-function BrandYAxisTick({ x, y, payload }: BrandYAxisTickProps) {
+function BrandYAxisTick({ x = 0, y = 0, payload }: BrandYAxisTickProps) {
   const label = String(payload?.value ?? "");
   const key = label.trim().toLowerCase();
   const logo = BRAND_LOGOS[key];
@@ -560,7 +560,7 @@ function renderDonutLabelLine({ cx, cy, midAngle, outerRadius }: DonutLabelLineP
     typeof midAngle !== "number" ||
     typeof outerRadius !== "number"
   ) {
-    return null;
+    return <g />;
   }
   const angle = (-midAngle * Math.PI) / 180;
   const startRadius = outerRadius + 2;
@@ -580,6 +580,8 @@ function renderDonutLabelLine({ cx, cy, midAngle, outerRadius }: DonutLabelLineP
     />
   );
 }
+
+const renderEmptyDonutLabelLine = () => <g />;
 
 function MultiSelect({
   label,
@@ -704,7 +706,9 @@ function MultiSelect({
                   return (
                     <label
                       key={opt.value}
-                      ref={(el) => (itemRefs.current[idx] = el)}
+                      ref={(el) => {
+                        itemRefs.current[idx] = el;
+                      }}
                       className={`flex cursor-pointer items-center gap-2 px-3 py-2 text-sm hover:bg-[color:var(--color-surface-2)] ${activeIdx === idx ? "bg-[color:var(--color-surface-2)]" : ""}`}
                     >
                       <input
@@ -2838,6 +2842,7 @@ export default function CrmBudgetExecutionView({
                         roleName: string;
                         actual: number;
                         days: number;
+                        units: number;
                         share: number;
                       };
                       return (
@@ -2876,7 +2881,7 @@ export default function CrmBudgetExecutionView({
                       dataKey="share"
                       position="right"
                       offset={10}
-                      formatter={(value: number) => formatPercentInt(Number(value))}
+                      formatter={(value) => formatPercentInt(Number(value))}
                       fill={chartTheme.tick.fill}
                       fontSize={11}
                     />
@@ -3029,7 +3034,7 @@ export default function CrmBudgetExecutionView({
                           dataKey="share"
                           position="right"
                           offset={10}
-                          formatter={(value: number) => formatPercentInt(Number(value))}
+                          formatter={(value) => formatPercentInt(Number(value))}
                           fill={chartTheme.tick.fill}
                           fontSize={11}
                         />
@@ -3158,7 +3163,7 @@ export default function CrmBudgetExecutionView({
                                   ? renderMarketDonutLabel
                                   : renderDonutShareLabel
                             }
-                            labelLine={block.kind === "brand" ? false : renderDonutLabelLine}
+                            labelLine={block.kind === "brand" ? renderEmptyDonutLabelLine : renderDonutLabelLine}
                           >
                             {block.data.map((entry, index) => (
                               <Cell
@@ -3622,7 +3627,9 @@ export default function CrmBudgetExecutionView({
         onClose={closeWorkstreamDetail}
         onSelectRow={(row) => {
           closeWorkstreamDetail();
-          setDetailRow(row);
+          const detailCandidate = baseRows.find((entry) => entry.key === row.key) ?? null;
+          if (!detailCandidate) return;
+          setDetailRow(detailCandidate);
           setDetailOpen(true);
         }}
         formatCurrency={formatCurrency}

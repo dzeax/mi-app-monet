@@ -10,6 +10,11 @@ const CreatePayloadZ = z.object({
   label: z.string().min(1),
 });
 
+type AppUserRoleRow = {
+  role?: string | null;
+  is_active?: boolean | null;
+};
+
 export const runtime = "nodejs";
 
 async function requireUser(
@@ -19,11 +24,12 @@ async function requireUser(
   if (userError || !userData?.user) {
     return { error: NextResponse.json({ error: "Unauthorized" }, { status: 401 }) };
   }
-  const { data: currentUser, error: currentUserError } = await supabase
+  const { data: currentUserData, error: currentUserError } = await supabase
     .from("app_users")
     .select("role,is_active")
     .eq("user_id", userData.user.id)
     .maybeSingle();
+  const currentUser = (currentUserData ?? null) as AppUserRoleRow | null;
   if (currentUserError) {
     return { error: NextResponse.json({ error: currentUserError.message }, { status: 500 }) };
   }
@@ -34,8 +40,8 @@ async function requireUser(
 }
 
 export async function GET(request: Request) {
-  const cookieStore = await cookies();
-  const supabase = createRouteHandlerClient({ cookies: () => cookieStore });
+ const cookieStore = await cookies();
+ const supabase = createRouteHandlerClient({ cookies: () => cookieStore as any });
   const auth = await requireUser(supabase);
   if (auth.error) return auth.error;
 
@@ -61,8 +67,8 @@ export async function GET(request: Request) {
 }
 
 export async function POST(request: Request) {
-  const cookieStore = await cookies();
-  const supabase = createRouteHandlerClient({ cookies: () => cookieStore });
+ const cookieStore = await cookies();
+ const supabase = createRouteHandlerClient({ cookies: () => cookieStore as any });
   const auth = await requireUser(supabase);
   if (auth.error) return auth.error;
 
@@ -117,3 +123,4 @@ export async function POST(request: Request) {
     return NextResponse.json({ error: msg }, { status: 500 });
   }
 }
+

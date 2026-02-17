@@ -167,7 +167,7 @@ export default function CrmBudgetModal({
   const hasInitializedExpanded = useRef(false);
   const initialSignatureRef = useRef("");
   const carryoverSnapshotRef = useRef<Record<string, number>>({});
-  const closeTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const closeTimeoutRef = useRef<number | null>(null);
 
   const stopPropagation = (event: ReactMouseEvent) => {
     event.stopPropagation();
@@ -272,10 +272,9 @@ export default function CrmBudgetModal({
           (acc, role) => acc + getRolePoolAmount(role),
           0,
         );
-        const totalSpent = Object.values(body?.spendByPerson ?? {}).reduce(
-          (acc, value) => acc + Number(value ?? 0),
-          0,
-        );
+        const totalSpent = Object.values(
+          (body?.spendByPerson ?? {}) as Record<string, number | null>,
+        ).reduce<number>((acc, value) => acc + Number(value ?? 0), 0);
         if (active) setCarryoverTotal(roundAmount(totalBudget - totalSpent));
       } catch (err) {
         if (active) {
