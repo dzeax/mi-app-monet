@@ -4,6 +4,7 @@ import { createRouteHandlerClient } from '@supabase/auth-helpers-nextjs';
 
 import { supabaseAdmin } from '@/lib/supabase/admin';
 import { mapPlanningFromDb, mapPlanningToInsert, type PlanningDbRow } from '@/lib/planning/db';
+import { campaignPlanningSupportsProgrammedAt } from '@/lib/planning/schema';
 import type { PlanningDraft, PlanningItem } from '@/components/campaign-planning/types';
 
 const ALLOWED_ROLES = new Set(['admin', 'editor']);
@@ -111,7 +112,12 @@ export async function POST(request: Request) {
       previewRecipients: payload.previewRecipients ?? [],
     };
     const insertPayload = mapPlanningToInsert(basePayload, user.id);
-    insertPayload.programmed_at = payload.status === 'Programmed' ? new Date().toISOString() : null;
+    const supportsProgrammedAt = await campaignPlanningSupportsProgrammedAt(admin);
+    if (supportsProgrammedAt) {
+      insertPayload.programmed_at = payload.status === 'Programmed' ? new Date().toISOString() : null;
+    } else {
+      delete (insertPayload as { programmed_at?: string | null }).programmed_at;
+    }
 
     const { data: inserted, error: insertError } = await admin
       .from('campaign_planning')

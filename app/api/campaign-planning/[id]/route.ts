@@ -4,6 +4,7 @@ import { createRouteHandlerClient } from '@supabase/auth-helpers-nextjs';
 
 import { supabaseAdmin } from '@/lib/supabase/admin';
 import { mapPlanningFromDb, mapPlanningPatch, type PlanningDbPatch, type PlanningDbRow } from '@/lib/planning/db';
+import { campaignPlanningSupportsProgrammedAt } from '@/lib/planning/schema';
 import type { PlanningDraft } from '@/components/campaign-planning/types';
 
 type HttpError = Error & { status?: number };
@@ -101,7 +102,8 @@ export async function PATCH(request: Request, context: { params: Promise<{ id: s
     }
 
     const dbPatch = buildDbPatch(patchInput);
-    if (patchInput.status !== undefined) {
+    const supportsProgrammedAt = await campaignPlanningSupportsProgrammedAt(admin);
+    if (patchInput.status !== undefined && supportsProgrammedAt) {
       const { data: current, error: currentError } = await admin
         .from('campaign_planning')
         .select('status, programmed_at')
