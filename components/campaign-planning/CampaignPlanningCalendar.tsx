@@ -11,6 +11,7 @@ import {
   isSameDay,
   isSameMonth,
   isToday,
+  isWeekend,
   startOfMonth,
   startOfWeek,
 } from 'date-fns';
@@ -297,6 +298,7 @@ function MonthView({
               const dayItems = items.filter((item) => isSameDay(new Date(item.date), date));
               const isCurrent = isSameDay(date, currentDate);
               const isDisabled = !isSameMonth(date, currentDate);
+              const isWknd = isWeekend(date);
               const iso = format(date, 'yyyy-MM-dd');
               const isDragTarget = dragOverDate === iso;
               const sortedDayItems = dayItems.slice().sort((a, b) => a.name.localeCompare(b.name));
@@ -305,12 +307,14 @@ function MonthView({
                 <div
                   key={date.toISOString()}
                   className={[
-                    'min-h-[120px] border-b border-r border-[color:var(--color-border)] p-3 transition-colors',
+                    'group min-h-[120px] border-b border-r border-[color:var(--color-border)] p-3 transition-colors',
                     isDisabled
-                      ? 'bg-[color:var(--color-surface-2)]/35 text-[color:var(--color-text)]/45'
-                      : 'bg-[color:var(--color-surface)]',
+                      ? 'bg-slate-100/60 text-gray-400'
+                      : isWknd
+                        ? 'bg-slate-50/80'
+                        : 'bg-white',
                     isDragTarget
-                      ? 'ring-2 ring-[color:var(--color-primary)]/70 ring-offset-2 ring-offset-[color:var(--color-surface)]'
+                      ? 'ring-inset ring-2 ring-[color:var(--color-primary)]/50 bg-[color:var(--color-primary)]/5'
                       : '',
                   ].join(' ')}
                   onDragOver={(event) => {
@@ -351,7 +355,7 @@ function MonthView({
                     {sortedDayItems.length === 0 ? (
                       <button
                         type="button"
-                        className="w-full rounded-lg border border-dashed border-[color:var(--color-border)]/60 px-3 py-6 text-xs font-semibold uppercase tracking-[0.18em] text-[color:var(--color-text)]/55 transition hover:border-[color:var(--color-primary)]/50 hover:text-[color:var(--color-primary)]"
+                        className="w-full rounded-lg border border-dashed border-[color:var(--color-border)]/60 px-3 py-6 text-xs font-semibold uppercase tracking-[0.18em] text-[color:var(--color-text)]/55 opacity-0 group-hover:opacity-100 transition-opacity duration-200 hover:border-[color:var(--color-primary)]/50 hover:text-[color:var(--color-primary)]"
                         onClick={() => onCreateAtDate(date)}
                       >
                         Add campaign

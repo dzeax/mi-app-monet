@@ -33,104 +33,103 @@ export default function CampaignPlanningHeader({
         : format(activeDate, 'MMMM yyyy');
 
   return (
-    <header className="flex flex-col gap-5 mb-6">
-      
-      {/* --- FILA SUPERIOR: Título + Acciones Globales --- */}
-      <div className="flex items-center justify-between">
-        <div className="flex flex-col gap-1">
-            <h1 className="text-2xl font-bold text-gray-900 tracking-tight">Campaign Planning</h1>
-            <p className="text-sm text-gray-500">Manage and schedule your marketing campaigns</p>
+    <div className="space-y-4">
+      <header className="relative overflow-hidden rounded-3xl border border-[color:var(--color-border)] bg-[color:var(--color-surface)] px-6 py-6 shadow-sm">
+        <div className="pointer-events-none absolute inset-0 bg-[radial-gradient(120%_120%_at_0%_0%,rgba(14,165,233,0.18),transparent_60%),radial-gradient(120%_120%_at_80%_0%,rgba(99,102,241,0.16),transparent_55%)]" />
+        <div className="relative z-10 flex flex-wrap items-center justify-between gap-4">
+          <div>
+            <h1 className="text-2xl font-bold tracking-tight text-[var(--color-text)]">
+              Campaign Planning
+            </h1>
+            <p className="mt-1 text-sm text-[var(--color-muted)]">
+              Manage and schedule your marketing campaigns
+            </p>
+          </div>
+
+          <div className="flex flex-wrap items-center gap-2 rounded-xl border border-[var(--color-border)] bg-[var(--color-surface)] p-1.5 shadow-sm">
+            <button
+              type="button"
+              onClick={onToggleReporting}
+              className={[
+                'btn-ghost h-9 px-3 text-xs',
+                reportingOpen
+                  ? 'border-[color:var(--color-primary)] bg-[color:var(--color-primary)]/10 text-[color:var(--color-primary)]'
+                  : '',
+              ].join(' ')}
+            >
+              {reportingOpen ? 'Hide reporting' : 'Show reporting'}
+            </button>
+            <button
+              type="button"
+              className="btn-primary h-9 px-4 text-xs shadow-sm"
+              onClick={onCreate}
+            >
+              + New campaign
+            </button>
+          </div>
         </div>
-        
-        <div className="flex items-center gap-3">
+      </header>
+
+      <div className="mt-6 flex flex-wrap items-center justify-between gap-4 rounded-2xl border border-[color:var(--color-border)] bg-[color:var(--color-surface)] p-2 shadow-sm">
+        <div className="flex items-center gap-2 pl-2">
           <button
             type="button"
-            onClick={onToggleReporting}
-            className={[
-              'inline-flex items-center justify-center rounded-lg border px-3 py-2 text-sm font-medium transition-colors',
-              reportingOpen
-                ? 'border-blue-200 bg-blue-50 text-blue-700'
-                : 'border-gray-200 bg-white text-gray-700 hover:bg-gray-50 hover:text-gray-900',
-            ].join(' ')}
+            className="h-9 flex items-center text-sm font-medium text-[var(--color-text)]/70 hover:text-[var(--color-text)] hover:bg-[var(--color-surface-2)] px-3 rounded-lg border border-transparent hover:border-[var(--color-border)] transition-all"
+            onClick={() => onNavigate('today')}
           >
-            {reportingOpen ? 'Hide reporting' : 'Show reporting'}
+            Today
           </button>
-          
-          <button 
-            type="button" 
-            className="btn-primary px-4 py-2 text-sm shadow-md shadow-emerald-500/20" 
-            onClick={onCreate}
-          >
-            + New campaign
-          </button>
-        </div>
-      </div>
 
-      {/* --- FILA INFERIOR: Toolbar (Navegación + Filtros) --- */}
-      <div className="flex flex-wrap items-center justify-between gap-4 rounded-xl border border-gray-200 bg-white p-2 shadow-sm">
-        
-        {/* IZQUIERDA: Navegación Temporal */}
-        <div className="flex items-center gap-2 pl-2">
-            <button 
-                type="button" 
-                className="text-sm font-medium text-gray-600 hover:text-gray-900 hover:bg-gray-100 px-3 py-1.5 rounded-lg border border-transparent hover:border-gray-200 transition-all" 
-                onClick={() => onNavigate('today')}
+          <div className="h-9 flex items-center rounded-lg border border-[var(--color-border)] bg-[var(--color-surface-2)]/50 mx-2">
+            <button
+              type="button"
+              className="h-8 w-8 inline-flex items-center justify-center text-[var(--color-text)]/60 hover:text-[var(--color-text)] hover:bg-[var(--color-surface)] rounded-md transition-colors m-0.5"
+              onClick={() => onNavigate('prev')}
+              aria-label="Previous period"
             >
-                Today
+              <NavChevron direction="left" />
             </button>
-            
-            <div className="flex items-center rounded-lg border border-gray-200 bg-gray-50/50 mx-2">
-              <button
-                type="button"
-                className="p-1.5 text-gray-500 hover:text-gray-900 hover:bg-white rounded-md transition-colors m-0.5"
-                onClick={() => onNavigate('prev')}
-                aria-label="Previous period"
-              >
-                <NavChevron direction="left" />
-              </button>
-              
-              <div className="px-3 py-1 text-sm font-semibold text-gray-800 min-w-[140px] text-center uppercase tracking-wide text-[11px]">
-                {periodLabel}
-              </div>
-              
-              <button
-                type="button"
-                className="p-1.5 text-gray-500 hover:text-gray-900 hover:bg-white rounded-md transition-colors m-0.5"
-                onClick={() => onNavigate('next')}
-                aria-label="Next period"
-              >
-                <NavChevron direction="right" />
-              </button>
+
+            <div className="min-h-[36px] px-3 flex items-center text-sm font-semibold text-[var(--color-text)] min-w-[140px] text-center uppercase tracking-wide text-[11px]">
+              {periodLabel}
             </div>
 
-            <div className="h-6 w-px bg-gray-200 mx-2" />
+            <button
+              type="button"
+              className="h-8 w-8 inline-flex items-center justify-center text-[var(--color-text)]/60 hover:text-[var(--color-text)] hover:bg-[var(--color-surface)] rounded-md transition-colors m-0.5"
+              onClick={() => onNavigate('next')}
+              aria-label="Next period"
+            >
+              <NavChevron direction="right" />
+            </button>
+          </div>
 
-            {/* Selector de Vista (Segmented Control) */}
-            <div className="flex items-center rounded-lg bg-gray-100 p-1">
-                {(['day', 'week', 'month'] as ViewMode[]).map((mode) => (
-                  <button
-                    key={mode}
-                    type="button"
-                    onClick={() => onViewModeChange(mode)}
-                    className={[
-                      'px-3 py-1 text-xs font-semibold rounded-md transition-all',
-                      viewMode === mode
-                        ? 'bg-white text-gray-900 shadow-sm'
-                        : 'text-gray-500 hover:text-gray-700',
-                    ].join(' ')}
-                  >
-                    {mode.charAt(0).toUpperCase() + mode.slice(1)}
-                  </button>
-                ))}
-            </div>
+          <div className="h-6 w-px bg-[var(--color-border)] mx-2" />
+
+          <div className="h-9 flex items-center rounded-lg bg-[var(--color-surface-2)] p-1">
+            {(['day', 'week', 'month'] as ViewMode[]).map((mode) => (
+              <button
+                key={mode}
+                type="button"
+                onClick={() => onViewModeChange(mode)}
+                className={[
+                  'h-7 px-3 inline-flex items-center text-xs font-semibold rounded-md transition-all',
+                  viewMode === mode
+                    ? 'bg-[var(--color-surface)] text-[var(--color-text)] shadow-sm'
+                    : 'text-[var(--color-text)]/60 hover:text-[var(--color-text)]',
+                ].join(' ')}
+              >
+                {mode.charAt(0).toUpperCase() + mode.slice(1)}
+              </button>
+            ))}
+          </div>
         </div>
 
-        {/* DERECHA: Slot de Filtros */}
         <div className="flex-1 flex justify-end min-w-[200px]">
-            {filtersSlot}
+          {filtersSlot}
         </div>
       </div>
-    </header>
+    </div>
   );
 }
 

@@ -614,7 +614,7 @@ function PlanningViewInner() {
   const bottomInset = reportingOpen ? reportingHeight + 32 : 24;
 
   return (
-    <div className="space-y-6" style={{ paddingBottom: bottomInset }}>
+    <div className="space-y-4" style={{ paddingBottom: bottomInset }}>
       <CampaignPlanningHeader
         activeDate={activeDate}
         viewMode={viewMode}
@@ -739,7 +739,7 @@ function PlanningViewInner() {
 export default function CampaignPlanningView() {
   return (
     <CampaignPlanningProvider>
-      <section className="px-3 md:px-4 lg:px-6 py-8">
+      <section className="px-3 py-4 md:px-4 md:py-5 lg:px-6">
         <PlanningViewInner />
       </section>
     </CampaignPlanningProvider>
