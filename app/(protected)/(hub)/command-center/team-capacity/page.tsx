@@ -166,7 +166,9 @@ type UnmappedDetailItem = {
 
 const today = new Date();
 const defaultStart = new Date(Date.UTC(today.getUTCFullYear(), today.getUTCMonth(), 1));
-const defaultEnd = new Date(Date.UTC(today.getUTCFullYear(), today.getUTCMonth() + 1, 0));
+const defaultMonthToDateEnd = new Date(
+  Date.UTC(today.getUTCFullYear(), today.getUTCMonth(), today.getUTCDate()),
+);
 
 const toDateInput = (date: Date) => date.toISOString().slice(0, 10);
 
@@ -220,7 +222,14 @@ const toDaysFromHours = (hours: number | null, hoursPerDay: number | null) => {
   return hours / hoursPerDay;
 };
 
-type DatePreset = 'custom' | 'this_month' | 'last_month' | 'next_month' | 'this_quarter' | 'this_year';
+type DatePreset =
+  | 'custom'
+  | 'month_to_date'
+  | 'this_month'
+  | 'last_month'
+  | 'next_month'
+  | 'this_quarter'
+  | 'this_year';
 
 const getPresetRange = (preset: DatePreset) => {
   const now = new Date();
@@ -228,6 +237,11 @@ const getPresetRange = (preset: DatePreset) => {
   const month = now.getUTCMonth();
 
   switch (preset) {
+    case 'month_to_date':
+      return {
+        start: new Date(Date.UTC(year, month, 1)).toISOString().slice(0, 10),
+        end: new Date(Date.UTC(year, month, now.getUTCDate())).toISOString().slice(0, 10),
+      };
     case 'this_month':
       return {
         start: new Date(Date.UTC(year, month, 1)).toISOString().slice(0, 10),
@@ -262,6 +276,7 @@ const getPresetRange = (preset: DatePreset) => {
 
 const presetLabels: Record<DatePreset, string> = {
   custom: 'Custom',
+  month_to_date: 'Month to date',
   this_month: 'This Month',
   last_month: 'Last Month',
   next_month: 'Next Month',
@@ -565,8 +580,8 @@ const getUtilizationStyles = (value: number | null) => {
 export default function TeamCapacityPage() {
   const { isAdmin } = useAuth();
   const [startDate, setStartDate] = useState(toDateInput(defaultStart));
-  const [endDate, setEndDate] = useState(toDateInput(defaultEnd));
-  const [activePreset, setActivePreset] = useState<DatePreset>('this_month');
+  const [endDate, setEndDate] = useState(toDateInput(defaultMonthToDateEnd));
+  const [activePreset, setActivePreset] = useState<DatePreset>('month_to_date');
   const [presetMenuOpen, setPresetMenuOpen] = useState(false);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);

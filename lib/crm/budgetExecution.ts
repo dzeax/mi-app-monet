@@ -1,4 +1,5 @@
 import type { SupabaseClient } from "@supabase/supabase-js";
+import { getTodayIsoInMadrid } from "@/lib/crm/dateBoundaries";
 
 const PAGE_SIZE = 1000;
 const DAY_MS = 24 * 60 * 60 * 1000;
@@ -44,6 +45,8 @@ export async function getBudgetExecutionData({
 }) {
   const yearStart = `${year}-01-01`;
   const yearEnd = `${year}-12-31`;
+  const madridToday = getTodayIsoInMadrid();
+  const campaignSpendEnd = yearEnd < madridToday ? yearEnd : madridToday;
   const UNMAPPED_KEY = "unmapped";
   const UNASSIGNED_ENTITY = "Unassigned";
 
@@ -349,7 +352,7 @@ export async function getBudgetExecutionData({
       .select("person_id, owner, hours_total, days_total, send_date, brand, market, scope, segment")
       .eq("client_slug", client)
       .gte("send_date", yearStart)
-      .lte("send_date", yearEnd)
+      .lte("send_date", campaignSpendEnd)
       .order("send_date", { ascending: true })
       .order("id", { ascending: true })
       .range(from, to),

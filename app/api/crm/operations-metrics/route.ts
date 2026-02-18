@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import { cookies } from "next/headers";
 import { createRouteHandlerClient } from "@supabase/auth-helpers-nextjs";
 import { CRM_CLIENTS } from "@/lib/crm/clients";
+import { getTodayIsoInMadrid } from "@/lib/crm/dateBoundaries";
 
 export const runtime = "nodejs";
 
@@ -129,6 +130,8 @@ export async function GET(request: Request) {
   const clients = parseClients(searchParams.get("clients"));
   const yearStart = `${year}-01-01`;
   const yearEnd = `${year}-12-31`;
+  const madridToday = getTodayIsoInMadrid();
+  const campaignSpendEnd = yearEnd < madridToday ? yearEnd : madridToday;
 
   try {
     const [
@@ -182,7 +185,7 @@ export async function GET(request: Request) {
           .select("client_slug, person_id, owner, hours_total, send_date")
           .in("client_slug", clients)
           .gte("send_date", yearStart)
-          .lte("send_date", yearEnd)
+          .lte("send_date", campaignSpendEnd)
           .order("send_date", { ascending: true })
           .order("id", { ascending: true })
           .range(from, to),

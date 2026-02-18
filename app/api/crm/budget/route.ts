@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { cookies } from "next/headers";
 import { createRouteHandlerClient } from "@supabase/auth-helpers-nextjs";
+import { getTodayIsoInMadrid } from "@/lib/crm/dateBoundaries";
 
 const DEFAULT_CLIENT = "emg";
 const PAGE_SIZE = 1000;
@@ -47,6 +48,8 @@ export async function GET(request: Request) {
   const year = parseYear(searchParams.get("year"));
   const yearStart = `${year}-01-01`;
   const yearEnd = `${year}-12-31`;
+  const madridToday = getTodayIsoInMadrid();
+  const campaignSpendEnd = yearEnd < madridToday ? yearEnd : madridToday;
 
   try {
     const { data: rolesData, error: rolesError } = await supabase
@@ -180,7 +183,7 @@ export async function GET(request: Request) {
         .select("person_id, owner, hours_total, send_date")
         .eq("client_slug", client)
         .gte("send_date", yearStart)
-        .lte("send_date", yearEnd)
+        .lte("send_date", campaignSpendEnd)
         .order("send_date", { ascending: true })
         .order("id", { ascending: true })
         .range(from, to),
