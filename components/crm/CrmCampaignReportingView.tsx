@@ -1068,6 +1068,7 @@ export default function CrmCampaignReportingView() {
         "hours_revisions",
         "hours_build",
         "hours_prep",
+        "budget_eur",
       ];
       const escape = (val: string) => `"${val.replace(/"/g, '""')}"`;
       const lines = sortedUnits.map((r) => {
@@ -1092,6 +1093,7 @@ export default function CrmCampaignReportingView() {
           r.hoursRevisions.toFixed(2),
           r.hoursBuild.toFixed(2),
           r.hoursPrep.toFixed(2),
+          r.budgetValue.toFixed(2),
         ]
           .map((v) => escape(String(v ?? "")))
           .join(",");

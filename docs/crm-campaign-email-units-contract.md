@@ -53,6 +53,7 @@ Respuesta `200`:
 - `week`, `year`, `scope`, `segment`, `touchpoint`, `variant`, `status`
 - `hours_master_template`, `hours_translations`, `hours_copywriting`
 - `hours_assets`, `hours_revisions`, `hours_build`, `hours_prep`
+- `budget_eur`
 
 ### Export CSV desde Campaign Reporting
 
