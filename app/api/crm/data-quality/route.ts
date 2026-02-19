@@ -199,6 +199,72 @@ const resolveContributionIdentity = (
   };
 };
 
+const normalizeContributionWorkstream = (value?: string | null) => {
+  const trimmed = value?.trim();
+  return trimmed || DEFAULT_WORKSTREAM;
+};
+
+const isUnassignedOwner = (value?: string | null) =>
+  normalizeAlias(value || "") === "unassigned";
+
+const isEmptyUnassignedContribution = (contribution: Contribution) =>
+  isUnassignedOwner(contribution.owner) &&
+  !contribution.personId &&
+  contribution.workHours === 0 &&
+  (contribution.prepHours ?? 0) === 0;
+
+const hasPositiveContributionEffort = (contribution: Contribution) =>
+  contribution.workHours > 0 || (contribution.prepHours ?? 0) > 0;
+
+const mergeContributionsByBusinessKey = (contributions: Contribution[]) => {
+  const merged = new Map<string, Contribution>();
+
+  contributions.forEach((contribution) => {
+    const owner = String(contribution.owner || "").trim();
+    if (!owner) return;
+    if (isEmptyUnassignedContribution(contribution)) return;
+    if (!hasPositiveContributionEffort(contribution)) return;
+
+    const effortDate = contribution.effortDate ?? null;
+    const workstream = normalizeContributionWorkstream(contribution.workstream);
+    const ownerKey = contribution.personId || normalizeAlias(owner);
+    const key = `${ownerKey}|${effortDate ?? ""}|${workstream.toLowerCase()}`;
+    const prep = contribution.prepHours ?? contribution.workHours * 0.35;
+    const existing = merged.get(key);
+
+    if (!existing) {
+      merged.set(key, {
+        owner,
+        personId: contribution.personId ?? null,
+        effortDate,
+        workHours: contribution.workHours,
+        prepHours: prep,
+        workstream,
+        notes: contribution.notes ?? null,
+      });
+      return;
+    }
+
+    existing.workHours += contribution.workHours;
+    existing.prepHours = (existing.prepHours ?? 0) + prep;
+    if (!existing.personId && contribution.personId) {
+      existing.personId = contribution.personId;
+    }
+    if (!existing.notes && contribution.notes) {
+      existing.notes = contribution.notes;
+    }
+  });
+
+  return Array.from(merged.values()).map((contribution) => ({
+    ...contribution,
+    workHours: Number(contribution.workHours.toFixed(2)),
+    prepHours:
+      contribution.prepHours != null
+        ? Number(contribution.prepHours.toFixed(2))
+        : null,
+  }));
+};
+
 export async function GET(request: Request) {
  const cookieStore = await cookies();
  const supabase = createRouteHandlerClient({ cookies: () => cookieStore as any });
@@ -402,15 +468,19 @@ export async function POST(request: Request) {
     const peopleLookup = await loadPeopleLookup(admin, clientSlug);
 
     const fallbackEffortDate = defaultEffortDateForAssignedDate(parsed.assignedDate);
-    const contributions = normalizeContributions(
+    const normalizedContributions = normalizeContributions(
       parsed.contributions,
       parsed.owner,
       parsed.workHours,
       parsed.prepHours ?? null,
       fallbackEffortDate,
     ).map((c) => resolveContributionIdentity(c, peopleLookup));
+    const contributions = mergeContributionsByBusinessKey(normalizedContributions);
     if (contributions.length === 0) {
-      return NextResponse.json({ error: "At least one contribution is required" }, { status: 400 });
+      return NextResponse.json(
+        { error: "At least one contribution with hours greater than 0 is required" },
+        { status: 400 },
+      );
     }
     const totals = aggregateTotals(contributions);
 
@@ -651,15 +721,19 @@ export async function PATCH(request: Request) {
     const peopleLookup = await loadPeopleLookup(admin, clientSlug);
 
     const fallbackEffortDate = defaultEffortDateForAssignedDate(parsed.assignedDate);
-    const contributions = normalizeContributions(
+    const normalizedContributions = normalizeContributions(
       parsed.contributions,
       parsed.owner,
       parsed.workHours,
       parsed.prepHours ?? null,
       fallbackEffortDate,
     ).map((c) => resolveContributionIdentity(c, peopleLookup));
+    const contributions = mergeContributionsByBusinessKey(normalizedContributions);
     if (contributions.length === 0) {
-      return NextResponse.json({ error: "At least one contribution is required" }, { status: 400 });
+      return NextResponse.json(
+        { error: "At least one contribution with hours greater than 0 is required" },
+        { status: 400 },
+      );
     }
     const totals = aggregateTotals(contributions);
 

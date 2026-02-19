@@ -684,6 +684,61 @@ const normalizeWorkstream = (value?: string | null) => {
 };
 
 const normalizePersonKey = (value?: string | null) => normalizeStr(value);
+const isUnassignedOwner = (value?: string | null) =>
+  normalizePersonKey(value) === "unassigned";
+
+type ContributionDraftPayload = {
+  owner: string;
+  personId: string | null;
+  effortDate: string;
+  workHours: number;
+  prepHours: number;
+  workstream: string;
+};
+
+const isEmptyUnassignedContribution = (contribution: {
+  owner: string;
+  personId?: string | null;
+  workHours?: number | null;
+  prepHours?: number | null;
+}) =>
+  isUnassignedOwner(contribution.owner) &&
+  !contribution.personId &&
+  isZeroValue(Number(contribution.workHours ?? 0)) &&
+  isZeroValue(Number(contribution.prepHours ?? 0));
+
+const hasPositiveContributionEffort = (contribution: {
+  workHours?: number | null;
+  prepHours?: number | null;
+}) =>
+  Number(contribution.workHours ?? 0) > 0 ||
+  Number(contribution.prepHours ?? 0) > 0;
+
+const mergeContributionsByBusinessKey = (
+  contributions: ContributionDraftPayload[],
+) => {
+  const merged = new Map<string, ContributionDraftPayload>();
+  contributions.forEach((contribution) => {
+    const normalizedWorkstream = normalizeWorkstream(contribution.workstream);
+    const ownerKey = contribution.personId || normalizePersonKey(contribution.owner);
+    const key = `${ownerKey}|${contribution.effortDate}|${normalizedWorkstream.toLowerCase()}`;
+    const existing = merged.get(key);
+    if (!existing) {
+      merged.set(key, { ...contribution, workstream: normalizedWorkstream });
+      return;
+    }
+    existing.workHours += contribution.workHours;
+    existing.prepHours += contribution.prepHours;
+    if (!existing.personId && contribution.personId) {
+      existing.personId = contribution.personId;
+    }
+  });
+  return Array.from(merged.values()).map((contribution) => ({
+    ...contribution,
+    workHours: Number(contribution.workHours.toFixed(2)),
+    prepHours: Number(contribution.prepHours.toFixed(2)),
+  }));
+};
 
 const parseYearFromDate = (value?: string | null) => {
   if (!value || value.length < 4) return null;
@@ -2187,6 +2242,13 @@ export default function CrmDataQualityView() {
       };
     };
 
+    const fallbackIdentity = resolveContributionIdentity(row.owner, null);
+    const rowWork = Number(row.workHours ?? 0);
+    const rowPrep = Number(row.prepHours ?? 0);
+    const hasLegacyEffort = !isZeroValue(rowWork) || !isZeroValue(rowPrep);
+    const shouldSeedFromTicket =
+      hasLegacyEffort ||
+      (Boolean(fallbackIdentity.owner) && !isUnassignedOwner(fallbackIdentity.owner));
     const contribs =
       row.contributions && row.contributions.length > 0
         ? row.contributions.map((c, idx) => ({
@@ -2204,12 +2266,20 @@ export default function CrmDataQualityView() {
           }))
         : [
             {
-              ...resolveContributionIdentity(row.owner, null),
               id: `c-${row.ticketId}-0`,
               effortDate: defaultEffortDateForAssignedDate(row.assignedDate || todaysIsoDate()),
-              workHours: String(row.workHours ?? ""),
-              prepHours:
-                row.prepHours != null ? String(row.prepHours) : computePrepHours(String(row.workHours ?? "")),
+              owner: shouldSeedFromTicket
+                ? fallbackIdentity.owner
+                : defaultContributionOwner?.owner || "",
+              personId: shouldSeedFromTicket
+                ? fallbackIdentity.personId
+                : defaultContributionOwner?.personId ?? null,
+              workHours: shouldSeedFromTicket ? String(row.workHours ?? "") : "",
+              prepHours: shouldSeedFromTicket
+                ? row.prepHours != null
+                  ? String(row.prepHours)
+                  : computePrepHours(String(row.workHours ?? ""))
+                : "",
               prepIsManual: false,
               workstream: DEFAULT_WORKSTREAM,
             },
@@ -2268,13 +2338,19 @@ export default function CrmDataQualityView() {
     setFormError(null);
     try {
       const fallbackEffortDate = defaultEffortDateForAssignedDate(form.assignedDate);
-      const contributions = formContribs
+      const contributionsRaw = formContribs
         .map((c) => {
           const rawEffort = (c.effortDate || "").trim();
           const effortDate = rawEffort && isIsoDate(rawEffort) ? rawEffort : fallbackEffortDate;
           const fallbackOwner = defaultContributionOwner?.owner || "";
           const fallbackPersonId = defaultContributionOwner?.personId ?? null;
           const owner = c.owner.trim() || fallbackOwner;
+          const ownerMatchesDefault =
+            Boolean(fallbackOwner) &&
+            normalizePersonKey(owner) === normalizePersonKey(fallbackOwner);
+          const personId =
+            c.personId ??
+            (ownerMatchesDefault || !c.owner.trim() ? fallbackPersonId : null);
           const w = Number(c.workHours || "0");
           const pRaw = c.prepHours;
           const p =
@@ -2283,16 +2359,19 @@ export default function CrmDataQualityView() {
               : Number(pRaw);
           return {
             owner,
-            personId: c.personId || fallbackPersonId,
+            personId,
             effortDate,
             workHours: Number.isFinite(w) && w >= 0 ? w : 0,
             prepHours: Number.isFinite(p) && p >= 0 ? p : w * 0.35,
             workstream: normalizeWorkstream(c.workstream),
           };
         })
-        .filter((c) => c.owner);
+        .filter((c) => c.owner)
+        .filter((c) => !isEmptyUnassignedContribution(c))
+        .filter((c) => hasPositiveContributionEffort(c));
+      const contributions = mergeContributionsByBusinessKey(contributionsRaw);
       if (contributions.length === 0) {
-        throw new Error("Please add at least one contribution with an owner.");
+        throw new Error("Please add at least one contribution with hours greater than 0.");
       }
       const totals = contributions.reduce(
         (acc, c) => {
@@ -4322,6 +4401,9 @@ export default function CrmDataQualityView() {
                     </button>
                   </div>
                 </div>
+                <p className="text-xs text-[color:var(--color-text)]/65">
+                  Entries with the same owner, date, and workstream are merged on save.
+                </p>
 
                 {showWorkstreamInput ? (
                   <div className="flex flex-wrap items-center gap-2 rounded-lg border border-[color:var(--color-border)] bg-[color:var(--color-surface)] px-3 py-2">
