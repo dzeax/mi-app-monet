@@ -5,7 +5,7 @@ import { generateSubjectLines } from '@/lib/ai/subjectLineGenerator';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
-export const maxDuration = 30;
+export const maxDuration = 60;
 
 const metadataSchema = z
   .object({
@@ -55,13 +55,40 @@ export async function POST(request: Request) {
 
   try {
     const result = await generateSubjectLines(parsed.data);
+    if (process.env.NODE_ENV === 'development') {
+      console.info('[api/ai/subject-lines] generation success', result?.debug ?? null);
+    }
     return NextResponse.json(result);
   } catch (error) {
     console.error('[api/ai/subject-lines] generation error', error);
+    const err = error as {
+      message?: unknown;
+      requestID?: unknown;
+      status?: unknown;
+      code?: unknown;
+      type?: unknown;
+    };
+    const detailParts: string[] = [];
+    if (typeof err.message === 'string' && err.message.trim()) {
+      detailParts.push(err.message.trim());
+    }
+    if (typeof err.requestID === 'string' && err.requestID.trim()) {
+      detailParts.push(`request_id=${err.requestID.trim()}`);
+    }
+    if (typeof err.status === 'number') {
+      detailParts.push(`status=${err.status}`);
+    }
+    if (typeof err.code === 'string' && err.code.trim()) {
+      detailParts.push(`code=${err.code.trim()}`);
+    }
+    if (typeof err.type === 'string' && err.type.trim()) {
+      detailParts.push(`type=${err.type.trim()}`);
+    }
+
     return NextResponse.json(
       {
         error: 'Subject line generation failed',
-        details: process.env.NODE_ENV === 'development' && error instanceof Error ? error.message : undefined,
+        details: process.env.NODE_ENV === 'development' ? detailParts.join(' | ') || undefined : undefined,
       },
       { status: 500 }
     );

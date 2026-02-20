@@ -266,6 +266,12 @@ export default function CampaignPlanningDrawer({
       })),
     [DATABASES]
   );
+  const matchedDatabaseName = useMemo(() => {
+    const needle = draft.database.trim().toLowerCase();
+    if (!needle) return null;
+    const matched = databaseOptions.find((option) => option.name.trim().toLowerCase() === needle);
+    return matched?.name ?? null;
+  }, [databaseOptions, draft.database]);
 
   const typeOptions = useMemo(() => (TYPES && TYPES.length ? TYPES : CAMPAIGN_TYPES), [TYPES]);
   const statusOptions = CAMPAIGN_STATUSES;
@@ -302,11 +308,13 @@ export default function CampaignPlanningDrawer({
   }, [open, availableLists]);
 
   useEffect(() => {
-    if (!open || !draft.database) {
+    const databaseName = matchedDatabaseName;
+    if (!open || !databaseName) {
       setRemoteDefaults(null);
       setDefaultsLoading(false);
       return;
     }
+    const activeDatabaseName: string = databaseName;
 
     let cancelled = false;
     setDefaultsLoading(true);
@@ -314,7 +322,7 @@ export default function CampaignPlanningDrawer({
 
     async function loadDefaults() {
       try {
-        const response = await fetch(`/api/doctorsender/defaults/${encodeURIComponent(draft.database)}`);
+        const response = await fetch(`/api/doctorsender/defaults/${encodeURIComponent(activeDatabaseName)}`);
         const payload = await response.json().catch(() => null);
         if (cancelled) return;
         if (response.ok && payload?.defaults) {
@@ -337,7 +345,7 @@ export default function CampaignPlanningDrawer({
     return () => {
       cancelled = true;
     };
-  }, [open, draft.database]);
+  }, [open, matchedDatabaseName]);
 
   useEffect(() => {
     if (!open) return;
@@ -700,7 +708,13 @@ export default function CampaignPlanningDrawer({
 
       const data = await response.json();
       if (!response.ok) {
-        throw new Error(typeof data?.error === 'string' ? data.error : 'Unable to generate subject lines.');
+        const message = [
+          typeof data?.error === 'string' ? data.error : null,
+          typeof data?.details === 'string' ? data.details : null,
+        ]
+          .filter(Boolean)
+          .join(' - ');
+        throw new Error(message || 'Unable to generate subject lines.');
       }
 
       setSubjectSuggestions(Array.isArray(data?.suggestions) ? data.suggestions : []);

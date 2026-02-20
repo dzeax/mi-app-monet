@@ -32,6 +32,14 @@ type DoctorSenderCampaignSnapshot = {
   status: string | null;
   sendDate: string | null;
   listUnsubscribe: string | null;
+  userList: string | null;
+};
+
+type DoctorSenderPreviewSendAttempt = {
+  format: 'string_array' | 'struct_array';
+  recipients: string[];
+  resultKind: 'false' | 'null' | 'object' | 'string' | 'number' | 'boolean' | 'unknown';
+  resultPreview: unknown;
 };
 
 export type DoctorSenderPreviewResult = {
@@ -96,14 +104,51 @@ function collectStrings(input: unknown, output: Set<string>, depth = 0) {
   }
 }
 
+function uniqueCaseInsensitive(values: string[]): string[] {
+  const seen = new Set<string>();
+  const result: string[] = [];
+  for (const entry of values) {
+    const normalized = entry.trim().toLowerCase();
+    if (!normalized || seen.has(normalized)) continue;
+    seen.add(normalized);
+    result.push(entry.trim());
+  }
+  return result;
+}
+
+function extractEmailsFromStrings(values: Iterable<string>): string[] {
+  const out: string[] = [];
+  const regex = /[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}/gi;
+  for (const value of values) {
+    const matches = value.match(regex);
+    if (!matches?.length) continue;
+    for (const match of matches) {
+      out.push(match);
+    }
+  }
+  return uniqueCaseInsensitive(out);
+}
+
+function extractDomainsFromStrings(values: Iterable<string>): string[] {
+  const out: string[] = [];
+  const regex = /\b([a-z0-9-]+\.)+[a-z]{2,}\b/gi;
+  for (const rawValue of values) {
+    const value = rawValue.replace(/^https?:\/\//i, '');
+    const matches = value.match(regex);
+    if (!matches?.length) continue;
+    for (const match of matches) {
+      out.push(match.toLowerCase());
+    }
+  }
+  return uniqueCaseInsensitive(out);
+}
+
 async function fetchAllowedFromEmails(account: { user: string; token: string }): Promise<string[] | null> {
   try {
     const response = await soapCall('dsSettingsGetAllFromEmail', [], account);
     const values = new Set<string>();
     collectStrings(response, values);
-    const emails = Array.from(values)
-      .map((entry) => entry.trim())
-      .filter((entry) => entry && entry.includes('@'));
+    const emails = extractEmailsFromStrings(values);
     if (!emails.length) {
       return null;
     }
@@ -119,9 +164,7 @@ async function fetchTrackingDomains(account: { user: string; token: string }): P
     const response = await soapCall('dsSettingsGetTracking', [], account);
     const values = new Set<string>();
     collectStrings(response, values);
-    const domains = Array.from(values)
-      .map((entry) => entry.trim().replace(/^https?:\/\//i, '').toLowerCase())
-      .filter((entry) => entry && entry.includes('.'));
+    const domains = extractDomainsFromStrings(values);
     if (!domains.length) {
       return null;
     }
@@ -164,6 +207,15 @@ async function runPreflight(
     );
   }
 
+  console.info('[DoctorSender] Preflight resolved', {
+    fromEmail,
+    trackingDomain: sanitizedTrackingDomain || null,
+    allowedFromEmailsCount: allowedFromEmails?.length ?? null,
+    allowedFromEmailsSample: allowedFromEmails?.slice(0, 5) ?? null,
+    allowedTrackingDomainsCount: allowedTrackingDomains?.length ?? null,
+    allowedTrackingDomainsSample: allowedTrackingDomains?.slice(0, 5) ?? null,
+  });
+
   return {
     fromEmailAllowed,
     allowedFromEmails,
@@ -177,7 +229,11 @@ async function fetchCampaignSnapshot(
   campaignId: number
 ): Promise<DoctorSenderCampaignSnapshot> {
   try {
-    const response = (await soapCall('dsCampaignGet', [campaignId, ['status', 'list_unsubscribe', 'send_date']], account)) as
+    const response = (await soapCall(
+      'dsCampaignGet',
+      [campaignId, ['status', 'list_unsubscribe', 'send_date', 'user_list']],
+      account
+    )) as
       | Record<string, unknown>
       | null
       | undefined;
@@ -193,11 +249,53 @@ async function fetchCampaignSnapshot(
       response && typeof (response as Record<string, unknown>).send_date === 'string'
         ? ((response as Record<string, unknown>).send_date as string)
         : null;
-    return { status, listUnsubscribe, sendDate };
+    const userList =
+      response && typeof (response as Record<string, unknown>).user_list === 'string'
+        ? (((response as Record<string, unknown>).user_list as string).trim() || null)
+        : null;
+    return { status, listUnsubscribe, sendDate, userList };
   } catch (error) {
     console.warn('DoctorSender snapshot fetch failed', { campaignId, error });
-    return { status: null, listUnsubscribe: null, sendDate: null };
+    return { status: null, listUnsubscribe: null, sendDate: null, userList: null };
   }
+}
+
+async function fetchCampaignSnapshotRaw(
+  account: { user: string; token: string },
+  campaignId: number
+): Promise<Record<string, unknown> | null> {
+  try {
+    const response = (await soapCall('dsCampaignGet', [campaignId], account)) as
+      | Record<string, unknown>
+      | null
+      | undefined;
+    if (!response || typeof response !== 'object') return null;
+    return response;
+  } catch (error) {
+    console.warn('DoctorSender raw snapshot fetch failed', { campaignId, error });
+    return null;
+  }
+}
+
+function summarizeSoapResult(result: unknown): {
+  resultKind: DoctorSenderPreviewSendAttempt['resultKind'];
+  resultPreview: unknown;
+} {
+  if (result === false) return { resultKind: 'false', resultPreview: false };
+  if (result == null) return { resultKind: 'null', resultPreview: null };
+  if (typeof result === 'object') return { resultKind: 'object', resultPreview: result };
+  if (typeof result === 'string') return { resultKind: 'string', resultPreview: result.slice(0, 300) };
+  if (typeof result === 'number') return { resultKind: 'number', resultPreview: result };
+  if (typeof result === 'boolean') return { resultKind: 'boolean', resultPreview: result };
+  return { resultKind: 'unknown', resultPreview: String(result) };
+}
+
+function isNilLikeSoapResult(result: unknown): boolean {
+  if (result == null) return true;
+  if (!result || typeof result !== 'object') return false;
+  const record = result as Record<string, unknown>;
+  if (!Object.prototype.hasOwnProperty.call(record, 'data')) return false;
+  return record.data == null && Object.keys(record).length <= 1;
 }
 
 export async function sendDoctorSenderPreview({
@@ -252,6 +350,7 @@ export async function sendDoctorSenderPreview({
   const parsedTemplateId = Number.parseInt(templateIdSource, 10);
   const templateId = Number.isFinite(parsedTemplateId) ? parsedTemplateId : null;
   const preflight = await runPreflight(account, fromEmail, trackingDomain);
+  const retryStructOnNil = process.env.DOCTORSENDER_TEST_SEND_STRUCT_FALLBACK === '1';
 
   const { html: finalHtml, plainText: plainTextRaw } = composeEmailHtml({
     headerHtml: defaults.headerHtml,
@@ -356,18 +455,99 @@ export async function sendDoctorSenderPreview({
   // Breve pausa para dar tiempo a DS a persistir la campaña antes del BAT
   await delay(2000);
 
-  // dsCampaignSendEmailsTest acepta array de strings
-  const previewContacts = previewRecipients;
-  let sendResult = await soapCall('dsCampaignSendEmailsTest', [currentCampaignId, previewContacts], account);
+  const sendAttempts: DoctorSenderPreviewSendAttempt[] = [];
+  const attemptPreviewSend = async (
+    format: DoctorSenderPreviewSendAttempt['format'],
+    payloadRecipients: string[] | Array<{ email: string }>
+  ) => {
+    const rawResult = await soapCall('dsCampaignSendEmailsTest', [currentCampaignId, payloadRecipients], account);
+    const summary = summarizeSoapResult(rawResult);
+    sendAttempts.push({
+      format,
+      recipients: previewRecipients,
+      resultKind: summary.resultKind,
+      resultPreview: summary.resultPreview,
+    });
+    console.info('[DoctorSender] BAT preview send attempt', {
+      campaignId: campaign.id,
+      dsCampaignId: currentCampaignId,
+      format,
+      recipientCount: previewRecipients.length,
+      recipients: previewRecipients,
+      resultKind: summary.resultKind,
+      resultPreview: summary.resultPreview,
+    });
+    return rawResult;
+  };
+
+  // dsCampaignSendEmailsTest attempt 1: plain string array
+  let sendResult = await attemptPreviewSend('string_array', previewRecipients);
   if (sendResult === false) {
     await delay(1500);
-    sendResult = await soapCall('dsCampaignSendEmailsTest', [currentCampaignId, previewContacts], account);
-    if (sendResult === false) {
+    sendResult = await attemptPreviewSend('string_array', previewRecipients);
+    if (sendResult === false && !retryStructOnNil) {
       throw new Error('DoctorSender rejected preview send (dsCampaignSendEmailsTest returned false after retry).');
     }
   }
 
+  // Optional diagnostics fallback:
+  // some DoctorSender accounts expect [{ email: "..." }] instead of ["..."] for test recipients.
+  const shouldTryStructFallback = retryStructOnNil && (sendResult === false || isNilLikeSoapResult(sendResult));
+  if (shouldTryStructFallback) {
+    await delay(1200);
+    const structRecipients = previewRecipients.map((email) => ({ email }));
+    const structResult = await attemptPreviewSend('struct_array', structRecipients);
+    if (structResult === false) {
+      throw new Error(
+        'DoctorSender rejected preview send using both recipient formats (string array and struct array).'
+      );
+    }
+    sendResult = structResult;
+  }
+
   const snapshot = await fetchCampaignSnapshot(account, currentCampaignId);
+  const finalSendSummary = summarizeSoapResult(sendResult);
+  const finalIsNilLike = isNilLikeSoapResult(sendResult);
+  console.info('[DoctorSender] BAT preview final result', {
+    campaignId: campaign.id,
+    dsCampaignId: currentCampaignId,
+    retryStructOnNil,
+    sendAttempts: sendAttempts.map((entry) => ({
+      format: entry.format,
+      resultKind: entry.resultKind,
+    })),
+    finalResultKind: finalSendSummary.resultKind,
+    finalResultPreview: finalSendSummary.resultPreview,
+    finalIsNilLike,
+    snapshot,
+  });
+  if (finalIsNilLike) {
+    console.warn('[DoctorSender] BAT preview returned no explicit dispatch confirmation from SOAP API', {
+      campaignId: campaign.id,
+      dsCampaignId: currentCampaignId,
+      retryStructOnNil,
+    });
+  }
+
+  const rawSnapshot = await fetchCampaignSnapshotRaw(account, currentCampaignId);
+  await writeDoctorSenderDebugFile(
+    `campaign-${campaign.id}-send-preview-summary.json`,
+    JSON.stringify(
+      {
+        campaignId: campaign.id,
+        dsCampaignId: currentCampaignId,
+        previewRecipients,
+        retryStructOnNil,
+        sendAttempts,
+        finalSendSummary,
+        finalIsNilLike,
+        snapshot,
+        rawSnapshot,
+      },
+      null,
+      2
+    )
+  );
 
   return {
     campaignId: currentCampaignId,

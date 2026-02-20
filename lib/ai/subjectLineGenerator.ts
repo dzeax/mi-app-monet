@@ -57,6 +57,12 @@ type RawSuggestion = {
 type SubjectLineResponse = {
   suggestions: SubjectLineSuggestion[];
   fromCache: boolean;
+  debug?: {
+    source: 'openai' | 'local-fallback';
+    model: string;
+    usedScreenshot: boolean;
+    attempt: string;
+  };
 };
 
 const SUBJECT_LINE_CACHE = new Map<string, SubjectLineResponse>();
@@ -64,6 +70,7 @@ const SUBJECT_LINE_CACHE = new Map<string, SubjectLineResponse>();
 const OPENAI_MODEL_DEFAULT = process.env.OPENAI_SUBJECT_LINES_MODEL ?? 'gpt-4o-mini';
 const SUBJECT_LINES_DEBUG = process.env.SUBJECT_LINES_DEBUG === '1';
 const SUBJECT_LINES_DEBUG_DIR = '.ds-debug';
+const SUBJECT_LINES_OPENAI_TIMEOUT_MS = 12_000;
 const SUBJECT_LINE_ALLOWED_MODELS = new Set(['gpt-5-mini', 'gpt-4-turbo']);
 const FALLBACK_SENDERS_BY_TONE: Record<string, string[]> = {
   neutral: ['Info Desk', 'Support Team', 'Atención Cliente', 'Equipo Soporte'],
@@ -90,10 +97,189 @@ const GENERIC_SENDER_BANNED_TERMS = new Set([
   'promo',
   'promos',
 ]);
+const FALLBACK_STOPWORDS = new Set([
+  'de',
+  'la',
+  'el',
+  'los',
+  'las',
+  'y',
+  'o',
+  'en',
+  'con',
+  'por',
+  'para',
+  'que',
+  'tu',
+  'tus',
+  'una',
+  'uno',
+  'un',
+  'sin',
+  'del',
+  'al',
+  'nos',
+  'se',
+  'si',
+  'solo',
+  'más',
+  'mas',
+  'the',
+  'and',
+  'for',
+  'with',
+  'your',
+]);
 
 const openaiClient = new OpenAI({
   apiKey: process.env.OPENAI_API_KEY,
+  maxRetries: 0,
 });
+
+type OpenAiAttempt = {
+  model: string;
+  screenshot: string | null;
+  label: string;
+};
+
+function errorToLowerString(error: unknown): string {
+  if (!error) return '';
+  const message = error instanceof Error ? error.message : String(error);
+  const cause = (error as { cause?: unknown }).cause;
+  const causeMessage = cause instanceof Error ? cause.message : cause ? String(cause) : '';
+  const name =
+    typeof (error as { name?: unknown }).name === 'string'
+      ? (error as { name: string }).name
+      : '';
+  const code =
+    typeof (error as { code?: unknown }).code === 'string'
+      ? (error as { code: string }).code
+      : '';
+  return `${name} ${message} ${causeMessage} ${code}`.toLowerCase();
+}
+
+function isOpenAiConnectionError(error: unknown): boolean {
+  const text = errorToLowerString(error);
+  if (!text) return false;
+  return (
+    text.includes('connection error') ||
+    text.includes('fetch failed') ||
+    text.includes('und_err_socket') ||
+    text.includes('socket') ||
+    text.includes('timed out') ||
+    text.includes('timeout') ||
+    text.includes('abort') ||
+    text.includes('econnreset') ||
+    text.includes('etimedout') ||
+    text.includes('network')
+  );
+}
+
+function getOpenAiErrorStatus(error: unknown): number | null {
+  const status = (error as { status?: unknown })?.status;
+  return typeof status === 'number' ? status : null;
+}
+
+function isOpenAiRetryableError(error: unknown): boolean {
+  if (isOpenAiConnectionError(error)) return true;
+  const status = getOpenAiErrorStatus(error);
+  if (status === 429) return true;
+  if (status != null && status >= 500) return true;
+
+  const code = String((error as { code?: unknown })?.code ?? '').toLowerCase();
+  const type = String((error as { type?: unknown })?.type ?? '').toLowerCase();
+  return code === 'server_error' || type === 'server_error';
+}
+
+function sleep(ms: number): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+function buildOpenAiAttempts(input: {
+  selectedModel: string;
+  fallbackModel: string;
+  screenshotBase64: string | null;
+}): OpenAiAttempt[] {
+  const attempts: OpenAiAttempt[] = [];
+  if (input.screenshotBase64) {
+    attempts.push({
+      model: input.selectedModel,
+      screenshot: input.screenshotBase64,
+      label: 'primary-with-screenshot',
+    });
+    if (input.fallbackModel && input.fallbackModel !== input.selectedModel) {
+      attempts.push({
+        model: input.fallbackModel,
+        screenshot: input.screenshotBase64,
+        label: 'fallback-model-with-screenshot',
+      });
+    }
+    attempts.push({
+      model: input.selectedModel,
+      screenshot: null,
+      label: 'primary-no-screenshot',
+    });
+  } else {
+    attempts.push({
+      model: input.selectedModel,
+      screenshot: null,
+      label: 'primary-no-screenshot',
+    });
+  }
+
+  if (input.fallbackModel && input.fallbackModel !== input.selectedModel) {
+    attempts.push({
+      model: input.fallbackModel,
+      screenshot: null,
+      label: 'fallback-model-no-screenshot',
+    });
+  }
+
+  return attempts;
+}
+
+function buildOpenAiInput(
+  systemInstruction: string,
+  prompt: string,
+  screenshotBase64: string | null
+): EasyInputMessage[] {
+  const userContent: ResponseInputContent[] = [{ type: 'input_text', text: prompt }];
+  if (screenshotBase64) {
+    userContent.push({
+      type: 'input_image',
+      detail: 'auto',
+      image_url: `data:image/png;base64,${screenshotBase64}`,
+    });
+  }
+
+  return [
+    {
+      role: 'system',
+      content: [{ type: 'input_text', text: systemInstruction }],
+    },
+    {
+      role: 'user',
+      content: userContent,
+    },
+  ];
+}
+
+async function createOpenAiResponse(
+  selectedModel: string,
+  systemInstruction: string,
+  prompt: string,
+  screenshotBase64: string | null
+) {
+  const input = buildOpenAiInput(systemInstruction, prompt, screenshotBase64);
+  const openAiRequest: ResponseCreateParamsNonStreaming = {
+    model: selectedModel,
+    input,
+  };
+
+  return openaiClient.responses.create(openAiRequest, {
+    timeout: SUBJECT_LINES_OPENAI_TIMEOUT_MS,
+  });
+}
 
 function sanitizeWhitespace(value: string): string {
   return value.replace(/\u2800+/g, ' ').replace(/\s+/g, ' ').trim();
@@ -224,6 +410,101 @@ function extractJsonBlock(raw: string): string | null {
   return raw.slice(start, end + 1);
 }
 
+function fitToMaxLength(text: string, maxLength: number): string {
+  let normalized = sanitizeWhitespace(text);
+  if ([...normalized].length <= maxLength) return normalized;
+  const words = normalized.split(' ');
+  while (words.length > 1 && [...words.join(' ')].length > maxLength) {
+    words.pop();
+  }
+  normalized = words.join(' ').trim();
+  if ([...normalized].length <= maxLength) return normalized;
+  return [...normalized].slice(0, Math.max(12, maxLength)).join('').trim();
+}
+
+function extractKeywords(plainText: string): string[] {
+  const tokens = plainText
+    .toLowerCase()
+    .split(/[^a-zà-öø-ÿ0-9]+/i)
+    .map((token) => token.trim())
+    .filter((token) => token.length >= 4 && !FALLBACK_STOPWORDS.has(token));
+  const seen = new Set<string>();
+  const out: string[] = [];
+  for (const token of tokens) {
+    if (seen.has(token)) continue;
+    seen.add(token);
+    out.push(token);
+    if (out.length >= 6) break;
+  }
+  return out;
+}
+
+function buildLocalFallbackSuggestions(input: {
+  mode: GenerationMode;
+  count: number;
+  maxLength: number;
+  tone: string;
+  plainText: string;
+  metadata: SubjectLineMetadata;
+  bannedSenderTerms: Set<string>;
+}): SubjectLineSuggestion[] {
+  const lower = input.plainText.toLowerCase();
+  const keywords = extractKeywords(input.plainText);
+  const keywordA = keywords[0];
+  const keywordB = keywords[1];
+  const campaign = sanitizeWhitespace(input.metadata.campaignName ?? '');
+
+  const candidates: string[] = [];
+  if (lower.includes('tarjeta revolving')) {
+    candidates.push('¿Tu tarjeta revolving te perjudica?');
+    candidates.push('Revisa tu tarjeta revolving hoy');
+  }
+  if (lower.includes('recupera tu dinero') || lower.includes('recuperar tu dinero')) {
+    candidates.push('Descubre si puedes recuperar dinero');
+    candidates.push('Consulta tu caso y recupera más');
+  }
+  if (lower.includes('solo cobramos si') || lower.includes('si tú ganas') || lower.includes('si tu ganas')) {
+    candidates.push('Solo pagas si tu caso sale bien');
+  }
+  candidates.push('Evalúa tu caso en pocos minutos');
+  candidates.push('Comprueba si tu caso es viable');
+  candidates.push('Consulta rápida con equipo legal');
+  if (keywordA) {
+    candidates.push(`Novedades sobre ${keywordA}`);
+  }
+  if (keywordA && keywordB) {
+    candidates.push(`${keywordA} y ${keywordB}: ¿te afecta?`);
+  }
+  if (campaign) {
+    candidates.push(`${campaign}: revisa tu situación`);
+  }
+
+  const uniqueTexts = dedupeByText(
+    candidates.map((text) => ({
+      text: fitToMaxLength(text, input.maxLength),
+      emoji: false,
+      personalization: false,
+      length: 0,
+      rationale: 'Generated locally due temporary AI service instability.',
+    }))
+  )
+    .map((entry) => ({
+      ...entry,
+      length: [...entry.text].length,
+    }))
+    .filter((entry) => entry.text.length > 0 && entry.length <= input.maxLength);
+
+  const usedSenders = input.mode === 'pair' ? new Set<string>() : null;
+  const withSender = uniqueTexts.map((entry) => {
+    if (input.mode !== 'pair') return entry;
+    const sender = generateFallbackSender(input.tone, input.bannedSenderTerms, usedSenders ?? undefined);
+    usedSenders?.add(sender.toLowerCase());
+    return { ...entry, sender };
+  });
+
+  return withSender.slice(0, input.count);
+}
+
 function parseSuggestionsFromText(raw: string): RawSuggestion[] {
   const jsonBlock = extractJsonBlock(raw);
   if (!jsonBlock) return [];
@@ -267,6 +548,7 @@ export async function generateSubjectLines({
 
   const selectedModel =
     model && SUBJECT_LINE_ALLOWED_MODELS.has(model) ? model : OPENAI_MODEL_DEFAULT;
+  const fallbackModel = OPENAI_MODEL_DEFAULT;
 
   const cacheKey = createHash('sha256')
     .update(
@@ -345,31 +627,6 @@ export async function generateSubjectLines({
       ? 'You are an elite performance email copywriter. Your workflow: (1) study the supplied campaign assets (screenshot plus text excerpt) to understand the offer, positioning, CTA, urgency, and tone; (2) extract the most compelling hooks and differentiators; (3) write compliant, brand-safe sender + subject pairs that maximise opens, stay concise, and feel fresh. Sender policy: 1-2 natural words (prefer two-word combinations) that sound like a real team/desk/service, no emojis, no brand names, no generic promo nouns such as ahorro, gratis, regalo, ofertas, precio, gana. Ground every idea in the provided assets - no hallucinated claims.'
       : 'You are an elite performance email copywriter. Your workflow: (1) study the supplied campaign assets (screenshot plus text excerpt) to understand the offer, positioning, CTA, urgency, and tone; (2) extract the most compelling hooks and differentiators; (3) write compliant, brand-safe subject lines that maximise opens, stay concise, and feel fresh. Ground every idea in the provided assets - no hallucinated claims.';
 
-  const userContent: ResponseInputContent[] = [{ type: 'input_text', text: prompt }];
-  if (screenshotBase64) {
-    userContent.push({
-      type: 'input_image',
-      detail: 'auto',
-      image_url: `data:image/png;base64,${screenshotBase64}`,
-    });
-  }
-
-  const input: EasyInputMessage[] = [
-    {
-      role: 'system',
-      content: [{ type: 'input_text', text: systemInstruction }],
-    },
-    {
-      role: 'user',
-      content: userContent,
-    },
-  ];
-
-  const openAiRequest: ResponseCreateParamsNonStreaming = {
-    model: selectedModel,
-    input,
-  };
-
   let debugScreenshotPath: string | null = null;
   if (SUBJECT_LINES_DEBUG) {
     if (screenshotBase64) {
@@ -396,10 +653,95 @@ export async function generateSubjectLines({
       screenshotSample: screenshotBase64 ? `${screenshotBase64.slice(0, 80)}...` : null,
       plainTextExcerpt: plainText.slice(0, 200),
       screenshotPath: debugScreenshotPath,
+      timeoutMs: SUBJECT_LINES_OPENAI_TIMEOUT_MS,
     });
   }
 
-  const response = await openaiClient.responses.create(openAiRequest);
+  const attempts = buildOpenAiAttempts({
+    selectedModel,
+    fallbackModel,
+    screenshotBase64,
+  });
+
+  let response: Awaited<ReturnType<typeof createOpenAiResponse>> | null = null;
+  let successfulAttempt: OpenAiAttempt | null = null;
+  let lastError: unknown = null;
+
+  for (let index = 0; index < attempts.length; index += 1) {
+    const attempt = attempts[index];
+    try {
+      response = await createOpenAiResponse(
+        attempt.model,
+        systemInstruction,
+        prompt,
+        attempt.screenshot
+      );
+      successfulAttempt = attempt;
+      console.info('[ai:subject-lines] OpenAI attempt succeeded', {
+        attempt: attempt.label,
+        model: attempt.model,
+        includesScreenshot: Boolean(attempt.screenshot),
+      });
+      break;
+    } catch (error) {
+      lastError = error;
+      const retryable = isOpenAiRetryableError(error);
+      const hasNextAttempt = index < attempts.length - 1;
+
+      console.warn('[ai:subject-lines] OpenAI attempt failed', {
+        attempt: attempt.label,
+        model: attempt.model,
+        includesScreenshot: Boolean(attempt.screenshot),
+        retryable,
+        status: getOpenAiErrorStatus(error),
+        code: (error as { code?: unknown })?.code ?? null,
+        requestID: (error as { requestID?: unknown })?.requestID ?? null,
+      });
+
+      if (!retryable) {
+        throw error;
+      }
+      if (!hasNextAttempt) {
+        break;
+      }
+
+      const backoffMs = 400 * (index + 1);
+      await sleep(backoffMs);
+    }
+  }
+
+  if (!response) {
+    if (lastError && isOpenAiRetryableError(lastError)) {
+      console.warn('[ai:subject-lines] Falling back to local suggestions after retryable OpenAI failures.', {
+        mode,
+        model: selectedModel,
+      });
+      const fallbackSuggestions = buildLocalFallbackSuggestions({
+        mode,
+        count,
+        maxLength,
+        tone,
+        plainText,
+        metadata,
+        bannedSenderTerms,
+      });
+      if (fallbackSuggestions.length) {
+      const fallbackPayload: SubjectLineResponse = {
+        suggestions: fallbackSuggestions,
+        fromCache: false,
+        debug: {
+          source: 'local-fallback',
+          model: selectedModel,
+          usedScreenshot: false,
+          attempt: 'local-fallback',
+        },
+      };
+      SUBJECT_LINE_CACHE.set(cacheKey, fallbackPayload);
+      return fallbackPayload;
+      }
+    }
+    throw (lastError instanceof Error ? lastError : new Error('OpenAI response was not received.'));
+  }
 
   const rawOutput = response.output_text ?? '';
   let suggestionsArray = parseSuggestionsFromText(rawOutput);
@@ -466,6 +808,12 @@ export async function generateSubjectLines({
   const payload: SubjectLineResponse = {
     suggestions,
     fromCache: false,
+    debug: {
+      source: 'openai',
+      model: successfulAttempt?.model ?? selectedModel,
+      usedScreenshot: Boolean(successfulAttempt?.screenshot),
+      attempt: successfulAttempt?.label ?? 'unknown',
+    },
   };
 
   SUBJECT_LINE_CACHE.set(cacheKey, payload);

@@ -132,45 +132,159 @@ function buildEnvelope(method: string, data: SoapValue[], auth: { user: string; 
 </SOAP-ENV:Envelope>`;
 }
 
+function extractTopLevelItemBlocks(xml: string): string[] {
+  const blocks: string[] = [];
+  const openTag = /<item\b[^>]*>/gi;
+  const closeTag = /<\/item>/gi;
+
+  let cursor = 0;
+  let depth = 0;
+  let blockStart = -1;
+
+  while (cursor < xml.length) {
+    openTag.lastIndex = cursor;
+    closeTag.lastIndex = cursor;
+    const nextOpen = openTag.exec(xml);
+    const nextClose = closeTag.exec(xml);
+
+    if (!nextOpen && !nextClose) break;
+
+    if (nextOpen && (!nextClose || nextOpen.index < nextClose.index)) {
+      if (depth === 0) blockStart = nextOpen.index;
+      depth += 1;
+      cursor = nextOpen.index + nextOpen[0].length;
+      continue;
+    }
+
+    if (nextClose) {
+      if (depth > 0) {
+        depth -= 1;
+        cursor = nextClose.index + nextClose[0].length;
+        if (depth === 0 && blockStart >= 0) {
+          blocks.push(xml.slice(blockStart, cursor));
+          blockStart = -1;
+        }
+      } else {
+        cursor = nextClose.index + nextClose[0].length;
+      }
+    }
+  }
+
+  return blocks;
+}
+
+function parseScalarValue(rawValue: string): string | number | boolean | null {
+  const decodedValue = decodeXmlEntities(rawValue.trim());
+  if (!decodedValue) return null;
+  if (decodedValue === 'true') return true;
+  if (decodedValue === 'false') return false;
+  const numeric = Number(decodedValue);
+  if (Number.isFinite(numeric) && decodedValue === String(numeric)) {
+    return numeric;
+  }
+  return decodedValue;
+}
+
+function parseSoapMapBody(body: string, depth = 0): Record<string, unknown> {
+  const result: Record<string, unknown> = {};
+  if (depth > 6) return result;
+
+  const topLevelItems = extractTopLevelItemBlocks(body);
+  for (const itemXml of topLevelItems) {
+    const keyMatch = itemXml.match(/<key[^>]*>([\s\S]*?)<\/key>/i);
+    if (!keyMatch) continue;
+    const key = decodeXmlEntities(keyMatch[1].trim());
+
+    // Only consider the *top-level* <value> for this item. Nested xsi:nil values inside maps/arrays
+    // must not null-out the entire item payload.
+    const keyEndIndex = (keyMatch.index ?? 0) + keyMatch[0].length;
+    const afterKey = itemXml.slice(keyEndIndex);
+    const valueTagMatch = afterKey.match(/<value\b[^>]*>/i);
+    if (valueTagMatch && /xsi:nil="true"/i.test(valueTagMatch[0])) {
+      result[key] = null;
+      continue;
+    }
+
+    const valueMatch = afterKey.match(/<value[^>]*>([\s\S]*)<\/value>/i);
+    if (!valueMatch) {
+      result[key] = null;
+      continue;
+    }
+
+    const rawValue = valueMatch[1].trim();
+    if (!rawValue) {
+      result[key] = null;
+      continue;
+    }
+
+    result[key] = parseSoapValue(rawValue, depth + 1);
+  }
+
+  const nested = result.msg;
+  if (nested && typeof nested === 'object' && !Array.isArray(nested)) {
+    for (const [nestedKey, nestedValue] of Object.entries(nested)) {
+      if (!(nestedKey in result)) {
+        result[nestedKey] = nestedValue;
+      }
+    }
+  }
+
+  return result;
+}
+
+function parseSoapArrayBody(body: string, depth = 0): unknown[] {
+  if (depth > 6) return [];
+
+  const result: unknown[] = [];
+  const topLevelItems = extractTopLevelItemBlocks(body);
+  for (const itemXml of topLevelItems) {
+    const nilItem = itemXml.match(/<item[^>]*xsi:nil="true"[^>]*\/>/i);
+    if (nilItem) {
+      result.push(null);
+      continue;
+    }
+
+    const contentMatch = itemXml.match(/<item[^>]*>([\s\S]*)<\/item>/i);
+    if (!contentMatch) {
+      result.push(null);
+      continue;
+    }
+
+    const rawValue = contentMatch[1].trim();
+    result.push(parseSoapValue(rawValue, depth + 1));
+  }
+  return result;
+}
+
+function parseSoapValue(rawValue: string, depth = 0): unknown {
+  if (depth > 6) return parseScalarValue(rawValue);
+
+  const trimmed = rawValue.trim();
+  if (!trimmed) return null;
+
+  if (/<item\b/i.test(trimmed)) {
+    const looksLikeMap = /<key\b/i.test(trimmed) && /<value\b/i.test(trimmed);
+    if (looksLikeMap) return parseSoapMapBody(trimmed, depth + 1);
+    return parseSoapArrayBody(trimmed, depth + 1);
+  }
+
+  return parseScalarValue(trimmed);
+}
+
 function parseSoapResponse(xml: string, method: string) {
   const mapMatch = xml.match(/<webserviceReturn[^>]*>([\s\S]*?)<\/webserviceReturn>/);
   if (mapMatch) {
     const body = mapMatch[1];
-    const result: Record<string, unknown> = {};
-    const itemRegex = /<item>([\s\S]*?)<\/item>/g;
-    let itemMatch: RegExpExecArray | null;
-    while ((itemMatch = itemRegex.exec(body)) !== null) {
-      const itemXml = itemMatch[1];
-      const keyMatch = itemXml.match(/<key[^>]*>([\s\S]*?)<\/key>/);
-      const valueMatch = itemXml.match(/<value[^>]*>([\s\S]*?)<\/value>/);
-      if (!keyMatch) continue;
-      const key = decodeXmlEntities(keyMatch[1].trim());
-      if (!valueMatch) {
-        result[key] = null;
-        continue;
-      }
-      const rawValue = valueMatch[1].trim();
-      if (!rawValue || /^<\/?value/.test(rawValue)) {
-        result[key] = null;
-        continue;
-      }
-      if (rawValue.includes('<item>')) {
-        result[key] = decodeXmlEntities(rawValue);
-        continue;
-      }
-      const decodedValue = decodeXmlEntities(rawValue);
-      const numeric = Number(decodedValue);
-      result[key] = Number.isFinite(numeric) && decodedValue === String(numeric) ? numeric : decodedValue;
-    }
-    return result;
+    return parseSoapMapBody(body);
   }
 
   const match = xml.match(/<return[^>]*>([\s\S]*?)<\/return>/);
   if (!match) {
-    // Some responses return <webserviceReturn xsi:nil="true"/> to mean "OK but no body"
+    // Some responses return <webserviceReturn xsi:nil="true"/> to mean "OK but no body".
+    // Normalize this to null so callers can branch on a real empty result.
     const nilReturn = xml.match(/<webserviceReturn[^>]*xsi:nil="true"[^>]*\/>/);
     if (nilReturn) {
-      return { data: null };
+      return null;
     }
     console.error('DoctorSender SOAP response missing <return>', {
       method,
@@ -237,5 +351,9 @@ export async function soapCall(
     throw new Error(payload?.msg || JSON.stringify(payload) || 'DoctorSender returned an error.');
   }
 
-  return payload?.data ?? payload;
+  if (payload && typeof payload === 'object' && 'data' in payload) {
+    return (payload as Record<string, unknown>).data;
+  }
+
+  return payload;
 }
