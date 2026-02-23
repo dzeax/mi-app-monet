@@ -266,9 +266,10 @@ export async function GET(req: Request) {
     return NextResponse.json({ error: currentUserError.message }, { status: 500 });
   }
 
-  if (!currentUser || currentUser.is_active === false || currentUser.role !== 'admin') {
+  if (!currentUser || currentUser.is_active === false) {
     return NextResponse.json({ error: 'Forbidden' }, { status: 403 });
   }
+  const isAdmin = currentUser.role === 'admin';
 
   const url = new URL(req.url);
   const now = new Date();
@@ -301,10 +302,14 @@ export async function GET(req: Request) {
   const yearEndStr = formatDate(yearEnd);
 
   const admin = supabaseAdmin();
-  const { data: users, error: usersError } = await admin
+  let usersQuery = admin
     .from('app_users')
     .select('user_id,email,display_name,avatar_url,in_team_capacity,is_active')
     .eq('is_active', true);
+  if (!isAdmin) {
+    usersQuery = usersQuery.eq('user_id', user.id);
+  }
+  const { data: users, error: usersError } = await usersQuery;
 
   if (usersError) {
     return NextResponse.json({ error: usersError.message }, { status: 500 });
@@ -475,12 +480,14 @@ export async function GET(req: Request) {
   const addWorkload = (userId: string | null, hours: number, weekKey: string | null) => {
     if (!Number.isFinite(hours) || hours <= 0) return;
     if (!userId) {
-      unmappedHours += hours;
-      if (weekKey) {
-        weeklyExternalWorkload.set(
-          weekKey,
-          (weeklyExternalWorkload.get(weekKey) ?? 0) + hours,
-        );
+      if (isAdmin) {
+        unmappedHours += hours;
+        if (weekKey) {
+          weeklyExternalWorkload.set(
+            weekKey,
+            (weeklyExternalWorkload.get(weekKey) ?? 0) + hours,
+          );
+        }
       }
       return;
     }

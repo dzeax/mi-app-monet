@@ -98,7 +98,7 @@ type WorkloadDetail = {
   hours: number;
 };
 
-const requireAdmin = async () => {
+const requireCapacityReadAccess = async () => {
   const supabase = await createServerSupabase();
   const { data: userData, error: userError } = await supabase.auth.getUser();
   const user = userData?.user ?? null;
@@ -121,11 +121,11 @@ const requireAdmin = async () => {
     return { error: NextResponse.json({ error: currentUserError.message }, { status: 500 }) };
   }
 
-  if (!currentUser || currentUser.is_active === false || currentUser.role !== 'admin') {
+  if (!currentUser || currentUser.is_active === false) {
     return { error: NextResponse.json({ error: 'Forbidden' }, { status: 403 }) };
   }
 
-  return { user };
+  return { user, isAdmin: currentUser.role === 'admin' };
 };
 
 const normalize = (value?: string | null) =>
@@ -187,8 +187,9 @@ async function fetchAll<T>(
 }
 
 export async function GET(req: Request) {
-  const auth = await requireAdmin();
+  const auth = await requireCapacityReadAccess();
   if (auth.error) return auth.error;
+  const { user, isAdmin } = auth;
 
   const url = new URL(req.url);
   const parsed = querySchema.safeParse({
@@ -205,11 +206,19 @@ export async function GET(req: Request) {
     return NextResponse.json({ error: 'Invalid date range.' }, { status: 400 });
   }
 
+  if (!isAdmin && parsed.data.userId && parsed.data.userId !== user.id) {
+    return NextResponse.json({ error: 'Forbidden' }, { status: 403 });
+  }
+
   const admin = supabaseAdmin();
-  const { data: users, error: usersError } = await admin
+  let usersQuery = admin
     .from('app_users')
     .select('user_id,email,display_name,is_active,in_team_capacity')
     .eq('is_active', true);
+  if (!isAdmin) {
+    usersQuery = usersQuery.eq('user_id', user.id);
+  }
+  const { data: users, error: usersError } = await usersQuery;
 
   if (usersError) {
     return NextResponse.json({ error: usersError.message }, { status: 500 });
@@ -311,8 +320,9 @@ export async function GET(req: Request) {
   clientNames.set('internal', 'Internal');
 
   const { start, end, userId } = parsed.data;
-  const targetUserIds = userId
-    ? new Set([userId])
+  const effectiveUserId = isAdmin ? userId ?? null : user.id;
+  const targetUserIds = effectiveUserId
+    ? new Set([effectiveUserId])
     : new Set(
         members
           .filter((member) => member.in_team_capacity ?? true)

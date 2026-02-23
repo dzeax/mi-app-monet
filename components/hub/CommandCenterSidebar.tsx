@@ -77,6 +77,25 @@ export default function CommandCenterSidebar({
     </button>
   );
 
+  const BtnMyCapacity = (
+    <button
+      onClick={() => router.push('/command-center/my-capacity')}
+      className={btnBase(pathname?.startsWith('/command-center/my-capacity') ? 'sidebar-btn--active' : '')}
+      title="My Capacity"
+      aria-label="My Capacity"
+    >
+      <Image
+        src="/icons/sidebar/reports.svg"
+        alt=""
+        aria-hidden
+        width={24}
+        height={24}
+        className="sidebar-icon"
+      />
+      {!collapsed && <span>My Capacity</span>}
+    </button>
+  );
+
   const BtnWorklogs = (
     <button
       onClick={() => router.push('/command-center/worklogs')}
@@ -172,7 +191,7 @@ export default function CommandCenterSidebar({
       key: 'team',
       title: 'Team',
       description: 'Capacity & workload',
-      items: [isAdmin ? BtnCapacity : null, BtnWorklogs],
+      items: [BtnMyCapacity, isAdmin ? BtnCapacity : null, BtnWorklogs],
     },
     {
       key: 'admin',

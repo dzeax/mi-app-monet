@@ -273,6 +273,14 @@ export default function OperationsHub() {
               Enter Monetization
               <ArrowRightIcon className="h-4 w-4" />
             </button>
+            <button
+              type="button"
+              className="btn-ghost hub-btn-ghost"
+              onClick={() => router.push('/command-center/my-capacity')}
+            >
+              My Capacity
+              <ArrowRightIcon className="h-4 w-4" />
+            </button>
           </div>
         </div>
 
