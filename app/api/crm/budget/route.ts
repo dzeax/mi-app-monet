@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import { cookies } from "next/headers";
 import { createRouteHandlerClient } from "@supabase/auth-helpers-nextjs";
 import { getTodayIsoInMadrid } from "@/lib/crm/dateBoundaries";
+import { isCrmBudgetExecutionEnhancedClient } from "@/lib/crm/clients";
 
 const DEFAULT_CLIENT = "emg";
 const PAGE_SIZE = 1000;
@@ -45,6 +46,7 @@ export async function GET(request: Request) {
 
   const { searchParams } = new URL(request.url);
   const client = searchParams.get("client") || DEFAULT_CLIENT;
+  const includeExtendedSources = isCrmBudgetExecutionEnhancedClient(client);
   const year = parseYear(searchParams.get("year"));
   const yearStart = `${year}-01-01`;
   const yearEnd = `${year}-12-31`;
@@ -165,29 +167,33 @@ export async function GET(request: Request) {
       dailyRatesByPersonId[personId] = entry.dailyRate;
     });
 
-    const contribRows = await fetchPaged<any>((from, to) =>
-      supabase
-        .from("crm_data_quality_contributions")
-        .select("person_id, owner, work_hours, prep_hours, effort_date")
-        .eq("client_slug", client)
-        .gte("effort_date", yearStart)
-        .lte("effort_date", yearEnd)
-        .order("effort_date", { ascending: true })
-        .order("id", { ascending: true })
-        .range(from, to),
-    );
+    const contribRows = includeExtendedSources
+      ? await fetchPaged<any>((from, to) =>
+          supabase
+            .from("crm_data_quality_contributions")
+            .select("person_id, owner, work_hours, prep_hours, effort_date")
+            .eq("client_slug", client)
+            .gte("effort_date", yearStart)
+            .lte("effort_date", yearEnd)
+            .order("effort_date", { ascending: true })
+            .order("id", { ascending: true })
+            .range(from, to),
+        )
+      : [];
 
-    const campaignRows = await fetchPaged<any>((from, to) =>
-      supabase
-        .from("campaign_email_units")
-        .select("person_id, owner, hours_total, send_date")
-        .eq("client_slug", client)
-        .gte("send_date", yearStart)
-        .lte("send_date", campaignSpendEnd)
-        .order("send_date", { ascending: true })
-        .order("id", { ascending: true })
-        .range(from, to),
-    );
+    const campaignRows = includeExtendedSources
+      ? await fetchPaged<any>((from, to) =>
+          supabase
+            .from("campaign_email_units")
+            .select("person_id, owner, hours_total, send_date")
+            .eq("client_slug", client)
+            .gte("send_date", yearStart)
+            .lte("send_date", campaignSpendEnd)
+            .order("send_date", { ascending: true })
+            .order("id", { ascending: true })
+            .range(from, to),
+        )
+      : [];
 
     const manualRows = await fetchPaged<any>((from, to) =>
       supabase

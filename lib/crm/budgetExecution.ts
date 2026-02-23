@@ -1,5 +1,6 @@
 import type { SupabaseClient } from "@supabase/supabase-js";
 import { getTodayIsoInMadrid } from "@/lib/crm/dateBoundaries";
+import { isCrmBudgetExecutionEnhancedClient } from "@/lib/crm/clients";
 
 const PAGE_SIZE = 1000;
 const DAY_MS = 24 * 60 * 60 * 1000;
@@ -43,6 +44,7 @@ export async function getBudgetExecutionData({
   client: string;
   year: number;
 }) {
+  const includeExtendedSources = isCrmBudgetExecutionEnhancedClient(client);
   const yearStart = `${year}-01-01`;
   const yearEnd = `${year}-12-31`;
   const madridToday = getTodayIsoInMadrid();
@@ -334,29 +336,33 @@ export async function getBudgetExecutionData({
     workstream?: string | null;
   };
 
-  const contribRows = await fetchPaged<ContributionRow>((from, to) =>
-    supabase
-      .from("crm_data_quality_contributions")
-      .select("person_id, owner, work_hours, prep_hours, effort_date, workstream")
-      .eq("client_slug", client)
-      .gte("effort_date", yearStart)
-      .lte("effort_date", yearEnd)
-      .order("effort_date", { ascending: true })
-      .order("id", { ascending: true })
-      .range(from, to),
-  );
+  const contribRows = includeExtendedSources
+    ? await fetchPaged<ContributionRow>((from, to) =>
+        supabase
+          .from("crm_data_quality_contributions")
+          .select("person_id, owner, work_hours, prep_hours, effort_date, workstream")
+          .eq("client_slug", client)
+          .gte("effort_date", yearStart)
+          .lte("effort_date", yearEnd)
+          .order("effort_date", { ascending: true })
+          .order("id", { ascending: true })
+          .range(from, to),
+      )
+    : [];
 
-  const campaignRows = await fetchPaged<CampaignRow>((from, to) =>
-    supabase
-      .from("campaign_email_units")
-      .select("person_id, owner, hours_total, days_total, send_date, brand, market, scope, segment")
-      .eq("client_slug", client)
-      .gte("send_date", yearStart)
-      .lte("send_date", campaignSpendEnd)
-      .order("send_date", { ascending: true })
-      .order("id", { ascending: true })
-      .range(from, to),
-  );
+  const campaignRows = includeExtendedSources
+    ? await fetchPaged<CampaignRow>((from, to) =>
+        supabase
+          .from("campaign_email_units")
+          .select("person_id, owner, hours_total, days_total, send_date, brand, market, scope, segment")
+          .eq("client_slug", client)
+          .gte("send_date", yearStart)
+          .lte("send_date", campaignSpendEnd)
+          .order("send_date", { ascending: true })
+          .order("id", { ascending: true })
+          .range(from, to),
+      )
+    : [];
 
   const manualRows = await fetchPaged<ManualEffortRow>((from, to) =>
     supabase

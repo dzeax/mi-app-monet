@@ -34,6 +34,7 @@ import {
 } from "recharts";
 import { chartTheme } from "@/components/charts/theme";
 import { canonicalGeo, geoEmoji, geoFlagClass, EMOJI_UNKNOWN } from "@/lib/geoFlags";
+import { getCrmClient, isCrmBudgetExecutionEnhancedClient } from "@/lib/crm/clients";
 import IfAdmin from "@/components/guards/IfAdmin";
 import CrmBudgetExecutionShareModal from "@/components/crm/CrmBudgetExecutionShareModal";
 
@@ -209,6 +210,15 @@ const COLUMN_LABELS: Record<ColumnKey, string> = {
 const PRODUCTION_SCOPE = "Production";
 const EMPTY_SET = new Set<string>();
 const CARRYOVER_CACHE_TTL_MS = 10 * 60 * 1000;
+const CLIENT_LOGOS: Record<string, { src: string; alt: string }> = {
+  emg: { src: "/logos/emg-logo.png", alt: "EMG" },
+  bouygues: { src: "/logos/bouygues-logo.png", alt: "Bouygues Telecom" },
+  taittinger: { src: "/logos/taittinger-logo.png", alt: "Taittinger" },
+  ponant: { src: "/logos/ponant-logo.png", alt: "Ponant" },
+  "petit-forestier": { src: "/logos/petit-forestier.png", alt: "Petit Forestier" },
+  "saveurs-et-vie": { src: "/logos/logo-saveurs-et-vie.svg", alt: "Saveurs et Vie" },
+  sfr: { src: "/logos/prm.png", alt: "Global PRM" },
+};
 
 const roundAmount = (value: number) => Math.round(value * 100) / 100;
 
@@ -747,6 +757,26 @@ export default function CrmBudgetExecutionView({
   const pathname = usePathname();
   const segments = pathname?.split("/").filter(Boolean) ?? [];
   const clientSlug = clientOverride || segments[1] || "emg";
+  const clientConfig = useMemo(() => getCrmClient(clientSlug), [clientSlug]);
+  const isEnhancedExecution = isCrmBudgetExecutionEnhancedClient(clientSlug);
+  const showProductionSection = isEnhancedExecution;
+  const showSourceMix = isEnhancedExecution;
+  const spentHelperLabel = isEnhancedExecution
+    ? "Production + Workstreams"
+    : "Manual workstreams";
+  const sourceLogicText = isEnhancedExecution
+    ? "KPIs and burn-up blend Production (campaign reporting) and Workstreams (DQ tickets + manual efforts)."
+    : "KPIs and burn-up are based on manual efforts grouped by workstream.";
+  const subtitleText = isEnhancedExecution
+    ? `Execution tracking by role and entity across Production and Workstreams for ${clientSlug.toUpperCase()}.`
+    : `Execution tracking by role and entity across manual workstreams for ${clientSlug.toUpperCase()}.`;
+  const workstreamsSectionLabel = isEnhancedExecution ? "Other Workstreams" : "Workstreams";
+  const workstreamsSectionTitle = isEnhancedExecution
+    ? "Consulting, Governance & Data Quality"
+    : "Manual efforts by workstream";
+  const workstreamsSectionDescription = isEnhancedExecution
+    ? "Effort logged across consulting, strategy/governance, and data quality, grouped by workstream."
+    : "Effort logged from manual entries, grouped by workstream.";
   const derivedShareToken = useMemo(() => {
     if (!shareMode) return undefined;
     if (segments.length >= 4 && segments[0] === "share") {
@@ -756,7 +786,7 @@ export default function CrmBudgetExecutionView({
     return undefined;
   }, [shareMode, segments]);
   const effectiveShareToken = shareToken || derivedShareToken;
-  const clientLogo = clientSlug === "emg" ? "/logos/emg-logo.png" : null;
+  const clientLogo = CLIENT_LOGOS[clientSlug] ?? null;
   const nowYear = new Date().getFullYear();
   const [year, setYear] = useState(initialYear ?? nowYear);
   const [data, setData] = useState<BudgetExecutionResponse | null>(null);
@@ -794,8 +824,8 @@ export default function CrmBudgetExecutionView({
   const [workstreamDetailOpen, setWorkstreamDetailOpen] = useState(false);
   const [workstreamDetailScope, setWorkstreamDetailScope] = useState<string | null>(null);
   const [carryoverSummary, setCarryoverSummary] = useState<BudgetCarryoverSummary | null>(null);
-  const [carryoverLoading, setCarryoverLoading] = useState(false);
   const [carryoverError, setCarryoverError] = useState<string | null>(null);
+  const [carryoverOpen, setCarryoverOpen] = useState(false);
 
   useEffect(() => {
     if (typeof window === "undefined") return;
@@ -813,7 +843,6 @@ export default function CrmBudgetExecutionView({
   useEffect(() => {
     if (shareMode) {
       setCarryoverSummary(null);
-      setCarryoverLoading(false);
       setCarryoverError(null);
       return;
     }
@@ -821,7 +850,6 @@ export default function CrmBudgetExecutionView({
     const fromYear = year - 1;
     if (!Number.isFinite(fromYear) || fromYear < 1900) {
       setCarryoverSummary(null);
-      setCarryoverLoading(false);
       setCarryoverError(null);
       return;
     }
@@ -846,7 +874,6 @@ export default function CrmBudgetExecutionView({
       setCarryoverSummary(cached.payload);
       const isFresh = Date.now() - Number(cached.at) <= CARRYOVER_CACHE_TTL_MS;
       if (isFresh) {
-        setCarryoverLoading(false);
         setCarryoverError(null);
         return;
       }
@@ -855,7 +882,6 @@ export default function CrmBudgetExecutionView({
     }
 
     let active = true;
-    setCarryoverLoading(!cached?.payload);
     setCarryoverError(null);
 
     const loadCarryover = async () => {
@@ -925,8 +951,6 @@ export default function CrmBudgetExecutionView({
         setCarryoverError(
           err instanceof Error ? err.message : "Unable to load carry-over summary",
         );
-      } finally {
-        if (active) setCarryoverLoading(false);
       }
     };
 
@@ -1017,6 +1041,24 @@ export default function CrmBudgetExecutionView({
     }
     return Array.from(base).sort((a, b) => b - a);
   }, [shareMode, shareAllowedYears, nowYear, initialYear]);
+
+  const detailLinks = useMemo(() => {
+    const links: Array<{ href: string; label: string }> = [];
+    const moduleSet = new Set(clientConfig?.modules.map((module) => module.slug) ?? []);
+    if (moduleSet.has("budget")) {
+      links.push({ href: `/crm/${clientSlug}/budget`, label: "Open Budget" });
+    }
+    if (moduleSet.has("manual-efforts")) {
+      links.push({ href: `/crm/${clientSlug}/manual-efforts`, label: "Open Manual Efforts" });
+    }
+    if (isEnhancedExecution && moduleSet.has("campaigns")) {
+      links.push({ href: `/crm/${clientSlug}/campaigns`, label: "Open Campaign Reporting" });
+    }
+    if (isEnhancedExecution && moduleSet.has("ticket-reporting")) {
+      links.push({ href: `/crm/${clientSlug}/ticket-reporting`, label: "Open Ticket Reporting" });
+    }
+    return links;
+  }, [clientConfig, clientSlug, isEnhancedExecution]);
 
   const currency = data?.currency || "EUR";
   const currencyFormatter = useMemo(() => {
@@ -1134,7 +1176,7 @@ export default function CrmBudgetExecutionView({
     data.table.rows.forEach((row) => {
       if (resourceFilterSet.size > 0 && (!row.personId || !resourceFilterSet.has(row.personId)))
         return;
-      const entityRow = buildRow(row, roleFilterSet, EMPTY_SET, EMPTY_SET, true);
+      const entityRow = buildRow(row, roleFilterSet, workstreamFilterSet, EMPTY_SET, true);
       if (entityRow) {
         entityCounts[row.entity] = (entityCounts[row.entity] ?? 0) + 1;
       }
@@ -1143,7 +1185,7 @@ export default function CrmBudgetExecutionView({
     data.table.rows.forEach((row) => {
       if (resourceFilterSet.size > 0 && (!row.personId || !resourceFilterSet.has(row.personId)))
         return;
-      const roleRow = buildRow(row, EMPTY_SET, EMPTY_SET, entityFilterSet, true);
+      const roleRow = buildRow(row, EMPTY_SET, workstreamFilterSet, entityFilterSet, true);
       if (!roleRow) return;
       if (row.isUnassigned) {
         roleCounts.unassigned = (roleCounts.unassigned ?? 0) + 1;
@@ -1172,13 +1214,21 @@ export default function CrmBudgetExecutionView({
 
     data.table.rows.forEach((row) => {
       if (!row.personId) return;
-      const resourceRow = buildRow(row, roleFilterSet, EMPTY_SET, entityFilterSet, true);
+      const resourceRow = buildRow(row, roleFilterSet, workstreamFilterSet, entityFilterSet, true);
       if (!resourceRow) return;
       resourceCounts[row.personId] = (resourceCounts[row.personId] ?? 0) + 1;
     });
 
     return { roleCounts, workstreamCounts, entityCounts, resourceCounts };
-  }, [data, roleFilterSet, entityFilterSet, resourceFilterSet, buildRow, roleShareForRow]);
+  }, [
+    data,
+    roleFilterSet,
+    workstreamFilterSet,
+    entityFilterSet,
+    resourceFilterSet,
+    buildRow,
+    roleShareForRow,
+  ]);
 
   const baseRows = useMemo(() => {
     if (!data) return [];
@@ -1186,10 +1236,10 @@ export default function CrmBudgetExecutionView({
       .map((row) => {
         if (resourceFilterSet.size > 0 && (!row.personId || !resourceFilterSet.has(row.personId)))
           return null;
-        return buildRow(row, roleFilterSet, EMPTY_SET, entityFilterSet, false);
+        return buildRow(row, roleFilterSet, workstreamFilterSet, entityFilterSet, false);
       })
       .filter((row): row is TableRow & { actual: number; plan: number; remaining: number; utilization: number; delta: number; risk: { label: string; tone: "ok" | "warn" | "danger" } } => Boolean(row));
-  }, [data, buildRow, roleFilterSet, entityFilterSet, resourceFilterSet]);
+  }, [data, buildRow, roleFilterSet, workstreamFilterSet, entityFilterSet, resourceFilterSet]);
 
   const planTotalFiltered = useMemo(
     () => baseRows.reduce((acc, row) => acc + row.plan, 0),
@@ -1208,7 +1258,7 @@ export default function CrmBudgetExecutionView({
     if (!data) {
       return [
         { label: "Annual plan", value: placeholder, helper: "Sum of budget pools", icon: Wallet },
-        { label: "Spent YTD", value: placeholder, helper: "Production + Workstreams", icon: CreditCard },
+        { label: "Spent YTD", value: placeholder, helper: spentHelperLabel, icon: CreditCard },
         { label: "Remaining", value: placeholder, helper: "Plan minus actuals", icon: PiggyBank },
         { label: "Utilization", value: placeholder, helper: "Spent / plan", icon: Activity },
       ];
@@ -1223,7 +1273,7 @@ export default function CrmBudgetExecutionView({
       {
         label: "Spent YTD",
         value: formatCurrency(actualTotalFiltered),
-        helper: "Production + Workstreams",
+        helper: spentHelperLabel,
         icon: CreditCard,
       },
       {
@@ -1247,10 +1297,35 @@ export default function CrmBudgetExecutionView({
     actualTotalFiltered,
     remainingFiltered,
     utilizationFiltered,
+    spentHelperLabel,
   ]);
 
   const filteredMonthlyActual = useMemo(() => {
     if (!data) return Array(12).fill(0);
+
+    const monthlyScope = data.monthlyScope ?? {};
+    const monthlyRole = data.monthlyRole ?? {};
+    const monthlyRoleScope = data.monthlyRoleScope ?? {};
+    const monthlyEntity = data.monthlyEntity ?? {};
+    const monthlyEntityScope = data.monthlyEntityScope ?? {};
+    const monthlyEntityRole = data.monthlyEntityRole ?? {};
+    const monthlyEntityRoleScope = data.monthlyEntityRoleScope ?? {};
+
+    if (resourceFilterSet.size > 0 && data.monthlyPersonScope && hasWorkstreamFilter) {
+      const seriesList: number[][] = [];
+      data.table.rows.forEach((row) => {
+        if (!row.personId || !resourceFilterSet.has(row.personId)) return;
+        if (hasEntityFilter && !entityFilterSet.has(row.entity)) return;
+        const scopeMap = data.monthlyPersonScope?.[row.personId] ?? {};
+        const scale = hasRoleFilter ? roleShareForRow(row, roleFilterSet) : 1;
+        if (scale <= 0) return;
+        workstreamFilters.forEach((scope) => {
+          const series = scopeMap[scope];
+          if (series) seriesList.push(series.map((value) => value * scale));
+        });
+      });
+      return sumSeriesList(seriesList);
+    }
 
     if (resourceFilterSet.size > 0 && data.monthlyPerson) {
       const seriesList: number[][] = [];
@@ -1266,13 +1341,53 @@ export default function CrmBudgetExecutionView({
       return sumSeriesList(seriesList);
     }
 
-    if (!hasRoleFilter && !hasEntityFilter) {
+    if (!hasRoleFilter && !hasEntityFilter && !hasWorkstreamFilter) {
       return data.monthlyActual ?? Array(12).fill(0);
     }
 
-    const monthlyRole = data.monthlyRole ?? {};
-    const monthlyEntity = data.monthlyEntity ?? {};
-    const monthlyEntityRole = data.monthlyEntityRole ?? {};
+    if (hasWorkstreamFilter) {
+      if (hasEntityFilter) {
+        if (hasRoleFilter) {
+          const seriesList: number[][] = [];
+          entityFilters.forEach((entity) => {
+            const roleMap = monthlyEntityRoleScope[entity] ?? {};
+            roleFilters.forEach((roleId) => {
+              const scopeMap = roleMap[roleId] ?? {};
+              workstreamFilters.forEach((scope) => {
+                const series = scopeMap[scope];
+                if (series) seriesList.push(series);
+              });
+            });
+          });
+          return sumSeriesList(seriesList);
+        }
+        const seriesList: number[][] = [];
+        entityFilters.forEach((entity) => {
+          const scopeMap = monthlyEntityScope[entity] ?? {};
+          workstreamFilters.forEach((scope) => {
+            const series = scopeMap[scope];
+            if (series) seriesList.push(series);
+          });
+        });
+        return sumSeriesList(seriesList);
+      }
+      if (hasRoleFilter) {
+        const seriesList: number[][] = [];
+        roleFilters.forEach((roleId) => {
+          const scopeMap = monthlyRoleScope[roleId] ?? {};
+          workstreamFilters.forEach((scope) => {
+            const series = scopeMap[scope];
+            if (series) seriesList.push(series);
+          });
+        });
+        return sumSeriesList(seriesList);
+      }
+      const seriesList = workstreamFilters
+        .map((scope) => monthlyScope[scope])
+        .filter((series): series is number[] => Array.isArray(series));
+      return sumSeriesList(seriesList);
+    }
+
     if (hasEntityFilter) {
       if (hasRoleFilter) {
         const seriesList: number[][] = [];
@@ -1301,11 +1416,14 @@ export default function CrmBudgetExecutionView({
     data,
     hasRoleFilter,
     hasEntityFilter,
+    hasWorkstreamFilter,
     roleFilters,
     entityFilters,
+    workstreamFilters,
     resourceFilterSet,
     entityFilterSet,
     roleShareForRow,
+    roleFilterSet,
   ]);
 
   const burnData = useMemo(() => {
@@ -1435,7 +1553,9 @@ export default function CrmBudgetExecutionView({
       data.table.rows.forEach((row) => {
         if (!row.personId || !resourceFilterSet.has(row.personId)) return;
         if (hasEntityFilter && !entityFilterSet.has(row.entity)) return;
-        const actual = sumRecord(row.scopeSpend ?? {});
+        const actual = hasWorkstreamFilter
+          ? sumRecord(row.scopeSpend ?? {}, workstreamFilterSet)
+          : sumRecord(row.scopeSpend ?? {});
         if (row.roleShares.length > 0) {
           row.roleShares.forEach((share) => {
             if (hasRoleFilter && !roleFilterSet.has(share.roleId)) return;
@@ -1482,9 +1602,20 @@ export default function CrmBudgetExecutionView({
     }
 
     const entityRole = data.monthlyEntityRole ?? {};
+    const entityRoleScope = data.monthlyEntityRoleScope ?? {};
 
     const roleActualForEntity = (roleId: string) => {
       if (!hasEntityFilter) return 0;
+      if (hasWorkstreamFilter) {
+        let total = 0;
+        entityFilters.forEach((entity) => {
+          const scopeMap = entityRoleScope[entity]?.[roleId] ?? {};
+          workstreamFilters.forEach((scope) => {
+            total += sumSeries(scopeMap[scope]);
+          });
+        });
+        return total;
+      }
       let total = 0;
       entityFilters.forEach((entity) => {
         total += sumSeries(entityRole[entity]?.[roleId]);
@@ -1498,7 +1629,9 @@ export default function CrmBudgetExecutionView({
         const scopeMap = roleScopes[role.roleId] ?? {};
         const actual = hasEntityFilter
           ? roleActualForEntity(role.roleId)
-          : sumRecord(scopeMap) || role.actual;
+          : hasWorkstreamFilter
+            ? workstreamFilters.reduce((acc, scope) => acc + Number(scopeMap[scope] ?? 0), 0)
+            : sumRecord(scopeMap) || role.actual;
         const plan = hasEntityFilter
           ? rolePlanById.get(role.roleId) ?? 0
           : role.plan;
@@ -1515,10 +1648,12 @@ export default function CrmBudgetExecutionView({
     hasRoleFilter,
     roleFilterSet,
     hasEntityFilter,
+    hasWorkstreamFilter,
     entityFilters,
+    workstreamFilters,
+    workstreamFilterSet,
     entityFilterSet,
     resourceFilterSet,
-    roleShareForRow,
   ]);
 
   const scopeTotalsData = useMemo(() => {
@@ -1569,16 +1704,22 @@ export default function CrmBudgetExecutionView({
       });
     }
     const result = Object.entries(scopeTotals).map(([scope, actual]) => ({ scope, actual }));
-    return result.sort((a, b) => b.actual - a.actual);
+    const filtered = hasWorkstreamFilter
+      ? result.filter((entry) => workstreamFilterSet.has(entry.scope))
+      : result;
+    return filtered.sort((a, b) => b.actual - a.actual);
   }, [
     data,
     hasRoleFilter,
     roleFilters,
     hasEntityFilter,
+    hasWorkstreamFilter,
     entityFilters,
     resourceFilterSet,
+    workstreamFilterSet,
     entityFilterSet,
     roleShareForRow,
+    roleFilterSet,
   ]);
 
   const productionActual = useMemo(
@@ -1689,8 +1830,8 @@ export default function CrmBudgetExecutionView({
   );
 
   const productionMonthlyActual = useMemo(
-    () => sumMonthlyForScopes([PRODUCTION_SCOPE]),
-    [sumMonthlyForScopes],
+    () => (hasWorkstreamFilter ? Array(12).fill(0) : sumMonthlyForScopes([PRODUCTION_SCOPE])),
+    [hasWorkstreamFilter, sumMonthlyForScopes],
   );
 
   const selectedWorkstreams = useMemo(
@@ -1725,6 +1866,7 @@ export default function CrmBudgetExecutionView({
   );
 
   const productionRoleChartData = useMemo(() => {
+    if (hasWorkstreamFilter) return [];
     if (!data?.production?.byPerson) return [];
     const roleNameMap = new Map(data.breakdowns.roles.map((role) => [role.roleId, role.roleName]));
     const totalsByRole = new Map<string, ProductionMetric>();
@@ -1763,6 +1905,7 @@ export default function CrmBudgetExecutionView({
     hasRoleFilter,
     roleFilterSet,
     hasEntityFilter,
+    hasWorkstreamFilter,
     entityFilterSet,
     resourceFilterSet,
   ]);
@@ -1923,7 +2066,7 @@ export default function CrmBudgetExecutionView({
     const bySegment = new Map<string, ProductionMetric>();
     const byScope = new Map<string, ProductionMetric>();
 
-    if (!data?.production?.byPerson) {
+    if (hasWorkstreamFilter || !data?.production?.byPerson) {
       return {
         totals,
         byBrand: [] as Array<{ key: string } & ProductionMetric>,
@@ -1981,7 +2124,15 @@ export default function CrmBudgetExecutionView({
       bySegment: toArray(bySegment),
       byScope: toArray(byScope),
     };
-  }, [data, hasEntityFilter, entityFilterSet, roleShareForRow, roleFilterSet, resourceFilterSet]);
+  }, [
+    data,
+    hasEntityFilter,
+    hasWorkstreamFilter,
+    entityFilterSet,
+    roleShareForRow,
+    roleFilterSet,
+    resourceFilterSet,
+  ]);
 
   const productionAggregateShare =
     actualTotalFiltered > 0 ? productionAggregate.totals.budget / actualTotalFiltered : 0;
@@ -2265,15 +2416,47 @@ export default function CrmBudgetExecutionView({
   }, [detailRow]);
 
   const detailMonthlyData = useMemo(() => {
-    if (!detailRow?.personId || !data?.monthlyPerson) return [];
-    const base = data.monthlyPerson[detailRow.personId];
-    if (!Array.isArray(base)) return [];
+    if (!detailRow?.personId) return [];
+    let base: number[] | null = null;
+    if (hasWorkstreamFilter && data?.monthlyPersonScope) {
+      const scopeMap = data.monthlyPersonScope[detailRow.personId] ?? {};
+      const scoped = workstreamFilters
+        .map((scope) => scopeMap[scope])
+        .filter((series): series is number[] => Array.isArray(series));
+      base = sumSeriesList(scoped);
+    } else if (data?.monthlyPerson) {
+      const series = data.monthlyPerson[detailRow.personId];
+      base = Array.isArray(series) ? series : null;
+    }
+    if (!base) return [];
     const scale = hasRoleFilter ? roleShareForRow(detailRow, roleFilterSet) : 1;
     return MONTHS.map((label, idx) => ({
       month: label,
       actual: (base[idx] ?? 0) * scale,
     }));
-  }, [detailRow, data, hasRoleFilter, roleShareForRow, roleFilterSet]);
+  }, [
+    detailRow,
+    data,
+    hasRoleFilter,
+    hasWorkstreamFilter,
+    workstreamFilters,
+    roleShareForRow,
+    roleFilterSet,
+  ]);
+
+  const hasCarryoverData = useMemo(() => {
+    if (!carryoverSummary) return false;
+    const epsilon = 0.005;
+    return (
+      Math.abs(Number(carryoverSummary.total ?? 0)) > epsilon ||
+      Math.abs(Number(carryoverSummary.allocated ?? 0)) > epsilon ||
+      Math.abs(Number(carryoverSummary.unallocated ?? 0)) > epsilon
+    );
+  }, [carryoverSummary]);
+
+  useEffect(() => {
+    setCarryoverOpen(hasCarryoverData);
+  }, [clientSlug, year, hasCarryoverData]);
 
   const visibleColumns = COLUMN_PRESETS[columnPreset];
 
@@ -2316,7 +2499,7 @@ export default function CrmBudgetExecutionView({
             <div className="mt-2 flex flex-wrap items-center gap-3">
               {clientLogo ? (
                 <span className="inline-flex h-8 w-16 items-center justify-center rounded-full border border-[color:var(--color-border)] bg-[color:var(--color-surface)] px-2">
-                  <img src={clientLogo} alt="EMG" className="h-5 w-full object-contain" />
+                  <img src={clientLogo.src} alt={clientLogo.alt} className="h-5 w-full object-contain" />
                 </span>
               ) : null}
               <h1 className="text-2xl font-semibold text-[color:var(--color-text)]">Budget Execution</h1>
@@ -2325,8 +2508,7 @@ export default function CrmBudgetExecutionView({
               </span>
             </div>
             <p className="mt-2 text-sm text-[color:var(--color-text)]/70">
-              Execution tracking by role and entity across Production and Workstreams for{" "}
-              {clientSlug.toUpperCase()}.
+              {subtitleText}
             </p>
           </div>
           <div className="flex flex-wrap items-center gap-2">
@@ -2397,7 +2579,7 @@ export default function CrmBudgetExecutionView({
           })}
         </div>
 
-        {!shareMode ? (
+        {!shareMode && hasCarryoverData ? (
           <div className="relative z-10 mt-4 rounded-2xl border border-[color:var(--color-border)] bg-[color:var(--color-surface-2)]/70 p-4">
             <div className="flex flex-wrap items-start justify-between gap-3">
               <div>
@@ -2409,34 +2591,39 @@ export default function CrmBudgetExecutionView({
                   Previous-year remnant pending allocation into {year} role pools.
                 </p>
               </div>
-              <span
-                className="rounded-full border border-[color:var(--color-border)] bg-[color:var(--color-surface)] px-2.5 py-1 text-[11px] font-medium text-[color:var(--color-text)]/70"
-                title="Computed as previous year plan minus actuals. Not affected by current filters."
-              >
-                Not affected by filters
-              </span>
+              <div className="flex flex-wrap items-center gap-2">
+                <span
+                  className="rounded-full border border-[color:var(--color-border)] bg-[color:var(--color-surface)] px-2.5 py-1 text-[11px] font-medium text-[color:var(--color-text)]/70"
+                  title="Computed as previous year plan minus actuals. Not affected by current filters."
+                >
+                  Not affected by filters
+                </span>
+                <button
+                  type="button"
+                  className="inline-flex items-center gap-1 rounded-full border border-[color:var(--color-border)] bg-[color:var(--color-surface)] px-2 py-1 text-[11px] font-medium text-[color:var(--color-text)]/70 hover:bg-[color:var(--color-surface-2)]"
+                  aria-expanded={carryoverOpen}
+                  aria-label={carryoverOpen ? "Collapse carry-over details" : "Expand carry-over details"}
+                  title={carryoverOpen ? "Collapse section" : "Expand section"}
+                  onClick={() => setCarryoverOpen((open) => !open)}
+                >
+                  <span>Details</span>
+                  {carryoverOpen ? (
+                    <ChevronUp className="h-3.5 w-3.5" />
+                  ) : (
+                    <ChevronDown className="h-3.5 w-3.5" />
+                  )}
+                </button>
+              </div>
             </div>
 
-            {carryoverLoading && !carryoverSummary ? (
-              <div className="mt-3 text-sm text-[color:var(--color-text)]/65">
-                Loading carry-over...
-              </div>
-            ) : null}
-
-            {carryoverError && !carryoverSummary ? (
-              <div className="mt-3 rounded-xl border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-800">
-                {carryoverError}
-              </div>
-            ) : null}
-
-            {carryoverSummary ? (
+            {carryoverOpen ? (
               <div className="mt-3 grid gap-3 sm:grid-cols-3">
                 <div className="rounded-xl border border-[color:var(--color-border)] bg-[color:var(--color-surface)] p-3">
                   <p className="text-[11px] font-semibold uppercase tracking-[0.2em] text-[color:var(--color-text)]/55">
-                    Total ({carryoverSummary.fromYear})
+                    Total ({carryoverSummary?.fromYear ?? year - 1})
                   </p>
                   <p className="mt-1 text-xl font-semibold text-[color:var(--color-text)]">
-                    {formatCurrency(carryoverSummary.total, true)}
+                    {formatCurrency(Number(carryoverSummary?.total ?? 0), true)}
                   </p>
                 </div>
                 <div className="rounded-xl border border-[color:var(--color-border)] bg-[color:var(--color-surface)] p-3">
@@ -2444,7 +2631,7 @@ export default function CrmBudgetExecutionView({
                     Allocated To {year}
                   </p>
                   <p className="mt-1 text-xl font-semibold text-[color:var(--color-text)]">
-                    {formatCurrency(carryoverSummary.allocated, true)}
+                    {formatCurrency(Number(carryoverSummary?.allocated ?? 0), true)}
                   </p>
                 </div>
                 <div className="rounded-xl border border-[color:var(--color-border)] bg-[color:var(--color-surface)] p-3">
@@ -2453,17 +2640,17 @@ export default function CrmBudgetExecutionView({
                   </p>
                   <p
                     className={`mt-1 text-xl font-semibold ${
-                      carryoverSummary.unallocated < 0 ? "text-red-600" : "text-emerald-600"
+                      Number(carryoverSummary?.unallocated ?? 0) < 0 ? "text-red-600" : "text-emerald-600"
                     }`}
                   >
-                    {formatCurrency(carryoverSummary.unallocated, true)}
+                    {formatCurrency(Number(carryoverSummary?.unallocated ?? 0), true)}
                   </p>
                 </div>
               </div>
             ) : null}
 
             {carryoverError && carryoverSummary ? (
-              <p className="mt-2 text-xs text-amber-700">
+              <p className={`${carryoverOpen ? "mt-2" : "mt-3"} text-xs text-amber-700`}>
                 Showing cached values. {carryoverError}
               </p>
             ) : null}
@@ -2472,7 +2659,7 @@ export default function CrmBudgetExecutionView({
       </header>
 
       <section className="card px-6 py-5">
-        <div className="grid gap-4 lg:grid-cols-[1.1fr_1.1fr_1.1fr]">
+        <div className="grid gap-4 lg:grid-cols-4">
           <MultiSelect
             label="Entity"
             options={entityOptions}
@@ -2488,6 +2675,14 @@ export default function CrmBudgetExecutionView({
             onChange={setRoleFilters}
             placeholder="All roles"
             counts={roleCounts}
+          />
+          <MultiSelect
+            label="Workstream"
+            options={workstreamOptions}
+            values={workstreamFilters}
+            onChange={setWorkstreamFilters}
+            placeholder="All workstreams"
+            counts={workstreamCounts}
           />
           <MultiSelect
             label="Resource"
@@ -2513,7 +2708,9 @@ export default function CrmBudgetExecutionView({
             </button>
           </div>
           <span className="text-xs text-[color:var(--color-text)]/60">
-            Global filters update KPIs, burn-up, production, workstreams, and details.
+            {showProductionSection
+              ? "Global filters update KPIs, burn-up, production, workstreams, and details."
+              : "Global filters update KPIs, burn-up, workstreams, and details."}
           </span>
         </div>
       </section>
@@ -2593,14 +2790,14 @@ export default function CrmBudgetExecutionView({
             <div className="rounded-2xl border border-[color:var(--color-border)] bg-[color:var(--color-surface-2)]/60 p-4">
               <p className="text-xs uppercase tracking-[0.2em] text-[color:var(--color-text)]/55">Source logic</p>
               <p className="mt-2 text-sm text-[color:var(--color-text)]/70">
-                KPIs and burn-up blend Production (campaign reporting) and Workstreams (DQ tickets + manual efforts).
+                {sourceLogicText}
               </p>
             </div>
           </div>
         </div>
       </section>
 
-      <section className="grid gap-4 lg:grid-cols-2">
+      <section className={`grid gap-4 ${showSourceMix ? "lg:grid-cols-2" : ""}`}>
         <article className="card px-6 py-5">
           <div className="flex items-center justify-between">
             <h3 className="text-base font-semibold text-[color:var(--color-text)]">By role</h3>
@@ -2652,54 +2849,57 @@ export default function CrmBudgetExecutionView({
             )}
           </div>
         </article>
-        <article className="card px-6 py-5">
-          <div className="flex items-center justify-between">
-            <h3 className="text-base font-semibold text-[color:var(--color-text)]">Source mix</h3>
-            <span className="text-xs uppercase tracking-[0.2em] text-[color:var(--color-text)]/60">Breakdown</span>
-          </div>
-          <div className="mt-4 min-h-[220px] rounded-2xl border border-[color:var(--color-border)] bg-[color:var(--color-surface-2)]/40 p-3">
-            {loading ? (
-              <div className="flex h-full items-center justify-center text-sm text-[color:var(--color-text)]/65">
-                Loading chart...
-              </div>
-            ) : sourceChartData.length === 0 ? (
-              <div className="flex h-full items-center justify-center text-sm text-[color:var(--color-text)]/65">
-                No source data available.
-              </div>
-            ) : (
-              <ResponsiveContainer width="100%" height={CHART_HEIGHT}>
-                <PieChart>
-                  <Tooltip
-                    contentStyle={chartTheme.tooltip.contentStyle}
-                    itemStyle={chartTheme.tooltip.itemStyle}
-                    labelStyle={chartTheme.tooltip.labelStyle}
-                    formatter={(value) => formatCurrency(Number(value), true)}
-                  />
-                  <Legend verticalAlign="bottom" height={36} />
-                  <Pie
-                    data={sourceChartData}
-                    dataKey="actual"
-                    nameKey="source"
-                    innerRadius="55%"
-                    outerRadius="80%"
-                    paddingAngle={3}
-                    stroke="transparent"
-                  >
-                    {sourceChartData.map((entry, index) => (
-                      <Cell
-                        key={`${entry.source}-${index}`}
-                        fill={chartTheme.palette[index % chartTheme.palette.length]}
-                      />
-                    ))}
-                  </Pie>
-                </PieChart>
-              </ResponsiveContainer>
-            )}
-          </div>
-        </article>
+        {showSourceMix ? (
+          <article className="card px-6 py-5">
+            <div className="flex items-center justify-between">
+              <h3 className="text-base font-semibold text-[color:var(--color-text)]">Source mix</h3>
+              <span className="text-xs uppercase tracking-[0.2em] text-[color:var(--color-text)]/60">Breakdown</span>
+            </div>
+            <div className="mt-4 min-h-[220px] rounded-2xl border border-[color:var(--color-border)] bg-[color:var(--color-surface-2)]/40 p-3">
+              {loading ? (
+                <div className="flex h-full items-center justify-center text-sm text-[color:var(--color-text)]/65">
+                  Loading chart...
+                </div>
+              ) : sourceChartData.length === 0 ? (
+                <div className="flex h-full items-center justify-center text-sm text-[color:var(--color-text)]/65">
+                  No source data available.
+                </div>
+              ) : (
+                <ResponsiveContainer width="100%" height={CHART_HEIGHT}>
+                  <PieChart>
+                    <Tooltip
+                      contentStyle={chartTheme.tooltip.contentStyle}
+                      itemStyle={chartTheme.tooltip.itemStyle}
+                      labelStyle={chartTheme.tooltip.labelStyle}
+                      formatter={(value) => formatCurrency(Number(value), true)}
+                    />
+                    <Legend verticalAlign="bottom" height={36} />
+                    <Pie
+                      data={sourceChartData}
+                      dataKey="actual"
+                      nameKey="source"
+                      innerRadius="55%"
+                      outerRadius="80%"
+                      paddingAngle={3}
+                      stroke="transparent"
+                    >
+                      {sourceChartData.map((entry, index) => (
+                        <Cell
+                          key={`${entry.source}-${index}`}
+                          fill={chartTheme.palette[index % chartTheme.palette.length]}
+                        />
+                      ))}
+                    </Pie>
+                  </PieChart>
+                </ResponsiveContainer>
+              )}
+            </div>
+          </article>
+        ) : null}
       </section>
 
-      <section className="card px-6 py-5">
+      {showProductionSection ? (
+        <section className="card px-6 py-5">
         <div className="flex flex-wrap items-start justify-between gap-4">
           <div>
             <p className="text-xs uppercase tracking-[0.2em] text-[color:var(--color-text)]/60">
@@ -3183,13 +3383,14 @@ export default function CrmBudgetExecutionView({
         </div>
           </>
         ) : null}
-      </section>
+        </section>
+      ) : null}
 
       <section className="card px-6 py-5">
         <div className="flex flex-wrap items-start justify-between gap-4">
           <div>
             <p className="text-xs uppercase tracking-[0.2em] text-[color:var(--color-text)]/60">
-              Other Workstreams
+              {workstreamsSectionLabel}
             </p>
             <h3 className="mt-1 flex items-center gap-2 text-lg font-semibold text-[color:var(--color-text)]">
               <img
@@ -3198,10 +3399,10 @@ export default function CrmBudgetExecutionView({
                 aria-hidden="true"
                 className="h-8 w-8 rounded-full border border-[color:var(--color-border)] bg-[color:var(--color-surface-2)] object-contain motion-reduce:hidden"
               />
-              Consulting, Governance & Data Quality
+              {workstreamsSectionTitle}
             </h3>
             <p className="mt-1 text-xs text-[color:var(--color-text)]/60">
-              Effort logged across consulting, strategy/governance, and data quality, grouped by workstream.
+              {workstreamsSectionDescription}
             </p>
           </div>
           <div className="flex flex-wrap items-center gap-3">
@@ -3256,22 +3457,6 @@ export default function CrmBudgetExecutionView({
 
         {workstreamsOpen ? (
           <>
-            <div className="mt-4 grid gap-4 lg:grid-cols-[1.1fr_2fr]">
-              <MultiSelect
-                label="Workstream"
-                options={workstreamOptions}
-                values={workstreamFilters}
-                onChange={setWorkstreamFilters}
-                placeholder="All workstreams"
-                counts={workstreamCounts}
-              />
-              <div className="flex items-end">
-                <p className="text-xs text-[color:var(--color-text)]/60">
-                  Workstream filters apply only to workstream charts and totals.
-                </p>
-              </div>
-            </div>
-
             <div className="mt-4 grid gap-4 lg:grid-cols-[1.1fr_1fr]">
               <div className="min-h-[220px] rounded-2xl border border-[color:var(--color-border)] bg-[color:var(--color-surface-2)]/40 p-3">
                 {loading ? (
@@ -3651,12 +3836,13 @@ export default function CrmBudgetExecutionView({
         row={detailRow}
         onClose={closeDetail}
         roleAllocations={detailRoleAllocations}
+        showSourceMix={showSourceMix}
         productionSpend={detailProductionSpend}
         workstreamSpend={detailWorkstreamSpend}
         sourceShare={detailSourceShare}
         workstreams={detailWorkstreamList}
         monthlyData={detailMonthlyData}
-        clientSlug={clientSlug}
+        links={detailLinks}
         formatCurrency={formatCurrency}
         formatPercent={formatPercent}
         formatPercentInt={formatPercentInt}
@@ -3670,12 +3856,13 @@ function ExecutionDetailDrawer({
   row,
   onClose,
   roleAllocations,
+  showSourceMix,
   productionSpend,
   workstreamSpend,
   sourceShare,
   workstreams,
   monthlyData,
-  clientSlug,
+  links,
   formatCurrency,
   formatPercent,
   formatPercentInt,
@@ -3691,12 +3878,13 @@ function ExecutionDetailDrawer({
   }) | null;
   onClose: () => void;
   roleAllocations: Array<{ roleName: string; share: number; plan: number; actual: number }>;
+  showSourceMix: boolean;
   productionSpend: number;
   workstreamSpend: number;
   sourceShare: number;
   workstreams: Array<{ scope: string; amount: number }>;
   monthlyData: Array<{ month: string; actual: number }>;
-  clientSlug: string;
+  links: Array<{ href: string; label: string }>;
   formatCurrency: (value: number, detailed?: boolean) => string;
   formatPercent: (value: number) => string;
   formatPercentInt: (value: number) => string;
@@ -3749,7 +3937,7 @@ function ExecutionDetailDrawer({
             </div>
           </section>
 
-          <section className="grid gap-3 md:grid-cols-[1.2fr_1fr]">
+          <section className={`grid gap-3 ${showSourceMix ? "md:grid-cols-[1.2fr_1fr]" : ""}`}>
             <div className="rounded-2xl border border-[color:var(--color-border)] bg-[color:var(--color-surface-2)]/40 p-4">
               <div className="flex items-center justify-between">
                 <h3 className="text-sm font-semibold text-[color:var(--color-text)]">Role allocations</h3>
@@ -3782,28 +3970,30 @@ function ExecutionDetailDrawer({
                 )}
               </div>
             </div>
-            <div className="rounded-2xl border border-[color:var(--color-border)] bg-[color:var(--color-surface-2)]/40 p-4">
-              <h3 className="text-sm font-semibold text-[color:var(--color-text)]">Source mix</h3>
-              <div className="mt-3 space-y-3 text-sm">
-                <div className="flex items-center justify-between">
-                  <span className="text-[color:var(--color-text)]/70">Production</span>
-                  <span className="font-semibold text-[color:var(--color-text)]">{formatCurrency(productionSpend)}</span>
-                </div>
-                <div className="flex items-center justify-between">
-                  <span className="text-[color:var(--color-text)]/70">Workstreams</span>
-                  <span className="font-semibold text-[color:var(--color-text)]">{formatCurrency(workstreamSpend)}</span>
-                </div>
-                <div className="mt-2 h-2 overflow-hidden rounded-full bg-[color:var(--color-surface-2)]">
-                  <div
-                    className="h-full bg-[color:var(--color-primary)]"
-                    style={{ width: `${Math.round(sourceShare * 100)}%` }}
-                  />
-                </div>
-                <div className="text-xs text-[color:var(--color-text)]/60">
-                  Production share {formatPercent(sourceShare)}
+            {showSourceMix ? (
+              <div className="rounded-2xl border border-[color:var(--color-border)] bg-[color:var(--color-surface-2)]/40 p-4">
+                <h3 className="text-sm font-semibold text-[color:var(--color-text)]">Source mix</h3>
+                <div className="mt-3 space-y-3 text-sm">
+                  <div className="flex items-center justify-between">
+                    <span className="text-[color:var(--color-text)]/70">Production</span>
+                    <span className="font-semibold text-[color:var(--color-text)]">{formatCurrency(productionSpend)}</span>
+                  </div>
+                  <div className="flex items-center justify-between">
+                    <span className="text-[color:var(--color-text)]/70">Workstreams</span>
+                    <span className="font-semibold text-[color:var(--color-text)]">{formatCurrency(workstreamSpend)}</span>
+                  </div>
+                  <div className="mt-2 h-2 overflow-hidden rounded-full bg-[color:var(--color-surface-2)]">
+                    <div
+                      className="h-full bg-[color:var(--color-primary)]"
+                      style={{ width: `${Math.round(sourceShare * 100)}%` }}
+                    />
+                  </div>
+                  <div className="text-xs text-[color:var(--color-text)]/60">
+                    Production share {formatPercent(sourceShare)}
+                  </div>
                 </div>
               </div>
-            </div>
+            ) : null}
           </section>
 
           <section className="grid gap-3 lg:grid-cols-[1.2fr_1fr]">
@@ -3854,15 +4044,11 @@ function ExecutionDetailDrawer({
           </section>
 
           <section className="flex flex-wrap gap-2">
-            <a className="btn-ghost h-9 px-3 text-xs" href={`/crm/${clientSlug}/campaigns`}>
-              Open Campaign Reporting
-            </a>
-            <a className="btn-ghost h-9 px-3 text-xs" href={`/crm/${clientSlug}/ticket-reporting`}>
-              Open Ticket Reporting
-            </a>
-            <a className="btn-ghost h-9 px-3 text-xs" href={`/crm/${clientSlug}/manual-efforts`}>
-              Open Manual Efforts
-            </a>
+            {links.map((link) => (
+              <a key={link.href} className="btn-ghost h-9 px-3 text-xs" href={link.href}>
+                {link.label}
+              </a>
+            ))}
           </section>
         </div>
       </div>

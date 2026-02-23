@@ -26,6 +26,8 @@ export type CrmClient = {
 
 export type CrmWorkspaceRole = 'admin' | 'editor' | 'viewer';
 
+export type CrmBudgetExecutionMode = 'enhanced' | 'standard';
+
 export const CRM_CLIENTS: CrmClient[] = [
   {
     slug: 'emg',
@@ -94,6 +96,13 @@ export const CRM_CLIENTS: CrmClient[] = [
         description: 'Annual budget planning and tracking.',
         icon: 'chart',
       },
+      {
+        slug: 'budget-execution',
+        type: 'budget_execution',
+        label: 'Budget Execution',
+        description: 'Budget execution tracking by role and scope.',
+        icon: 'chart',
+      },
     ],
   },
   {
@@ -112,6 +121,13 @@ export const CRM_CLIENTS: CrmClient[] = [
         type: 'budget',
         label: 'Budget',
         description: 'Annual budget planning and tracking.',
+        icon: 'chart',
+      },
+      {
+        slug: 'budget-execution',
+        type: 'budget_execution',
+        label: 'Budget Execution',
+        description: 'Budget execution tracking by role and scope.',
         icon: 'chart',
       },
     ],
@@ -134,6 +150,13 @@ export const CRM_CLIENTS: CrmClient[] = [
         description: 'Annual budget planning and tracking.',
         icon: 'chart',
       },
+      {
+        slug: 'budget-execution',
+        type: 'budget_execution',
+        label: 'Budget Execution',
+        description: 'Budget execution tracking by role and scope.',
+        icon: 'chart',
+      },
     ],
   },
   {
@@ -152,6 +175,13 @@ export const CRM_CLIENTS: CrmClient[] = [
         type: 'budget',
         label: 'Budget',
         description: 'Annual budget planning and tracking.',
+        icon: 'chart',
+      },
+      {
+        slug: 'budget-execution',
+        type: 'budget_execution',
+        label: 'Budget Execution',
+        description: 'Budget execution tracking by role and scope.',
         icon: 'chart',
       },
     ],
@@ -174,6 +204,13 @@ export const CRM_CLIENTS: CrmClient[] = [
         description: 'Annual budget planning and tracking.',
         icon: 'chart',
       },
+      {
+        slug: 'budget-execution',
+        type: 'budget_execution',
+        label: 'Budget Execution',
+        description: 'Budget execution tracking by role and scope.',
+        icon: 'chart',
+      },
     ],
   },
   {
@@ -194,6 +231,13 @@ export const CRM_CLIENTS: CrmClient[] = [
         description: 'Annual budget planning and tracking.',
         icon: 'chart',
       },
+      {
+        slug: 'budget-execution',
+        type: 'budget_execution',
+        label: 'Budget Execution',
+        description: 'Budget execution tracking by role and scope.',
+        icon: 'chart',
+      },
     ],
   },
 ];
@@ -206,6 +250,15 @@ export function getCrmClient(slug?: string | null) {
 export function getCrmModule(client: CrmClient | null, moduleSlug?: string | null) {
   if (!client || !moduleSlug) return null;
   return client.modules.find((m) => m.slug === moduleSlug) ?? null;
+}
+
+export function getCrmBudgetExecutionMode(clientSlug?: string | null): CrmBudgetExecutionMode {
+  if (clientSlug === 'emg') return 'enhanced';
+  return 'standard';
+}
+
+export function isCrmBudgetExecutionEnhancedClient(clientSlug?: string | null) {
+  return getCrmBudgetExecutionMode(clientSlug) === 'enhanced';
 }
 
 const WORKSPACE_PRIORITY: string[] = [
