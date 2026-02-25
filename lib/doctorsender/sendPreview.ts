@@ -36,7 +36,7 @@ type DoctorSenderCampaignSnapshot = {
 };
 
 type DoctorSenderPreviewSendAttempt = {
-  format: 'string_array' | 'struct_array';
+  format: 'map_array' | 'string_array';
   recipients: string[];
   resultKind: 'false' | 'null' | 'object' | 'string' | 'number' | 'boolean' | 'unknown';
   resultPreview: unknown;
@@ -350,7 +350,7 @@ export async function sendDoctorSenderPreview({
   const parsedTemplateId = Number.parseInt(templateIdSource, 10);
   const templateId = Number.isFinite(parsedTemplateId) ? parsedTemplateId : null;
   const preflight = await runPreflight(account, fromEmail, trackingDomain);
-  const retryStructOnNil = process.env.DOCTORSENDER_TEST_SEND_STRUCT_FALLBACK === '1';
+  const retryStringOnNil = process.env.DOCTORSENDER_TEST_SEND_STRING_FALLBACK !== '0';
 
   const { html: finalHtml, plainText: plainTextRaw } = composeEmailHtml({
     headerHtml: defaults.headerHtml,
@@ -480,29 +480,28 @@ export async function sendDoctorSenderPreview({
     return rawResult;
   };
 
-  // dsCampaignSendEmailsTest attempt 1: plain string array
-  let sendResult = await attemptPreviewSend('string_array', previewRecipients);
+  // Preferred format from DoctorSender support: array of maps [{ email: "..." }]
+  const mapRecipients = previewRecipients.map((email) => ({ email }));
+  let sendResult = await attemptPreviewSend('map_array', mapRecipients);
   if (sendResult === false) {
     await delay(1500);
-    sendResult = await attemptPreviewSend('string_array', previewRecipients);
-    if (sendResult === false && !retryStructOnNil) {
+    sendResult = await attemptPreviewSend('map_array', mapRecipients);
+    if (sendResult === false && !retryStringOnNil) {
       throw new Error('DoctorSender rejected preview send (dsCampaignSendEmailsTest returned false after retry).');
     }
   }
 
-  // Optional diagnostics fallback:
-  // some DoctorSender accounts expect [{ email: "..." }] instead of ["..."] for test recipients.
-  const shouldTryStructFallback = retryStructOnNil && (sendResult === false || isNilLikeSoapResult(sendResult));
-  if (shouldTryStructFallback) {
+  // Compatibility fallback: some accounts still expect plain string arrays.
+  const shouldTryStringFallback = retryStringOnNil && (sendResult === false || isNilLikeSoapResult(sendResult));
+  if (shouldTryStringFallback) {
     await delay(1200);
-    const structRecipients = previewRecipients.map((email) => ({ email }));
-    const structResult = await attemptPreviewSend('struct_array', structRecipients);
-    if (structResult === false) {
+    const stringResult = await attemptPreviewSend('string_array', previewRecipients);
+    if (stringResult === false) {
       throw new Error(
-        'DoctorSender rejected preview send using both recipient formats (string array and struct array).'
+        'DoctorSender rejected preview send using both recipient formats (map array and string array).'
       );
     }
-    sendResult = structResult;
+    sendResult = stringResult;
   }
 
   const snapshot = await fetchCampaignSnapshot(account, currentCampaignId);
@@ -511,7 +510,7 @@ export async function sendDoctorSenderPreview({
   console.info('[DoctorSender] BAT preview final result', {
     campaignId: campaign.id,
     dsCampaignId: currentCampaignId,
-    retryStructOnNil,
+    retryStringOnNil,
     sendAttempts: sendAttempts.map((entry) => ({
       format: entry.format,
       resultKind: entry.resultKind,
@@ -525,7 +524,7 @@ export async function sendDoctorSenderPreview({
     console.warn('[DoctorSender] BAT preview returned no explicit dispatch confirmation from SOAP API', {
       campaignId: campaign.id,
       dsCampaignId: currentCampaignId,
-      retryStructOnNil,
+      retryStringOnNil,
     });
   }
 
@@ -537,7 +536,7 @@ export async function sendDoctorSenderPreview({
         campaignId: campaign.id,
         dsCampaignId: currentCampaignId,
         previewRecipients,
-        retryStructOnNil,
+        retryStringOnNil,
         sendAttempts,
         finalSendSummary,
         finalIsNilLike,

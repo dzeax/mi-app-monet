@@ -7,6 +7,9 @@ type SoapPrimitive = string | number | boolean | null | undefined;
 type SoapObject = Record<string, SoapPrimitive>;
 type SoapArrayItem = SoapPrimitive | SoapObject;
 type SoapValue = SoapPrimitive | SoapArrayItem[] | SoapObject;
+type SerializeOptions = {
+  objectArrayAsMap?: boolean;
+};
 
 function serializePrimitive(value: SoapPrimitive) {
   if (value === null || value === undefined) {
@@ -27,12 +30,47 @@ function serializePrimitive(value: SoapPrimitive) {
   return `<item xsi:type="xsd:string">${escapeXml(String(value))}</item>`;
 }
 
-function serializeArray(values: SoapArrayItem[]) {
+function serializeMapEntryValue(value: SoapPrimitive) {
+  if (value === null || value === undefined) {
+    return '<value xsi:nil="true" />';
+  }
+
+  if (typeof value === 'boolean') {
+    return `<value xsi:type="xsd:boolean">${value ? 'true' : 'false'}</value>`;
+  }
+
+  if (typeof value === 'number') {
+    if (Number.isInteger(value)) {
+      return `<value xsi:type="xsd:int">${value}</value>`;
+    }
+    return `<value xsi:type="xsd:double">${value}</value>`;
+  }
+
+  return `<value xsi:type="xsd:string">${escapeXml(String(value))}</value>`;
+}
+
+function serializeObjectAsMap(obj: SoapObject) {
+  const entries = Object.entries(obj ?? {})
+    .map(
+      ([key, val]) =>
+        `<item><key xsi:type="xsd:string">${escapeXml(key)}</key>${serializeMapEntryValue(val)}</item>`,
+    )
+    .join('');
+
+  return `<item xsi:type="ns2:Map">${entries}</item>`;
+}
+
+function serializeArray(values: SoapArrayItem[], options: SerializeOptions = {}) {
   const allObjects = values.every(
     (value): value is SoapObject => value !== null && typeof value === 'object' && !Array.isArray(value),
   );
 
   if (allObjects) {
+    if (options.objectArrayAsMap) {
+      const items = values.map((obj) => serializeObjectAsMap(obj)).join('');
+      return `<item SOAP-ENC:arrayType="ns2:Map[${values.length}]" xsi:type="SOAP-ENC:Array">${items}</item>`;
+    }
+
     const items = values
       .map((obj) => {
         const entries = Object.entries(obj ?? {})
@@ -67,9 +105,9 @@ function serializeArray(values: SoapArrayItem[]) {
   return `<item SOAP-ENC:arrayType="${type}[${values.length}]" xsi:type="SOAP-ENC:Array">${items}</item>`;
 }
 
-function serializeValue(value: SoapValue): string {
+function serializeValue(value: SoapValue, options: SerializeOptions = {}): string {
   if (Array.isArray(value)) {
-    return serializeArray(value);
+    return serializeArray(value, options);
   }
 
   if (value && typeof value === 'object') {
@@ -94,11 +132,15 @@ function serializeValue(value: SoapValue): string {
 }
 
 function buildEnvelope(method: string, data: SoapValue[], auth: { user: string; token: string }) {
+  const serializeOptions: SerializeOptions = {
+    objectArrayAsMap: method === 'dsCampaignSendEmailsTest',
+  };
+
   const serializedData =
     data.length === 0
       ? '<data xsi:nil="true"/>'
       : `<data SOAP-ENC:arrayType="xsd:anyType[${data.length}]" xsi:type="SOAP-ENC:Array">${data
-          .map((value) => serializeValue(value))
+          .map((value) => serializeValue(value, serializeOptions))
           .join('')}</data>`;
 
   return `<?xml version="1.0" encoding="UTF-8"?>
@@ -108,6 +150,7 @@ function buildEnvelope(method: string, data: SoapValue[], auth: { user: string; 
   xmlns:xsd="http://www.w3.org/2001/XMLSchema"
   xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
   xmlns:SOAP-ENC="http://schemas.xmlsoap.org/soap/encoding/"
+  xmlns:ns2="http://xml.apache.org/xml-soap"
   SOAP-ENV:encodingStyle="http://schemas.xmlsoap.org/soap/encoding/">
   <SOAP-ENV:Header>
     <ns1:app_auth>
