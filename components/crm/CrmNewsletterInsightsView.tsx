@@ -124,7 +124,16 @@ export default function CrmNewsletterInsightsView() {
         const list = Array.isArray(body?.rows) ? (body.rows as InsightRow[]) : [];
         if (active) setRows(list);
       } catch (err) {
-        if (active) setError(err instanceof Error ? err.message : "Unable to load newsletter insights");
+        console.error("[newsletter-insights] load failed", {
+          clientSlug,
+          dateFrom,
+          dateTo,
+          error: err,
+        });
+        if (active) {
+          const message = err instanceof Error ? err.message : "Unable to load newsletter insights";
+          setError(message);
+        }
       } finally {
         if (active) setLoading(false);
       }

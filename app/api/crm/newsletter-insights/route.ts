@@ -5,6 +5,8 @@ import { parse } from "csv-parse/sync";
 
 const DEFAULT_CLIENT = "emg";
 const PAGE_SIZE = 1000;
+const TRACKING_IN_BATCH_SIZE = 80;
+const UNIT_ID_IN_BATCH_SIZE = 120;
 
 type UnitRow = {
   id: string;
@@ -158,6 +160,16 @@ const chunk = <T,>(items: T[], size = 500) => {
   return batches;
 };
 
+const getErrorMessage = (err: unknown) => {
+  if (err instanceof Error) return err.message;
+  return String(err);
+};
+
+const getErrorStack = (err: unknown) => {
+  if (err instanceof Error) return err.stack ?? null;
+  return null;
+};
+
 const getAuthContext = async (supabase: ReturnType<typeof createRouteHandlerClient>) => {
   const { data: authData, error: authError } = await supabase.auth.getUser();
   if (authError || !authData?.user?.id) {
@@ -198,7 +210,7 @@ const fetchUnitsByTracking = async (
 ) => {
   const map = new Map<string, UnitRow>();
   const unique = Array.from(new Set(trackings.map((tracking) => tracking.trim()).filter(Boolean)));
-  for (const batch of chunk(unique, 200)) {
+  for (const batch of chunk(unique, TRACKING_IN_BATCH_SIZE)) {
     const { data, error } = await supabase
       .from("campaign_email_units")
       .select("id,client_slug,campaign_name,send_date,market,segment,touchpoint,variant,owner,sfmc_tracking,status")
@@ -290,7 +302,7 @@ export async function GET(request: Request) {
     const heatmapByUnit = new Map<string, HeatmapRow>();
     const sectionCountByUnit = new Map<string, number>();
 
-    for (const batch of chunk(ids, 400)) {
+    for (const batch of chunk(ids, UNIT_ID_IN_BATCH_SIZE)) {
       const [{ data: kpis, error: kpiError }, { data: heatmaps, error: heatmapError }, { data: sections, error: sectionError }] =
         await Promise.all([
           supabase
@@ -310,9 +322,30 @@ export async function GET(request: Request) {
             .select("unit_id")
             .in("unit_id", batch),
         ]);
-      if (kpiError) return NextResponse.json({ error: kpiError.message }, { status: 500 });
-      if (heatmapError) return NextResponse.json({ error: heatmapError.message }, { status: 500 });
-      if (sectionError) return NextResponse.json({ error: sectionError.message }, { status: 500 });
+      if (kpiError) {
+        console.error("[crm:newsletter-insights][GET] campaign_email_unit_kpis query failed", {
+          client,
+          batchSize: batch.length,
+          error: kpiError.message,
+        });
+        return NextResponse.json({ error: kpiError.message }, { status: 500 });
+      }
+      if (heatmapError) {
+        console.error("[crm:newsletter-insights][GET] campaign_email_unit_heatmap query failed", {
+          client,
+          batchSize: batch.length,
+          error: heatmapError.message,
+        });
+        return NextResponse.json({ error: heatmapError.message }, { status: 500 });
+      }
+      if (sectionError) {
+        console.error("[crm:newsletter-insights][GET] campaign_email_unit_heatmap_sections query failed", {
+          client,
+          batchSize: batch.length,
+          error: sectionError.message,
+        });
+        return NextResponse.json({ error: sectionError.message }, { status: 500 });
+      }
       (kpis ?? []).forEach((row) => kpiByUnit.set((row as KpiRow).unit_id, row as KpiRow));
       (heatmaps ?? []).forEach((row) => heatmapByUnit.set((row as HeatmapRow).unit_id, row as HeatmapRow));
       (sections ?? []).forEach((row) => {
@@ -367,7 +400,22 @@ export async function GET(request: Request) {
 
     return NextResponse.json({ rows });
   } catch (err) {
-    const msg = err instanceof Error ? err.message : "Unexpected error";
+    const msg = getErrorMessage(err);
+    console.error("[crm:newsletter-insights][GET] unexpected failure", {
+      client,
+      from,
+      to,
+      market,
+      segment,
+      touchpoint,
+      owner,
+      status,
+      hasTracking,
+      unitId,
+      searchLength: search.length,
+      error: msg,
+      stack: getErrorStack(err),
+    });
     return NextResponse.json({ error: msg }, { status: 500 });
   }
 }
@@ -620,7 +668,7 @@ export async function PUT(request: Request) {
 
       const heatmapIdByUnit = new Map<string, string>();
       const relatedUnitIds = Array.from(summaryByUnit.keys());
-      for (const batch of chunk(relatedUnitIds, 400)) {
+      for (const batch of chunk(relatedUnitIds, UNIT_ID_IN_BATCH_SIZE)) {
         const { data, error } = await supabase
           .from("campaign_email_unit_heatmap")
           .select("id,unit_id")
@@ -679,7 +727,13 @@ export async function PUT(request: Request) {
       { status: 400 },
     );
   } catch (err) {
-    const msg = err instanceof Error ? err.message : "Unexpected error";
+    const msg = getErrorMessage(err);
+    console.error("[crm:newsletter-insights][PUT] unexpected failure", {
+      client,
+      dataset,
+      error: msg,
+      stack: getErrorStack(err),
+    });
     return NextResponse.json({ error: msg }, { status: 500 });
   }
 }
