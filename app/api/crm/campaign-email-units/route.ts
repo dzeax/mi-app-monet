@@ -91,9 +91,14 @@ const BulkUpdatePayloadZ = z.object({
       sendDate: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).optional(),
       owner: z.string().min(1).optional(),
       status: z.string().min(1).optional(),
+      sfmcTracking: z.string().trim().optional().nullable(),
     })
     .refine(
-      (v) => v.sendDate != null || v.owner != null || v.status != null,
+      (v) =>
+        v.sendDate != null ||
+        v.owner != null ||
+        v.status != null ||
+        v.sfmcTracking !== undefined,
       "At least one patch field is required",
     ),
 });
@@ -130,6 +135,7 @@ type CampaignUnitInsert = {
   owner: string;
   person_id?: string | null;
   jira_ticket: string;
+  sfmc_tracking?: string | null;
   status: string;
   hours_master_template: number;
   hours_translations: number;
@@ -255,6 +261,7 @@ export async function GET(request: Request) {
       owner: r.owner,
       personId: r.person_id ?? null,
       jiraTicket: r.jira_ticket,
+      sfmcTracking: r.sfmc_tracking ?? null,
       status: r.status,
       hoursMasterTemplate: Number(r.hours_master_template ?? 0),
       hoursTranslations: Number(r.hours_translations ?? 0),
@@ -424,6 +431,7 @@ export async function POST(request: Request) {
               owner: parsed.owner,
               person_id: personId,
               jira_ticket: parsed.jiraTicket,
+              sfmc_tracking: null,
               status: parsed.status,
               hours_master_template: hours.hours_master_template,
               hours_translations: hours.hours_translations,
@@ -529,6 +537,7 @@ export async function PUT(request: Request) {
       const campaignName = String(r.campaign_name ?? "").trim();
       const variant = String(r.variant ?? "").trim();
       const touchpoint = String(r.touchpoint ?? "").trim();
+      const sfmcTrackingRaw = String(r.sfmc_tracking ?? "").trim();
       const scope = String(r.scope ?? "Global").trim() || "Global";
       return {
         client_slug: clientSlug,
@@ -544,6 +553,7 @@ export async function PUT(request: Request) {
         variant,
         owner,
         jira_ticket: jira,
+        sfmc_tracking: sfmcTrackingRaw || null,
         status: String(r.status ?? "Planned").trim() || "Planned",
         hours_master_template: parseNum(r.hours_master_template, 0),
         hours_translations: parseNum(r.hours_translations, 0),
@@ -677,6 +687,10 @@ export async function PATCH(request: Request) {
       update.person_id = resolvePersonId(aliasMap, parsed.patch.owner);
     }
     if (parsed.patch.status) update.status = parsed.patch.status;
+    if (parsed.patch.sfmcTracking !== undefined) {
+      const trimmed = String(parsed.patch.sfmcTracking ?? "").trim();
+      update.sfmc_tracking = trimmed || null;
+    }
 
     const { data, error } = await supabase
       .from("campaign_email_units")

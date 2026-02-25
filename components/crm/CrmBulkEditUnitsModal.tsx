@@ -8,6 +8,7 @@ export type CampaignUnitsBulkPatch = {
   sendDate?: string;
   owner?: string;
   status?: string;
+  sfmcTracking?: string | null;
 };
 
 type Props = {
@@ -36,6 +37,8 @@ export default function CrmBulkEditUnitsModal({
   const [owner, setOwner] = useState("");
   const [updateStatus, setUpdateStatus] = useState(false);
   const [status, setStatus] = useState("");
+  const [updateTracking, setUpdateTracking] = useState(false);
+  const [sfmcTracking, setSfmcTracking] = useState("");
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -46,13 +49,17 @@ export default function CrmBulkEditUnitsModal({
 
   const canSubmit = useMemo(() => {
     if (saving) return false;
-    const hasAny = (updateDate && !!sendDate) || (updateOwner && !!owner) || (updateStatus && !!status);
+    const hasAny =
+      (updateDate && !!sendDate) ||
+      (updateOwner && !!owner) ||
+      (updateStatus && !!status) ||
+      updateTracking;
     const allValid =
       (!updateDate || (!!sendDate && isIsoDate(sendDate))) &&
       (!updateOwner || !!owner) &&
       (!updateStatus || !!status);
     return hasAny && allValid;
-  }, [saving, updateDate, sendDate, updateOwner, owner, updateStatus, status]);
+  }, [saving, updateDate, sendDate, updateOwner, owner, updateStatus, status, updateTracking]);
 
   const openDatePicker = () => {
     if (!updateDate || saving) return;
@@ -77,6 +84,10 @@ export default function CrmBulkEditUnitsModal({
     if (updateDate) patch.sendDate = sendDate;
     if (updateOwner) patch.owner = owner;
     if (updateStatus) patch.status = status;
+    if (updateTracking) {
+      const trimmed = sfmcTracking.trim();
+      patch.sfmcTracking = trimmed || null;
+    }
 
     if (!Object.keys(patch).length) {
       setError("Select at least one field to update.");
@@ -255,6 +266,34 @@ export default function CrmBulkEditUnitsModal({
                   </option>
                 ))}
               </select>
+            </div>
+          </div>
+
+          <div className="flex items-start gap-3">
+            <input
+              type="checkbox"
+              className="mt-2 h-4 w-4"
+              checked={updateTracking}
+              onChange={(e) => setUpdateTracking(e.target.checked)}
+              disabled={saving}
+              aria-label="Update SFMC tracking"
+            />
+            <div className="flex-1">
+              <label className="text-xs font-medium text-[color:var(--color-text)]/70">
+                SFMC tracking
+              </label>
+              <input
+                className="input h-10 w-full"
+                value={sfmcTracking}
+                onChange={(e) => setSfmcTracking(e.target.value)}
+                disabled={!updateTracking || saving}
+                placeholder={updateTracking ? "Paste tracking (empty to clear)" : "Keep current"}
+              />
+              {updateTracking ? (
+                <p className="mt-1 text-xs text-[color:var(--color-text)]/60">
+                  Leave empty to clear tracking for selected units.
+                </p>
+              ) : null}
             </div>
           </div>
         </div>

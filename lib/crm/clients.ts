@@ -2,6 +2,7 @@ export type CrmModuleType =
   | 'data_quality'
   | 'dq_tickets'
   | 'campaign_reporting'
+  | 'newsletter_insights'
   | 'budget'
   | 'budget_execution'
   | 'manual_efforts'
@@ -61,6 +62,13 @@ export const CRM_CLIENTS: CrmClient[] = [
         label: 'Campaign Reporting',
         description: 'Email production tracking per market/segment.',
         icon: 'table',
+      },
+      {
+        slug: 'newsletter-insights',
+        type: 'newsletter_insights',
+        label: 'Newsletter Insights',
+        description: 'SFMC KPIs and heatmap coverage linked to campaign units.',
+        icon: 'insight',
       },
       {
         slug: 'budget',
@@ -266,6 +274,7 @@ const WORKSPACE_PRIORITY: string[] = [
   'manual-efforts',
   'dq-tickets',
   'campaigns',
+  'newsletter-insights',
   'budget',
   'budget-execution',
 ];

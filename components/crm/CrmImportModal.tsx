@@ -21,7 +21,7 @@ const EXPECTED: Record<ImportTarget, { title: string; cols: string }> = {
   campaigns: {
     title: "Campaign email units",
     cols:
-      "week, year, campaign_name, brand, send_date, market, scope, segment, touchpoint, variant, owner, jira_ticket, status, hours_master_template, hours_translations, hours_copywriting, hours_assets, hours_revisions, hours_build, hours_prep.",
+      "week, year, campaign_name, brand, send_date, market, scope, segment, touchpoint, variant, owner, jira_ticket, sfmc_tracking (optional), status, hours_master_template, hours_translations, hours_copywriting, hours_assets, hours_revisions, hours_build, hours_prep.",
   },
 };
 

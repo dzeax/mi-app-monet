@@ -37,6 +37,7 @@ type Unit = {
   year: number | null;
   campaignName: string;
   variant: string;
+  sfmcTracking: string | null;
   brand: string;
   sendDate: string | null;
   market: string;
@@ -407,6 +408,7 @@ export default function CrmCampaignReportingView() {
         { id: "segment", label: "Segment" },
         { id: "touchpoint", label: "Touchpoint" },
         { id: "variant", label: "Variant" },
+        { id: "tracking", label: "SFMC Tracking" },
         { id: "owner", label: "Owner" },
         { id: "status", label: "Status" },
         { id: "hours", label: "Hours" },
@@ -477,6 +479,7 @@ export default function CrmCampaignReportingView() {
               year: r.year ?? null,
               campaignName: r.campaignName || r.campaign_name || "",
               variant: r.variant || "",
+              sfmcTracking: r.sfmcTracking || null,
               brand: r.brand || "",
               sendDate: r.sendDate || null,
               market: r.market || "",
@@ -584,6 +587,7 @@ export default function CrmCampaignReportingView() {
           r.market,
           r.segment ?? "",
           r.touchpoint ?? "",
+          r.sfmcTracking ?? "",
         ]
           .join(" ")
           .toLowerCase();
@@ -1060,6 +1064,7 @@ export default function CrmCampaignReportingView() {
         "segment",
         "touchpoint",
         "variant",
+        "sfmc_tracking",
         "status",
         "hours_master_template",
         "hours_translations",
@@ -1085,6 +1090,7 @@ export default function CrmCampaignReportingView() {
           r.segment ?? "",
           r.touchpoint ?? "",
           r.variant ?? "",
+          r.sfmcTracking ?? "",
           r.status,
           r.hoursMasterTemplate.toFixed(2),
           r.hoursTranslations.toFixed(2),
@@ -1593,6 +1599,9 @@ export default function CrmCampaignReportingView() {
                 {showCol("variant") ? (
                   <th className="px-3 py-3 font-semibold">Variant</th>
                 ) : null}
+                {showCol("tracking") ? (
+                  <th className="px-3 py-3 font-semibold min-w-[220px]">SFMC tracking</th>
+                ) : null}
                 {showCol("owner") ? (
                   <th className="px-3 py-3 font-semibold">Owner</th>
                 ) : null}
@@ -1821,6 +1830,11 @@ export default function CrmCampaignReportingView() {
                     {showCol("variant") ? (
                       <td className="px-3 py-3">{r.variant || "n/a"}</td>
                     ) : null}
+                    {showCol("tracking") ? (
+                      <td className="px-3 py-3 max-w-[300px] truncate" title={r.sfmcTracking || undefined}>
+                        {r.sfmcTracking || <span className="text-[color:var(--color-text)]/55">n/a</span>}
+                      </td>
+                    ) : null}
                     {showCol("owner") ? (
                       <td className="px-3 py-3">
                         <span
@@ -1976,6 +1990,10 @@ export default function CrmCampaignReportingView() {
                       sendDate: patch.sendDate ?? r.sendDate,
                       owner: patch.owner ?? r.owner,
                       status: patch.status ?? r.status,
+                      sfmcTracking:
+                        Object.prototype.hasOwnProperty.call(patch, "sfmcTracking")
+                          ? patch.sfmcTracking ?? null
+                          : r.sfmcTracking,
                     }
                   : r,
               ),
