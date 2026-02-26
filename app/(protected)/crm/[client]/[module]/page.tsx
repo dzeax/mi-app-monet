@@ -8,6 +8,7 @@ import CrmBudgetExecutionView from '@/components/crm/CrmBudgetExecutionView';
 import CrmDqTicketsAnalyticsView from '@/components/crm/CrmDqTicketsAnalyticsView';
 import CrmManualEffortsView from '@/components/crm/CrmManualEffortsView';
 import CrmNewsletterInsightsView from '@/components/crm/CrmNewsletterInsightsView';
+import CrmEmailCopyGeneratorView from '@/components/crm/CrmEmailCopyGeneratorView';
 import CrmOperationsOverview from '@/components/crm/CrmOperationsOverview';
 import { getCrmClient, getCrmModule, getCrmWorkspaceHref } from '@/lib/crm/clients';
 
@@ -61,6 +62,9 @@ export default async function CrmModulePage({ params }: Props) {
   }
   if (moduleConfig.type === 'newsletter_insights') {
     return <CrmNewsletterInsightsView />;
+  }
+  if (moduleConfig.type === 'email_copy') {
+    return <CrmEmailCopyGeneratorView clientSlug={client.slug} clientLabel={client.label ?? client.name} />;
   }
   if (moduleConfig.type === 'budget') {
     return <CrmBudgetView />;

@@ -3,6 +3,7 @@ export type CrmModuleType =
   | 'dq_tickets'
   | 'campaign_reporting'
   | 'newsletter_insights'
+  | 'email_copy'
   | 'budget'
   | 'budget_execution'
   | 'manual_efforts'
@@ -199,6 +200,13 @@ export const CRM_CLIENTS: CrmClient[] = [
     name: 'Saveurs et Vie',
     modules: [
       {
+        slug: 'email-copy',
+        type: 'email_copy',
+        label: 'Email Copy Generator',
+        description: 'Generate French CRM email copy by Brevo block with brand tone constraints.',
+        icon: 'runbook',
+      },
+      {
         slug: 'manual-efforts',
         type: 'manual_efforts',
         label: 'Manual Efforts',
@@ -271,6 +279,7 @@ export function isCrmBudgetExecutionEnhancedClient(clientSlug?: string | null) {
 
 const WORKSPACE_PRIORITY: string[] = [
   'ticket-reporting',
+  'email-copy',
   'manual-efforts',
   'dq-tickets',
   'campaigns',
