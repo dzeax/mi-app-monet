@@ -1,6 +1,17 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import {
+  CheckCircle2,
+  Copy,
+  FileText,
+  LayoutGrid,
+  Loader2,
+  Palette,
+  Plus,
+  Sparkles,
+  Trash2,
+} from "lucide-react";
 
 import { parseEmailCopyBrief } from "@/lib/crm/emailCopyBriefParser";
 import {
@@ -50,12 +61,28 @@ type WorkspacePayload = {
 };
 
 type GenerationModel = "gpt-5-mini" | "gpt-4-turbo" | "gpt-4o-mini";
+type WizardStepId = "brief" | "blocks" | "generate";
+
 const BLOCK_TYPE_OPTIONS: Array<{ value: BrevoBlockType; label: string }> = [
-  { value: "hero", label: "Hero" },
-  { value: "three_columns", label: "3 columns" },
-  { value: "two_columns", label: "2 columns" },
-  { value: "image_text_side_by_side", label: "Image + text" },
+  { value: "hero", label: "Hero content" },
+  { value: "three_columns", label: "3 columns content block" },
+  { value: "two_columns", label: "2 columns content block" },
+  { value: "image_text_side_by_side", label: "Image + text side-by-side block" },
 ];
+
+const MODEL_OPTIONS: Array<{ value: GenerationModel; label: string }> = [
+  { value: "gpt-4o-mini", label: "GPT-4o mini (recommended)" },
+  { value: "gpt-5-mini", label: "GPT-5 mini (creative)" },
+  { value: "gpt-4-turbo", label: "GPT-4 Turbo (stable)" },
+];
+
+const VARIANT_OPTIONS = [1, 2, 3, 4, 5];
+const FIELD_LABEL_CLASS = "text-[color:var(--color-text)]/72";
+const FOCUS_RING_CLASS =
+  "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[color:var(--color-primary)]/50 focus-visible:ring-offset-2 focus-visible:ring-offset-[color:var(--color-surface)]";
+const CONTROL_BUTTON_CLASS = `h-9 px-3 text-xs sm:text-sm ${FOCUS_RING_CLASS}`;
+const OUTPUT_META_CLASS = "text-[11px] uppercase tracking-[0.16em] text-[color:var(--color-text)]/72 sm:text-xs sm:tracking-[0.2em]";
+const OUTPUT_CARD_CLASS = "rounded-xl border border-[color:var(--color-border)] bg-[color:var(--color-surface-2)]/72 p-3 sm:p-3.5";
 
 function createEmptyBrief(): EmailCopyBrief {
   return {
@@ -94,6 +121,13 @@ function splitLines(value: string): string[] {
   return value
     .split(/\r?\n/)
     .map((line) => clean(line))
+    .filter(Boolean);
+}
+
+function splitCsv(value: string): string[] {
+  return value
+    .split(",")
+    .map((item) => clean(item))
     .filter(Boolean);
 }
 
@@ -146,10 +180,38 @@ function normalizeBrand(profile: EmailCopyBrandProfile): EmailCopyBrandProfile {
 function formatVariantClipboard(variant: EmailCopyVariant): string {
   const lines = [`Subject: ${variant.subject}`, `Preheader: ${variant.preheader}`];
   variant.blocks.forEach((block, index) => {
-    lines.push("", `Block ${index + 1} (${block.blockType})`, `Title: ${block.title}`);
-    lines.push(`Subtitle: ${block.subtitle}`, `Content: ${block.content}`, `CTA: ${block.ctaLabel}`);
+    lines.push("", `Block ${index + 1} (${block.blockType})`);
+    lines.push(`Title: ${block.title}`);
+    lines.push(`Subtitle: ${block.subtitle}`);
+    lines.push(`Content: ${block.content}`);
+    lines.push(`CTA: ${block.ctaLabel}`);
   });
   return lines.join("\n");
+}
+
+function briefLooksStarted(brief: EmailCopyBrief, rawBriefInput: string): boolean {
+  if (clean(rawBriefInput).length > 0) return true;
+  if (clean(brief.campaignName).length > 0 && clean(brief.campaignName) !== "Nouvelle campagne") return true;
+  if (clean(brief.sourceSubject || "").length > 0) return true;
+  if (clean(brief.sourcePreheader || "").length > 0) return true;
+  if (clean(brief.objective || "").length > 0) return true;
+  if (clean(brief.offerSummary || "").length > 0) return true;
+  return false;
+}
+
+async function copyText(value: string, label: string) {
+  try {
+    await navigator.clipboard.writeText(value);
+    showSuccess(`${label} copied.`);
+  } catch {
+    showError(`Unable to copy ${label.toLowerCase()}.`);
+  }
+}
+
+function isTypingElement(target: EventTarget | null): boolean {
+  if (!(target instanceof HTMLElement)) return false;
+  const tagName = target.tagName.toLowerCase();
+  return tagName === "input" || tagName === "textarea" || tagName === "select" || target.isContentEditable;
 }
 
 export default function CrmEmailCopyGeneratorView({ clientSlug, clientLabel }: CrmEmailCopyGeneratorViewProps) {
@@ -174,11 +236,131 @@ export default function CrmEmailCopyGeneratorView({ clientSlug, clientLabel }: C
   const [savingBrief, setSavingBrief] = useState(false);
   const [savingBrand, setSavingBrand] = useState(false);
   const [savingDrafts, setSavingDrafts] = useState(false);
+  const [activeStep, setActiveStep] = useState<WizardStepId>("brief");
+  const [brandDrawerOpen, setBrandDrawerOpen] = useState(false);
+  const [mobileOutputOpen, setMobileOutputOpen] = useState(false);
+  const [expandedBlockId, setExpandedBlockId] = useState<string>("block-1");
+  const brandKitButtonRef = useRef<HTMLButtonElement | null>(null);
+  const brandDrawerRef = useRef<HTMLElement | null>(null);
+  const brandDrawerCloseButtonRef = useRef<HTMLButtonElement | null>(null);
+  const lastFocusedElementRef = useRef<HTMLElement | null>(null);
+  const drawerOpenedRef = useRef(false);
 
   const currentVariant = useMemo(
     () => variants.find((variant) => variant.index === activeVariant) || null,
     [variants, activeVariant]
   );
+
+  const briefReady = useMemo(() => briefLooksStarted(brief, rawBriefInput), [brief, rawBriefInput]);
+  const blocksReady = useMemo(
+    () =>
+      brief.blocks.length > 0 &&
+      brief.blocks.every((block) => clean(block.id).length > 0 && clean(block.sourceContent || block.sourceTitle || "").length > 0),
+    [brief.blocks]
+  );
+  const generatedReady = variants.length > 0;
+  const mappedBlocksCount = useMemo(
+    () =>
+      brief.blocks.filter(
+        (block) => clean(block.id).length > 0 && clean(block.sourceContent || block.sourceTitle || "").length > 0
+      ).length,
+    [brief.blocks]
+  );
+
+  const stepMeta = useMemo(
+    () => [
+      {
+        id: "brief" as const,
+        title: "Brief Intake",
+        helper: "Paste and normalize campaign brief",
+        ready: briefReady,
+        icon: FileText,
+      },
+      {
+        id: "blocks" as const,
+        title: "Block Mapping",
+        helper: "Map content to Brevo sections",
+        ready: blocksReady,
+        icon: LayoutGrid,
+      },
+      {
+        id: "generate" as const,
+        title: "Generate & Review",
+        helper: "Produce variants and copy to Brevo",
+        ready: generatedReady,
+        icon: Sparkles,
+      },
+    ],
+    [briefReady, blocksReady, generatedReady]
+  );
+
+  const openBrandDrawer = useCallback(() => {
+    lastFocusedElementRef.current =
+      document.activeElement instanceof HTMLElement ? document.activeElement : brandKitButtonRef.current;
+    setBrandDrawerOpen(true);
+  }, []);
+
+  const closeBrandDrawer = useCallback(() => {
+    setBrandDrawerOpen(false);
+  }, []);
+
+  useEffect(() => {
+    if (brandDrawerOpen) {
+      drawerOpenedRef.current = true;
+      const timer = window.setTimeout(() => {
+        brandDrawerCloseButtonRef.current?.focus();
+      }, 0);
+      return () => window.clearTimeout(timer);
+    }
+
+    if (!drawerOpenedRef.current) return;
+    const focusTarget = lastFocusedElementRef.current ?? brandKitButtonRef.current;
+    const timer = window.setTimeout(() => {
+      focusTarget?.focus();
+    }, 0);
+    return () => window.clearTimeout(timer);
+  }, [brandDrawerOpen]);
+
+  useEffect(() => {
+    if (!brandDrawerOpen) return;
+
+    const handleDrawerKeys = (event: KeyboardEvent) => {
+      if (event.key === "Escape") {
+        event.preventDefault();
+        closeBrandDrawer();
+        return;
+      }
+      if (event.key !== "Tab") return;
+
+      const drawerElement = brandDrawerRef.current;
+      if (!drawerElement) return;
+
+      const focusable = drawerElement.querySelectorAll<HTMLElement>(
+        'a[href],button:not([disabled]),textarea:not([disabled]),input:not([disabled]),select:not([disabled]),[tabindex]:not([tabindex="-1"])'
+      );
+      if (!focusable.length) return;
+
+      const first = focusable[0];
+      const last = focusable[focusable.length - 1];
+      const active = document.activeElement instanceof HTMLElement ? document.activeElement : null;
+
+      if (event.shiftKey) {
+        if (!active || !drawerElement.contains(active) || active === first) {
+          event.preventDefault();
+          last.focus();
+        }
+        return;
+      }
+
+      if (!active || !drawerElement.contains(active) || active === last) {
+        event.preventDefault();
+        first.focus();
+      }
+    };
+
+    document.addEventListener("keydown", handleDrawerKeys);
+    return () => document.removeEventListener("keydown", handleDrawerKeys);
+  }, [brandDrawerOpen, closeBrandDrawer]);
 
   const fetchWorkspace = useCallback(
     async (briefId?: string) => {
@@ -197,12 +379,16 @@ export default function CrmEmailCopyGeneratorView({ clientSlug, clientLabel }: C
           ...(payload.brandProfile ?? {}),
         });
         setBriefs(payload.briefs || []);
+
         if (payload.selectedBrief?.id) {
+          const loadedBrief = (payload.selectedBrief.brief as EmailCopyBrief | null) || createEmptyBrief();
           setActiveBriefId(payload.selectedBrief.id);
           setSelectedBriefId(payload.selectedBrief.id);
-          setBrief((payload.selectedBrief.brief as EmailCopyBrief) || createEmptyBrief());
+          setBrief(loadedBrief);
           setBriefStatus(payload.selectedBrief.status || "");
-          setRawBriefInput((payload.selectedBrief.brief as EmailCopyBrief | null)?.rawBriefText || "");
+          setRawBriefInput(loadedBrief.rawBriefText || "");
+          setExpandedBlockId(loadedBrief.blocks[0]?.id || "block-1");
+          setActiveStep("blocks");
         }
 
         const sortedDrafts = (payload.drafts || []).sort((a, b) => a.variantIndex - b.variantIndex);
@@ -211,6 +397,8 @@ export default function CrmEmailCopyGeneratorView({ clientSlug, clientLabel }: C
           setGeneratedModel(sortedDrafts[0].model);
           setGeneratedSource(sortedDrafts[0].source);
           setActiveVariant(sortedDrafts[0].draft.index || 1);
+          setActiveStep("generate");
+          setMobileOutputOpen(true);
         }
       } catch (error) {
         showError(error instanceof Error ? error.message : "Unable to load workspace");
@@ -242,29 +430,54 @@ export default function CrmEmailCopyGeneratorView({ clientSlug, clientLabel }: C
     });
   };
 
+  const startNewBrief = () => {
+    const nextBrief = createEmptyBrief();
+    setActiveBriefId(null);
+    setSelectedBriefId("");
+    setBriefStatus("");
+    setRawBriefInput("");
+    setBrief(nextBrief);
+    setVariants([]);
+    setGeneratedModel(null);
+    setGeneratedSource(null);
+    setActiveVariant(1);
+    setActiveStep("brief");
+    setMobileOutputOpen(false);
+    setExpandedBlockId(nextBrief.blocks[0].id);
+  };
+
   const addBlock = () => {
-    setBrief((prev) => ({
-      ...prev,
-      blocks: [
-        ...prev.blocks,
-        {
-          id: `block-${prev.blocks.length + 1}`,
-          blockType: "image_text_side_by_side",
-          sourceTitle: null,
-          sourceContent: null,
-          ctaLabel: null,
-          ctaUrl: null,
-        },
-      ],
-    }));
+    setBrief((prev) => {
+      const nextId = `block-${prev.blocks.length + 1}`;
+      setExpandedBlockId(nextId);
+      return {
+        ...prev,
+        blocks: [
+          ...prev.blocks,
+          {
+            id: nextId,
+            blockType: "image_text_side_by_side",
+            sourceTitle: null,
+            sourceContent: null,
+            ctaLabel: null,
+            ctaUrl: null,
+          },
+        ],
+      };
+    });
   };
 
   const removeBlock = (blockIndex: number) => {
     setBrief((prev) => {
       if (prev.blocks.length <= 1) return prev;
+      const removed = prev.blocks[blockIndex];
+      const remaining = prev.blocks.filter((_, index) => index !== blockIndex);
+      if (removed?.id === expandedBlockId) {
+        setExpandedBlockId(remaining[0]?.id || "block-1");
+      }
       return {
         ...prev,
-        blocks: prev.blocks.filter((_, index) => index !== blockIndex),
+        blocks: remaining,
       };
     });
   };
@@ -283,6 +496,7 @@ export default function CrmEmailCopyGeneratorView({ clientSlug, clientLabel }: C
           brief: normalizeBrief({ ...brief, rawBriefText: rawBriefInput || brief.rawBriefText || null }),
         }),
       });
+
       const payload = await response.json().catch(() => null);
       if (!response.ok) throw new Error(payload?.error || `Save failed (${response.status})`);
       const nextId = payload?.briefRecord?.id as string | undefined;
@@ -316,6 +530,7 @@ export default function CrmEmailCopyGeneratorView({ clientSlug, clientLabel }: C
       const payload = await response.json().catch(() => null);
       if (!response.ok) throw new Error(payload?.error || `Save failed (${response.status})`);
       showSuccess("Brand profile saved.");
+      closeBrandDrawer();
     } catch (error) {
       showError(error instanceof Error ? error.message : "Unable to save brand profile");
     } finally {
@@ -323,7 +538,31 @@ export default function CrmEmailCopyGeneratorView({ clientSlug, clientLabel }: C
     }
   };
 
+  const handleParseBrief = () => {
+    if (!clean(rawBriefInput).length) {
+      showError("Paste a brief before parsing.");
+      return;
+    }
+    const parsed = parseEmailCopyBrief(rawBriefInput);
+    setBrief(parsed.brief);
+    setBriefStatus(parsed.metadata.status || "");
+    setExpandedBlockId(parsed.brief.blocks[0]?.id || "block-1");
+    setActiveStep("blocks");
+    showSuccess("Brief parsed.");
+  };
+
   const generateCopy = async () => {
+    if (!briefReady) {
+      showError("Complete brief intake before generation.");
+      setActiveStep("brief");
+      return;
+    }
+    if (!blocksReady) {
+      showError("Complete block mapping before generation.");
+      setActiveStep("blocks");
+      return;
+    }
+
     setGenerating(true);
     try {
       const response = await fetch("/api/ai/email-copy", {
@@ -345,6 +584,8 @@ export default function CrmEmailCopyGeneratorView({ clientSlug, clientLabel }: C
       setGeneratedModel((payload?.model as string | undefined) || model);
       setGeneratedSource((payload?.source as "openai" | "local-fallback" | undefined) || "openai");
       setActiveVariant(generated[0].index);
+      setActiveStep("generate");
+      setMobileOutputOpen(true);
       showSuccess("Variants generated.");
     } catch (error) {
       showError(error instanceof Error ? error.message : "Unable to generate");
@@ -387,170 +628,719 @@ export default function CrmEmailCopyGeneratorView({ clientSlug, clientLabel }: C
     }
   };
 
+  const scrollToOutput = useCallback(() => {
+    document.getElementById("email-copy-output-panel")?.scrollIntoView({ behavior: "smooth", block: "start" });
+    setMobileOutputOpen(true);
+  }, []);
+
+  useEffect(() => {
+    const handleKeyboardShortcuts = (event: KeyboardEvent) => {
+      if (event.defaultPrevented || event.repeat) return;
+
+      if (brandDrawerOpen && event.key !== "Escape") return;
+
+      const key = event.key.toLowerCase();
+      const withCmdOrCtrl = event.metaKey || event.ctrlKey;
+
+      if (withCmdOrCtrl && !event.altKey && !event.shiftKey && key === "s") {
+        event.preventDefault();
+        void saveBrief();
+        return;
+      }
+
+      if (withCmdOrCtrl && !event.altKey && !event.shiftKey && event.key === "Enter") {
+        event.preventDefault();
+        void generateCopy();
+        return;
+      }
+
+      if (isTypingElement(event.target)) return;
+      if (!event.altKey || event.ctrlKey || event.metaKey) return;
+
+      if (key === "1") {
+        event.preventDefault();
+        setActiveStep("brief");
+        return;
+      }
+      if (key === "2") {
+        event.preventDefault();
+        setActiveStep("blocks");
+        return;
+      }
+      if (key === "3") {
+        event.preventDefault();
+        setActiveStep("generate");
+        return;
+      }
+      if (key === "b") {
+        event.preventDefault();
+        openBrandDrawer();
+        return;
+      }
+      if (key === "o") {
+        event.preventDefault();
+        scrollToOutput();
+      }
+    };
+
+    window.addEventListener("keydown", handleKeyboardShortcuts);
+    return () => window.removeEventListener("keydown", handleKeyboardShortcuts);
+  }, [brandDrawerOpen, generateCopy, openBrandDrawer, saveBrief, scrollToOutput]);
+
+  const stepNavigation = (
+    <div className="card p-3 sm:p-5">
+      <div className="grid gap-2 sm:flex sm:flex-wrap sm:items-center sm:gap-3">
+        {stepMeta.map((step, index) => {
+          const StepIcon = step.icon;
+          const isActive = activeStep === step.id;
+          const complete = step.ready;
+          return (
+            <button
+              key={step.id}
+              type="button"
+              className={[
+                `flex w-full items-start gap-3 rounded-xl border px-3 py-3 text-left transition-colors sm:min-w-[220px] sm:flex-1 sm:px-4 sm:py-3.5 ${FOCUS_RING_CLASS}`,
+                isActive
+                  ? "border-[color:var(--color-primary)] bg-[color:var(--color-primary)]/10"
+                  : "border-[color:var(--color-border)] bg-[color:var(--color-surface)] hover:bg-[color:var(--color-surface-2)]",
+              ].join(" ")}
+              onClick={() => setActiveStep(step.id)}
+              aria-current={isActive ? "step" : undefined}
+              aria-keyshortcuts={`Alt+${index + 1}`}
+            >
+              <div
+                className={[
+                  "flex h-8 w-8 shrink-0 items-center justify-center rounded-full border",
+                  complete
+                    ? "border-emerald-300 bg-emerald-100 text-emerald-700"
+                    : "border-[color:var(--color-border)] bg-[color:var(--color-surface-2)] text-[color:var(--color-text)]/70",
+                ].join(" ")}
+              >
+                {complete ? <CheckCircle2 className="h-4 w-4" /> : <StepIcon className="h-4 w-4" />}
+              </div>
+              <div className="min-w-0">
+                <p className="text-xs uppercase tracking-[0.18em] text-[var(--color-muted)]">Step {index + 1}</p>
+                <p className="mt-0.5 text-sm font-semibold text-[color:var(--color-text)]">{step.title}</p>
+                <p className="mt-1 hidden text-xs text-[var(--color-muted)] sm:block">{step.helper}</p>
+              </div>
+            </button>
+          );
+        })}
+      </div>
+    </div>
+  );
+
   return (
-    <section className="space-y-5" data-page="crm-email-copy-generator">
-      <header className="rounded-2xl border border-[color:var(--color-border)] bg-[color:var(--color-surface)] px-5 py-4 shadow-sm">
-        <h1 className="text-lg font-semibold text-[color:var(--color-text)]">Email Copy Generator</h1>
-        <p className="mt-1 text-sm text-[color:var(--color-text-muted)]">
-          {clientLabel ?? clientSlug}: French only, always vouvoiement, and Brevo block limits enforced.
-        </p>
-      </header>
+    <section className="space-y-4 sm:space-y-6" data-page="crm-email-copy-generator">
+      <a
+        href="#email-copy-main-panel"
+        className="sr-only focus:not-sr-only focus:fixed focus:left-4 focus:top-4 focus:z-[260] focus:rounded-md focus:bg-[color:var(--color-surface)] focus:px-3 focus:py-2 focus:text-xs focus:font-medium focus:text-[color:var(--color-text)]"
+      >
+        Skip to form
+      </a>
+      <a
+        href="#email-copy-output-panel"
+        className="sr-only focus:not-sr-only focus:fixed focus:left-36 focus:top-4 focus:z-[260] focus:rounded-md focus:bg-[color:var(--color-surface)] focus:px-3 focus:py-2 focus:text-xs focus:font-medium focus:text-[color:var(--color-text)]"
+      >
+        Skip to output
+      </a>
+      <header className="relative overflow-hidden rounded-2xl border border-[color:var(--color-border)] bg-[color:var(--color-surface)] px-4 py-4 shadow-sm sm:rounded-3xl sm:px-6 sm:py-6">
+        <div className="pointer-events-none absolute inset-0 bg-[radial-gradient(120%_120%_at_0%_0%,rgba(14,165,233,0.18),transparent_60%),radial-gradient(120%_120%_at_80%_0%,rgba(99,102,241,0.16),transparent_55%)]" />
+        <div className="relative z-10 space-y-4 sm:space-y-5">
+          <div className="flex flex-col gap-3 lg:flex-row lg:items-start lg:justify-between">
+            <div>
+              <p className="text-xs uppercase tracking-[0.3em] text-[color:var(--color-text)]/65">CRM</p>
+              <div className="mt-2 flex flex-wrap items-center gap-2.5 sm:gap-3">
+                <h1 className="text-xl font-semibold text-[color:var(--color-text)] sm:text-2xl">Email Copy Generator</h1>
+                <span className="rounded-full border border-[color:var(--color-primary)] bg-[color:var(--color-primary)]/10 px-2.5 py-1 text-xs font-semibold text-[color:var(--color-primary)]">
+                  {clientLabel ?? clientSlug}
+                </span>
+              </div>
+              <p className="mt-2 text-xs text-[color:var(--color-text)]/72 sm:text-sm">
+                French output only, vouvoiement enforced, and Brevo block limits built-in.
+              </p>
+              <p className="mt-1 text-[11px] text-[color:var(--color-text)]/62 sm:text-xs">
+                Shortcuts: Alt+1/2/3 step, Alt+B Brand Kit, Alt+O Output, Ctrl/Cmd+S Save brief, Ctrl/Cmd+Enter Generate.
+              </p>
+            </div>
 
-      <div className="grid gap-5 xl:grid-cols-[minmax(0,1.1fr)_minmax(0,0.9fr)]">
-        <div className="space-y-5">
-          <article className="rounded-2xl border border-[color:var(--color-border)] bg-[color:var(--color-surface)] p-4 shadow-sm">
-            <div className="flex items-center justify-between gap-2">
-              <h2 className="text-base font-semibold text-[color:var(--color-text)]">Saved briefs</h2>
-              <span className="text-xs text-[color:var(--color-text-muted)]">{loading ? "Loading..." : `${briefs.length} item(s)`}</span>
-            </div>
-            <div className="mt-3 flex gap-2">
-              <select className="input flex-1" value={selectedBriefId} onChange={(event) => setSelectedBriefId(event.target.value)}>
-                <option value="">Select brief</option>
-                {briefs.map((item) => (
-                  <option key={item.id} value={item.id}>
-                    {item.campaignName} {item.sendDate ? `| ${item.sendDate}` : ""}
-                  </option>
-                ))}
-              </select>
-              <button type="button" className="btn-ghost" disabled={!selectedBriefId} onClick={() => void fetchWorkspace(selectedBriefId)}>
-                Load
-              </button>
-            </div>
-          </article>
-
-          <article className="rounded-2xl border border-[color:var(--color-border)] bg-[color:var(--color-surface)] p-4 shadow-sm">
-            <div className="flex items-center justify-between gap-2">
-              <h2 className="text-base font-semibold text-[color:var(--color-text)]">Brand profile</h2>
-              <button type="button" className="btn-ghost" disabled={savingBrand} onClick={() => void saveBrandProfile()}>
-                {savingBrand ? "Saving..." : "Save profile"}
-              </button>
-            </div>
-            <div className="mt-3 grid gap-3 md:grid-cols-2">
-              <label className="space-y-1 text-sm md:col-span-2">
-                <span className="text-[color:var(--color-text-muted)]">Tone summary</span>
-                <textarea className="input min-h-[64px]" value={brandProfile.toneSummary} onChange={(event) => setBrandProfile((prev) => ({ ...prev, toneSummary: event.target.value }))} />
-              </label>
-              <label className="space-y-1 text-sm">
-                <span className="text-[color:var(--color-text-muted)]">Tone do (line by line)</span>
-                <textarea className="input min-h-[96px]" value={brandProfile.toneDo.join("\n")} onChange={(event) => setBrandProfile((prev) => ({ ...prev, toneDo: splitLines(event.target.value) }))} />
-              </label>
-              <label className="space-y-1 text-sm">
-                <span className="text-[color:var(--color-text-muted)]">Tone don't (line by line)</span>
-                <textarea className="input min-h-[96px]" value={brandProfile.toneDont.join("\n")} onChange={(event) => setBrandProfile((prev) => ({ ...prev, toneDont: splitLines(event.target.value) }))} />
-              </label>
-            </div>
-          </article>
-
-          <article className="rounded-2xl border border-[color:var(--color-border)] bg-[color:var(--color-surface)] p-4 shadow-sm">
-            <div className="flex flex-wrap items-center justify-between gap-2">
-              <h2 className="text-base font-semibold text-[color:var(--color-text)]">Brief builder</h2>
-              <div className="flex gap-2">
-                <button type="button" className="btn-ghost" disabled={!rawBriefInput.trim()} onClick={() => { const parsed = parseEmailCopyBrief(rawBriefInput); setBrief(parsed.brief); setBriefStatus(parsed.metadata.status || ""); showSuccess("Brief parsed."); }}>
-                  Parse
+            <div className="w-full rounded-xl border border-[color:var(--color-border)] bg-[color:var(--color-surface)] p-2 shadow-sm lg:w-auto">
+              <div className="grid gap-2 sm:grid-cols-[minmax(0,1fr)_auto]">
+                <select className="input h-9 min-w-0 w-full text-xs sm:min-w-[220px] sm:text-sm" value={selectedBriefId} onChange={(event) => setSelectedBriefId(event.target.value)}>
+                  <option value="">{loading ? "Loading briefs..." : "Select saved brief"}</option>
+                  {briefs.map((item) => (
+                    <option key={item.id} value={item.id}>
+                      {item.campaignName}
+                      {item.sendDate ? ` | ${item.sendDate}` : ""}
+                    </option>
+                  ))}
+                </select>
+                <button type="button" className={`btn-ghost ${CONTROL_BUTTON_CLASS}`} disabled={!selectedBriefId} onClick={() => void fetchWorkspace(selectedBriefId)}>
+                  Load
                 </button>
-                <button type="button" className="btn-ghost" disabled={savingBrief} onClick={() => void saveBrief()}>
-                  {savingBrief ? "Saving..." : "Save brief"}
+              </div>
+
+              <div className="mt-2 grid grid-cols-2 gap-2 sm:flex sm:flex-wrap sm:items-center">
+                <button type="button" className={`btn-ghost ${CONTROL_BUTTON_CLASS}`} onClick={startNewBrief}>
+                  New
+                </button>
+                <button
+                  ref={brandKitButtonRef}
+                  type="button"
+                  className={`btn-ghost ${CONTROL_BUTTON_CLASS}`}
+                  onClick={openBrandDrawer}
+                  aria-keyshortcuts="Alt+B"
+                >
+                  Brand Kit
+                </button>
+                <button
+                  type="button"
+                  className={`btn-ghost ${CONTROL_BUTTON_CLASS}`}
+                  disabled={savingBrief}
+                  onClick={() => void saveBrief()}
+                  aria-keyshortcuts="Control+S Meta+S"
+                >
+                  {savingBrief ? "Saving..." : "Save Brief"}
+                </button>
+                <button
+                  type="button"
+                  className={`btn-primary ${CONTROL_BUTTON_CLASS}`}
+                  disabled={generating}
+                  onClick={() => void generateCopy()}
+                  aria-keyshortcuts="Control+Enter Meta+Enter"
+                >
+                  {generating ? (
+                    <span className="flex items-center gap-2">
+                      <Loader2 className="h-4 w-4 animate-spin" />
+                      Generating
+                    </span>
+                  ) : (
+                    "Generate"
+                  )}
                 </button>
               </div>
             </div>
-            <textarea className="input mt-3 min-h-[150px]" value={rawBriefInput} onChange={(event) => setRawBriefInput(event.target.value)} placeholder="Paste the client brief here..." />
-            <div className="mt-3 grid gap-3 md:grid-cols-2">
-              <label className="space-y-1 text-sm md:col-span-2"><span className="text-[color:var(--color-text-muted)]">Campaign</span><input className="input" value={brief.campaignName} onChange={(event) => updateBriefField("campaignName", event.target.value)} /></label>
-              <label className="space-y-1 text-sm"><span className="text-[color:var(--color-text-muted)]">Status</span><input className="input" value={briefStatus} onChange={(event) => setBriefStatus(event.target.value)} /></label>
-              <label className="space-y-1 text-sm"><span className="text-[color:var(--color-text-muted)]">Send date</span><input className="input" value={brief.sendDate || ""} onChange={(event) => updateBriefField("sendDate", event.target.value || null)} /></label>
-              <label className="space-y-1 text-sm"><span className="text-[color:var(--color-text-muted)]">Subject ({countChars(brief.sourceSubject)}/{EMAIL_COPY_CHAR_LIMITS.subject})</span><input className="input" value={brief.sourceSubject || ""} onChange={(event) => updateBriefField("sourceSubject", event.target.value || null)} /></label>
-              <label className="space-y-1 text-sm"><span className="text-[color:var(--color-text-muted)]">Preheader ({countChars(brief.sourcePreheader)}/{EMAIL_COPY_CHAR_LIMITS.preheader})</span><input className="input" value={brief.sourcePreheader || ""} onChange={(event) => updateBriefField("sourcePreheader", event.target.value || null)} /></label>
-            </div>
-
-            <div className="mt-4 space-y-3">
-              <div className="flex items-center justify-end">
-                <button type="button" className="btn-ghost" onClick={addBlock}>
-                  Add block
-                </button>
-              </div>
-              {brief.blocks.map((block, blockIndex) => (
-                <div key={`${block.id}-${blockIndex}`} className="rounded-xl border border-[color:var(--color-border)] bg-[color:var(--color-bg-soft)] p-3">
-                  <div className="grid gap-2 md:grid-cols-2">
-                    <label className="space-y-1 text-sm"><span className="text-[color:var(--color-text-muted)]">Block ID</span><input className="input" value={block.id} onChange={(event) => updateBlockField(blockIndex, "id", event.target.value)} /></label>
-                    <label className="space-y-1 text-sm"><span className="text-[color:var(--color-text-muted)]">Type</span><select className="input" value={block.blockType} onChange={(event) => updateBlockField(blockIndex, "blockType", event.target.value as BrevoBlockType)}>{BLOCK_TYPE_OPTIONS.map((option) => (<option key={option.value} value={option.value}>{option.label}</option>))}</select></label>
-                    <label className="space-y-1 text-sm"><span className="text-[color:var(--color-text-muted)]">Title ({countChars(block.sourceTitle)}/{EMAIL_COPY_CHAR_LIMITS.title})</span><input className="input" value={block.sourceTitle || ""} onChange={(event) => updateBlockField(blockIndex, "sourceTitle", event.target.value || null)} /></label>
-                    <label className="space-y-1 text-sm"><span className="text-[color:var(--color-text-muted)]">CTA</span><input className="input" value={block.ctaLabel || ""} onChange={(event) => updateBlockField(blockIndex, "ctaLabel", event.target.value || null)} /></label>
-                    <label className="space-y-1 text-sm md:col-span-2"><span className="text-[color:var(--color-text-muted)]">Content ({countChars(block.sourceContent)}/{EMAIL_COPY_BLOCK_CONTENT_LIMITS[block.blockType]})</span><textarea className="input min-h-[84px]" value={block.sourceContent || ""} onChange={(event) => updateBlockField(blockIndex, "sourceContent", event.target.value || null)} /></label>
-                    <div className="md:col-span-2 flex justify-end">
-                      <button type="button" className="btn-ghost" disabled={brief.blocks.length <= 1} onClick={() => removeBlock(blockIndex)}>
-                        Remove block
-                      </button>
-                    </div>
-                  </div>
-                </div>
-              ))}
-            </div>
-
-            <div className="mt-4 grid gap-2 md:grid-cols-3">
-              <label className="space-y-1 text-sm"><span className="text-[color:var(--color-text-muted)]">Variants</span><select className="input" value={variantCount} onChange={(event) => setVariantCount(Number(event.target.value) || 1)}>{[1,2,3,4,5].map((option) => <option key={option} value={option}>{option}</option>)}</select></label>
-              <label className="space-y-1 text-sm md:col-span-2"><span className="text-[color:var(--color-text-muted)]">Model</span><select className="input" value={model} onChange={(event) => setModel(event.target.value as GenerationModel)}><option value="gpt-4o-mini">GPT-4o mini</option><option value="gpt-5-mini">GPT-5 mini</option><option value="gpt-4-turbo">GPT-4 Turbo</option></select></label>
-            </div>
-
-            <div className="mt-3 flex flex-wrap gap-2">
-              <button type="button" className="btn" disabled={generating} onClick={() => void generateCopy()}>{generating ? "Generating..." : "Generate variants"}</button>
-              <button type="button" className="btn-ghost" disabled={savingDrafts || !variants.length} onClick={() => void saveDrafts()}>{savingDrafts ? "Saving..." : "Save drafts"}</button>
-            </div>
-          </article>
-        </div>
-
-        <article className="rounded-2xl border border-[color:var(--color-border)] bg-[color:var(--color-surface)] p-4 shadow-sm">
-          <div className="flex items-center justify-between">
-            <h2 className="text-base font-semibold text-[color:var(--color-text)]">Output</h2>
-            <span className="text-xs text-[color:var(--color-text-muted)]">{generatedModel ? `${generatedModel} | ${generatedSource}` : "No generation yet"}</span>
           </div>
 
-          {!variants.length ? (
-            <p className="mt-3 text-sm text-[color:var(--color-text-muted)]">Generate variants to copy/paste into Brevo.</p>
-          ) : (
-            <div className="mt-3 space-y-3">
-              <div className="flex flex-wrap gap-2">
-                {variants.map((variant) => (
-                  <button key={variant.index} type="button" className={["rounded-lg border px-3 py-1.5 text-sm", activeVariant === variant.index ? "border-[color:var(--color-primary)] bg-[color:var(--color-primary-soft)]" : "border-[color:var(--color-border)]"].join(" ")} onClick={() => setActiveVariant(variant.index)}>
-                    Variant {variant.index}
-                  </button>
-                ))}
-              </div>
-
-              {currentVariant ? (
-                <>
-                  <div className="rounded-xl border border-[color:var(--color-border)] bg-[color:var(--color-bg-soft)] p-3">
-                    <p className="text-xs text-[color:var(--color-text-muted)]">Subject ({countChars(currentVariant.subject)}/{EMAIL_COPY_CHAR_LIMITS.subject})</p>
-                    <p className="mt-1 text-sm">{currentVariant.subject}</p>
-                  </div>
-                  <div className="rounded-xl border border-[color:var(--color-border)] bg-[color:var(--color-bg-soft)] p-3">
-                    <p className="text-xs text-[color:var(--color-text-muted)]">Preheader ({countChars(currentVariant.preheader)}/{EMAIL_COPY_CHAR_LIMITS.preheader})</p>
-                    <p className="mt-1 text-sm">{currentVariant.preheader}</p>
-                  </div>
-                  {currentVariant.blocks.map((block, index) => (
-                    <div key={`${block.id}-${index}`} className="rounded-xl border border-[color:var(--color-border)] bg-[color:var(--color-bg-soft)] p-3">
-                      <p className="text-xs text-[color:var(--color-text-muted)]">Block {index + 1} ({block.blockType}) | Title {countChars(block.title)}/{EMAIL_COPY_CHAR_LIMITS.title} | Subtitle {countChars(block.subtitle)}/{EMAIL_COPY_CHAR_LIMITS.subtitle} | Content {countChars(block.content)}/{EMAIL_COPY_BLOCK_CONTENT_LIMITS[block.blockType]}</p>
-                      <p className="mt-2 text-sm font-medium">{block.title}</p>
-                      <p className="mt-1 text-sm text-[color:var(--color-text-muted)]">{block.subtitle}</p>
-                      <p className="mt-2 text-sm">{block.content}</p>
-                      <p className="mt-2 text-xs uppercase tracking-wide text-[color:var(--color-text-muted)]">CTA: {block.ctaLabel}</p>
-                    </div>
-                  ))}
-                  {currentVariant.warnings.length > 0 ? (
-                    <div className="rounded-xl border border-amber-300/70 bg-amber-50 px-3 py-2 text-xs text-amber-900">
-                      {currentVariant.warnings.map((warning, idx) => (
-                        <p key={`${warning}-${idx}`}>- {warning}</p>
-                      ))}
-                    </div>
-                  ) : null}
-                  <button type="button" className="btn-ghost w-full" onClick={async () => { try { await navigator.clipboard.writeText(formatVariantClipboard(currentVariant)); showSuccess("Variant copied."); } catch { showError("Unable to copy variant."); } }}>
-                    Copy full variant
-                  </button>
-                </>
-              ) : null}
+          <div className="grid grid-cols-2 gap-2 sm:gap-3 lg:grid-cols-4">
+            <div className="kpi-frame p-3 sm:p-4">
+              <p className="text-[10px] uppercase tracking-[0.2em] text-[color:var(--color-text)]/55 sm:text-xs">Saved Briefs</p>
+              <p className="mt-1.5 text-xl font-semibold text-[color:var(--color-text)] sm:mt-2 sm:text-2xl">{briefs.length}</p>
+              <p className="mt-1 text-[10px] text-[var(--color-muted)] sm:text-xs">Reusable campaign history</p>
             </div>
-          )}
-        </article>
+            <div className="kpi-frame p-3 sm:p-4">
+              <p className="text-[10px] uppercase tracking-[0.2em] text-[color:var(--color-text)]/55 sm:text-xs">Blocks</p>
+              <p className="mt-1.5 text-xl font-semibold text-[color:var(--color-text)] sm:mt-2 sm:text-2xl">{brief.blocks.length}</p>
+              <p className="mt-1 text-[10px] text-[var(--color-muted)] sm:text-xs">Brevo sections mapped</p>
+            </div>
+            <div className="kpi-frame p-3 sm:p-4">
+              <p className="text-[10px] uppercase tracking-[0.2em] text-[color:var(--color-text)]/55 sm:text-xs">Variants</p>
+              <p className="mt-1.5 text-xl font-semibold text-[color:var(--color-text)] sm:mt-2 sm:text-2xl">{variants.length}</p>
+              <p className="mt-1 text-[10px] text-[var(--color-muted)] sm:text-xs">Generated alternatives</p>
+            </div>
+            <div className="kpi-frame p-3 sm:p-4">
+              <p className="text-[10px] uppercase tracking-[0.2em] text-[color:var(--color-text)]/55 sm:text-xs">Current Step</p>
+              <p className="mt-1.5 text-sm font-semibold text-[color:var(--color-text)] sm:mt-2 sm:text-lg">
+                {stepMeta.find((step) => step.id === activeStep)?.title}
+              </p>
+              <p className="mt-1 text-[10px] text-[var(--color-muted)] sm:text-xs">Guided authoring flow</p>
+            </div>
+          </div>
+        </div>
+      </header>
+
+      <div className="grid gap-4 sm:gap-5 xl:grid-cols-[minmax(0,1.12fr)_minmax(0,0.88fr)]">
+        <div id="email-copy-main-panel" className="space-y-4 sm:space-y-5">
+          {stepNavigation}
+
+          <div className="xl:hidden">
+            <button
+              type="button"
+              className={`btn-ghost ${CONTROL_BUTTON_CLASS} flex w-full items-center justify-between`}
+              onClick={scrollToOutput}
+            >
+              <span>Review output</span>
+              <span className="text-[var(--color-muted)]">{variants.length} variant(s)</span>
+            </button>
+          </div>
+
+          {activeStep === "brief" ? (
+            <article className="card p-3.5 ring-1 ring-[color:var(--color-primary)]/40 sm:p-5 lg:p-6">
+            <div className="flex flex-col gap-3 sm:flex-row sm:flex-wrap sm:items-center sm:justify-between">
+              <div>
+                <p className="text-xs uppercase tracking-[0.2em] text-[var(--color-muted)]">Step 1</p>
+                <h2 className="text-lg font-semibold text-[color:var(--color-text)]">Brief Intake</h2>
+              </div>
+              <div className="grid w-full grid-cols-2 gap-2 sm:flex sm:w-auto sm:items-center">
+                <button type="button" className={`btn-primary ${CONTROL_BUTTON_CLASS}`} onClick={handleParseBrief} disabled={!clean(rawBriefInput).length}>
+                  Parse brief
+                </button>
+                <button type="button" className={`btn-ghost ${CONTROL_BUTTON_CLASS}`} onClick={() => setActiveStep("blocks")} disabled={!briefReady}>
+                  Next
+                </button>
+              </div>
+            </div>
+
+            <label className="mt-3 block space-y-1 text-sm sm:mt-4">
+              <span className={FIELD_LABEL_CLASS}>Raw client brief</span>
+              <textarea
+                className="input min-h-[140px] w-full sm:min-h-[170px]"
+                value={rawBriefInput}
+                onChange={(event) => setRawBriefInput(event.target.value)}
+                placeholder="Paste full client brief here..."
+                lang="fr"
+                spellCheck
+              />
+            </label>
+
+            {!clean(rawBriefInput).length ? (
+              <div className="mt-3 rounded-xl border border-dashed border-[color:var(--color-border)] bg-[color:var(--color-surface-2)]/45 px-3 py-2 text-xs text-[var(--color-muted)]">
+                Paste the full brief first, then use Parse brief to prefill campaign and blocks.
+              </div>
+            ) : null}
+
+            <div className="mt-3 grid gap-2.5 sm:mt-4 sm:gap-3 md:grid-cols-2">
+              <label className="space-y-1 text-sm md:col-span-2">
+                <span className={FIELD_LABEL_CLASS}>Campaign name</span>
+                <input className="input w-full" value={brief.campaignName} onChange={(event) => updateBriefField("campaignName", event.target.value)} />
+              </label>
+              <label className="space-y-1 text-sm">
+                <span className={FIELD_LABEL_CLASS}>Status</span>
+                <input className="input w-full" value={briefStatus} onChange={(event) => setBriefStatus(event.target.value)} />
+              </label>
+              <label className="space-y-1 text-sm">
+                <span className={FIELD_LABEL_CLASS}>Send date</span>
+                <input className="input w-full" value={brief.sendDate || ""} onChange={(event) => updateBriefField("sendDate", event.target.value || null)} lang="fr" />
+              </label>
+              <label className="space-y-1 text-sm">
+                <span className={FIELD_LABEL_CLASS}>
+                  Subject ({countChars(brief.sourceSubject)}/{EMAIL_COPY_CHAR_LIMITS.subject})
+                </span>
+                <input className="input w-full" value={brief.sourceSubject || ""} onChange={(event) => updateBriefField("sourceSubject", event.target.value || null)} lang="fr" />
+              </label>
+              <label className="space-y-1 text-sm">
+                <span className={FIELD_LABEL_CLASS}>
+                  Preheader ({countChars(brief.sourcePreheader)}/{EMAIL_COPY_CHAR_LIMITS.preheader})
+                </span>
+                <input className="input w-full" value={brief.sourcePreheader || ""} onChange={(event) => updateBriefField("sourcePreheader", event.target.value || null)} lang="fr" />
+              </label>
+              <label className="space-y-1 text-sm md:col-span-2">
+                <span className={FIELD_LABEL_CLASS}>Offer summary</span>
+                <textarea className="input min-h-[74px] w-full" value={brief.offerSummary || ""} onChange={(event) => updateBriefField("offerSummary", event.target.value || null)} lang="fr" spellCheck />
+              </label>
+            </div>
+            </article>
+          ) : null}
+
+          {activeStep === "blocks" ? (
+            <article className="card p-3.5 ring-1 ring-[color:var(--color-primary)]/40 sm:p-5 lg:p-6">
+            <div className="flex flex-col gap-3 sm:flex-row sm:flex-wrap sm:items-center sm:justify-between">
+              <div>
+                <p className="text-xs uppercase tracking-[0.2em] text-[var(--color-muted)]">Step 2</p>
+                <h2 className="text-lg font-semibold text-[color:var(--color-text)]">Block Mapping</h2>
+              </div>
+              <div className="grid w-full grid-cols-3 gap-2 sm:flex sm:w-auto sm:items-center">
+                <button type="button" className={`btn-ghost ${CONTROL_BUTTON_CLASS}`} onClick={() => setActiveStep("brief")}>
+                  Back
+                </button>
+                <button type="button" className={`btn-ghost ${CONTROL_BUTTON_CLASS}`} onClick={addBlock}>
+                  <Plus className="mr-1 h-4 w-4" />
+                  Add block
+                </button>
+                <button type="button" className={`btn-primary ${CONTROL_BUTTON_CLASS}`} onClick={() => setActiveStep("generate")} disabled={!blocksReady}>
+                  Next
+                </button>
+              </div>
+            </div>
+
+            <div className="mt-3 flex flex-wrap items-center justify-between gap-2 rounded-xl border border-[color:var(--color-border)] bg-[color:var(--color-surface-2)]/55 px-3 py-2 text-xs">
+              <span className="text-[var(--color-muted)]">
+                {mappedBlocksCount}/{brief.blocks.length} blocks have enough source content.
+              </span>
+              {!blocksReady ? (
+                <span className="rounded-full bg-amber-100 px-2 py-0.5 font-semibold text-amber-700">Complete missing blocks</span>
+              ) : (
+                <span className="rounded-full bg-emerald-100 px-2 py-0.5 font-semibold text-emerald-700">Blocks ready</span>
+              )}
+            </div>
+
+            <div className="mt-3 space-y-2.5 sm:mt-4 sm:space-y-3">
+              {brief.blocks.map((block, blockIndex) => {
+                const isExpanded = expandedBlockId === block.id;
+                const contentLimit = EMAIL_COPY_BLOCK_CONTENT_LIMITS[block.blockType];
+                const sourceSize = countChars(block.sourceContent);
+                const over = sourceSize > contentLimit;
+                return (
+                  <div key={`${block.id}-${blockIndex}`} className="rounded-2xl border border-[color:var(--color-border)] bg-[color:var(--color-surface)]">
+                    <button
+                      type="button"
+                      className={`flex w-full items-center justify-between gap-3 px-3 py-2.5 text-left sm:px-4 sm:py-3 ${FOCUS_RING_CLASS}`}
+                      onClick={() => setExpandedBlockId(isExpanded ? "" : block.id)}
+                      aria-expanded={isExpanded}
+                      aria-controls={`block-panel-${blockIndex}`}
+                    >
+                      <div className="min-w-0">
+                        <p className="text-sm font-semibold text-[color:var(--color-text)]">
+                          {block.id} - {BLOCK_TYPE_OPTIONS.find((entry) => entry.value === block.blockType)?.label}
+                        </p>
+                        <p className="mt-0.5 text-xs text-[var(--color-muted)]">
+                          {sourceSize}/{contentLimit} chars in source content
+                        </p>
+                      </div>
+                      <span
+                        className={[
+                          "rounded-full px-2 py-0.5 text-xs font-semibold",
+                          over
+                            ? "bg-red-100 text-red-700"
+                            : sourceSize > 0
+                              ? "bg-emerald-100 text-emerald-700"
+                              : "bg-slate-100 text-slate-600",
+                        ].join(" ")}
+                      >
+                        {over ? "Over limit" : sourceSize > 0 ? "Ready" : "Empty"}
+                      </span>
+                    </button>
+
+                    {isExpanded ? (
+                      <div id={`block-panel-${blockIndex}`} className="grid gap-2.5 border-t border-[color:var(--color-border)] px-3 py-3 sm:gap-3 sm:px-4 sm:py-4 md:grid-cols-2">
+                        <label className="space-y-1 text-sm">
+                          <span className={FIELD_LABEL_CLASS}>Block ID</span>
+                          <input className="input w-full" value={block.id} onChange={(event) => updateBlockField(blockIndex, "id", event.target.value)} />
+                        </label>
+                        <label className="space-y-1 text-sm">
+                          <span className={FIELD_LABEL_CLASS}>Type</span>
+                          <select className="input w-full" value={block.blockType} onChange={(event) => updateBlockField(blockIndex, "blockType", event.target.value as BrevoBlockType)}>
+                            {BLOCK_TYPE_OPTIONS.map((option) => (
+                              <option key={option.value} value={option.value}>
+                                {option.label}
+                              </option>
+                            ))}
+                          </select>
+                        </label>
+                        <label className="space-y-1 text-sm">
+                          <span className={FIELD_LABEL_CLASS}>
+                            Source title ({countChars(block.sourceTitle)}/{EMAIL_COPY_CHAR_LIMITS.title})
+                          </span>
+                          <input className="input w-full" value={block.sourceTitle || ""} onChange={(event) => updateBlockField(blockIndex, "sourceTitle", event.target.value || null)} lang="fr" />
+                        </label>
+                        <label className="space-y-1 text-sm">
+                          <span className={FIELD_LABEL_CLASS}>CTA label</span>
+                          <input className="input w-full" value={block.ctaLabel || ""} onChange={(event) => updateBlockField(blockIndex, "ctaLabel", event.target.value || null)} lang="fr" />
+                        </label>
+                        <label className="space-y-1 text-sm md:col-span-2">
+                          <span className={FIELD_LABEL_CLASS}>
+                            Source content ({countChars(block.sourceContent)}/{EMAIL_COPY_BLOCK_CONTENT_LIMITS[block.blockType]})
+                          </span>
+                          <textarea className="input min-h-[90px] w-full" value={block.sourceContent || ""} onChange={(event) => updateBlockField(blockIndex, "sourceContent", event.target.value || null)} lang="fr" spellCheck />
+                        </label>
+                        <div className="md:col-span-2 flex justify-end">
+                          <button type="button" className={`btn-ghost ${CONTROL_BUTTON_CLASS} w-full sm:w-auto`} disabled={brief.blocks.length <= 1} onClick={() => removeBlock(blockIndex)}>
+                            <Trash2 className="mr-1 h-4 w-4" />
+                            Remove block
+                          </button>
+                        </div>
+                      </div>
+                    ) : null}
+                  </div>
+                );
+              })}
+            </div>
+            </article>
+          ) : null}
+
+          {activeStep === "generate" ? (
+            <article className="card p-3.5 ring-1 ring-[color:var(--color-primary)]/40 sm:p-5 lg:p-6">
+            <div className="flex flex-col gap-3 sm:flex-row sm:flex-wrap sm:items-center sm:justify-between">
+              <div>
+                <p className="text-xs uppercase tracking-[0.2em] text-[var(--color-muted)]">Step 3</p>
+                <h2 className="text-lg font-semibold text-[color:var(--color-text)]">Generate & Save</h2>
+              </div>
+              <button type="button" className={`btn-ghost ${CONTROL_BUTTON_CLASS} w-full sm:w-auto`} onClick={() => setActiveStep("blocks")}>
+                Back
+              </button>
+            </div>
+
+            <div className="mt-3 grid gap-2.5 sm:mt-4 sm:gap-3 md:grid-cols-2">
+              <label className="space-y-1 text-sm">
+                <span className={FIELD_LABEL_CLASS}>Variants</span>
+                <select className="input w-full" value={variantCount} onChange={(event) => setVariantCount(Number(event.target.value) || 1)}>
+                  {VARIANT_OPTIONS.map((option) => (
+                    <option key={option} value={option}>
+                      {option}
+                    </option>
+                  ))}
+                </select>
+              </label>
+              <label className="space-y-1 text-sm">
+                <span className={FIELD_LABEL_CLASS}>Model</span>
+                <select className="input w-full" value={model} onChange={(event) => setModel(event.target.value as GenerationModel)}>
+                  {MODEL_OPTIONS.map((option) => (
+                    <option key={option.value} value={option.value}>
+                      {option.label}
+                    </option>
+                  ))}
+                </select>
+              </label>
+            </div>
+
+            {!generatedReady ? (
+              <div className="mt-3 rounded-xl border border-dashed border-[color:var(--color-border)] bg-[color:var(--color-surface-2)]/45 px-3 py-2 text-xs text-[var(--color-muted)]">
+                Generate variants to populate the sticky output panel and enable Save drafts.
+              </div>
+            ) : null}
+
+            <div className="mt-4 grid grid-cols-2 gap-2 sm:flex sm:flex-wrap sm:items-center">
+              <button
+                type="button"
+                className={`btn-primary ${CONTROL_BUTTON_CLASS}`}
+                disabled={generating}
+                onClick={() => void generateCopy()}
+                aria-keyshortcuts="Control+Enter Meta+Enter"
+              >
+                {generating ? (
+                  <span className="flex items-center gap-2">
+                    <Loader2 className="h-4 w-4 animate-spin" />
+                    Generating
+                  </span>
+                ) : (
+                  "Generate variants"
+                )}
+              </button>
+              <button type="button" className={`btn-ghost ${CONTROL_BUTTON_CLASS}`} disabled={savingDrafts || !variants.length} onClick={() => void saveDrafts()}>
+                {savingDrafts ? "Saving..." : "Save drafts"}
+              </button>
+            </div>
+            </article>
+          ) : null}
+        </div>
+
+        <aside className="xl:sticky xl:top-[calc(var(--content-sticky-top)+1rem)] xl:self-start">
+          <article id="email-copy-output-panel" className="card overflow-hidden xl:h-full xl:max-h-[calc(100vh-var(--content-sticky-top)-2.2rem)]">
+            <header className="border-b border-[color:var(--color-border)] px-4 py-3 sm:px-5 sm:py-4">
+              <div className="flex flex-wrap items-start justify-between gap-2 sm:gap-3">
+                <div>
+                  <p className="text-xs uppercase tracking-[0.2em] text-[var(--color-muted)]">Review</p>
+                  <h2 className="text-base font-semibold text-[color:var(--color-text)] sm:text-lg">Output</h2>
+                </div>
+                <div className="flex items-center gap-2 sm:gap-3">
+                  <div className="text-right text-[11px] text-[var(--color-muted)] sm:text-xs">
+                    {generatedModel ? (
+                      <>
+                        <p className="font-medium text-[color:var(--color-text)]/80">{generatedModel}</p>
+                        <p className="uppercase tracking-[0.08em]">{generatedSource}</p>
+                      </>
+                    ) : (
+                      "No generation yet"
+                    )}
+                  </div>
+                  <button
+                    type="button"
+                    className={`btn-ghost ${CONTROL_BUTTON_CLASS} px-2.5 xl:hidden`}
+                    onClick={() => setMobileOutputOpen((prev) => !prev)}
+                    aria-expanded={mobileOutputOpen}
+                    aria-controls="email-copy-output-content"
+                  >
+                    {mobileOutputOpen ? "Hide" : "Show"}
+                  </button>
+                </div>
+              </div>
+            </header>
+
+            <div id="email-copy-output-content" className={["p-4 sm:p-5", "xl:h-full xl:overflow-y-auto", mobileOutputOpen ? "block" : "hidden xl:block"].join(" ")}>
+              {!variants.length ? (
+                <div className="rounded-2xl border border-dashed border-[color:var(--color-border)] bg-[color:var(--color-surface-2)]/45 p-4 text-[13px] leading-5 text-[var(--color-muted)] sm:p-5">
+                  <p className="text-sm font-semibold text-[color:var(--color-text)]">No variants generated yet.</p>
+                  <p className="mt-1.5">Complete Step 1 and Step 2, then run generation from Step 3.</p>
+                  <div className="mt-3 grid grid-cols-2 gap-2 sm:flex sm:flex-wrap">
+                    <button type="button" className={`btn-ghost ${CONTROL_BUTTON_CLASS}`} onClick={() => setActiveStep("brief")}>
+                      Go to Step 1
+                    </button>
+                    <button type="button" className={`btn-ghost ${CONTROL_BUTTON_CLASS}`} onClick={() => setActiveStep("blocks")}>
+                      Go to Step 2
+                    </button>
+                  </div>
+                </div>
+              ) : (
+                <div className="space-y-3.5 sm:space-y-4">
+                  <p className={OUTPUT_META_CLASS}>
+                    Variants ({variants.length}){currentVariant ? ` - Active ${currentVariant.index}` : ""}
+                  </p>
+                  <div className="flex flex-wrap gap-1.5 sm:gap-2" role="tablist" aria-label="Generated variants">
+                    {variants.map((variant) => (
+                      <button
+                        key={variant.index}
+                        type="button"
+                        className={[
+                          `rounded-lg border h-9 px-3 text-xs font-medium sm:text-sm ${FOCUS_RING_CLASS}`,
+                          activeVariant === variant.index
+                            ? "border-[color:var(--color-primary)] bg-[color:var(--color-primary)]/12 text-[color:var(--color-text)] shadow-sm"
+                            : "border-[color:var(--color-border)] bg-[color:var(--color-surface)] text-[color:var(--color-text)]/72",
+                        ].join(" ")}
+                        onClick={() => setActiveVariant(variant.index)}
+                        role="tab"
+                        aria-selected={activeVariant === variant.index}
+                      >
+                        Variant {variant.index}
+                      </button>
+                    ))}
+                  </div>
+
+                  {currentVariant ? (
+                    <>
+                      <div className={OUTPUT_CARD_CLASS}>
+                        <div className="flex items-center justify-between gap-2">
+                          <p className={OUTPUT_META_CLASS}>
+                            Subject ({countChars(currentVariant.subject)}/{EMAIL_COPY_CHAR_LIMITS.subject})
+                          </p>
+                          <button type="button" className={`btn-ghost h-9 px-2.5 text-xs sm:text-sm ${FOCUS_RING_CLASS}`} onClick={() => void copyText(currentVariant.subject, "Subject")}>
+                            <Copy className="mr-1 h-3.5 w-3.5" />
+                            Copy
+                          </button>
+                        </div>
+                        <p className="mt-1.5 text-[13px] leading-5 text-[color:var(--color-text)] sm:text-sm">{currentVariant.subject}</p>
+                      </div>
+
+                      <div className={OUTPUT_CARD_CLASS}>
+                        <div className="flex items-center justify-between gap-2">
+                          <p className={OUTPUT_META_CLASS}>
+                            Preheader ({countChars(currentVariant.preheader)}/{EMAIL_COPY_CHAR_LIMITS.preheader})
+                          </p>
+                          <button type="button" className={`btn-ghost h-9 px-2.5 text-xs sm:text-sm ${FOCUS_RING_CLASS}`} onClick={() => void copyText(currentVariant.preheader, "Preheader")}>
+                            <Copy className="mr-1 h-3.5 w-3.5" />
+                            Copy
+                          </button>
+                        </div>
+                        <p className="mt-1.5 text-[13px] leading-5 text-[color:var(--color-text)] sm:text-sm">{currentVariant.preheader}</p>
+                      </div>
+
+                      {currentVariant.blocks.map((block, index) => (
+                        <div key={`${block.id}-${index}`} className={OUTPUT_CARD_CLASS}>
+                          <div className="flex items-center justify-between gap-2">
+                            <p className={OUTPUT_META_CLASS}>
+                              Block {index + 1} - {BLOCK_TYPE_OPTIONS.find((entry) => entry.value === block.blockType)?.label ?? block.blockType}
+                            </p>
+                            <button type="button" className={`btn-ghost h-9 px-2.5 text-xs sm:text-sm ${FOCUS_RING_CLASS}`} onClick={() => void copyText(`${block.title}\n${block.subtitle}\n${block.content}\nCTA: ${block.ctaLabel}`, `Block ${index + 1}`)}>
+                              <Copy className="mr-1 h-3.5 w-3.5" />
+                              Copy
+                            </button>
+                          </div>
+                          <p className="mt-1.5 text-[13px] font-semibold leading-5 text-[color:var(--color-text)] sm:text-sm">{block.title}</p>
+                          <p className="mt-1 text-[13px] leading-5 text-[color:var(--color-text)]/70 sm:text-sm">{block.subtitle}</p>
+                          <p className="mt-1.5 text-[13px] leading-5 text-[color:var(--color-text)] sm:text-sm">{block.content}</p>
+                          <p className="mt-1.5 text-[11px] uppercase tracking-[0.14em] text-[var(--color-text)]/64 sm:text-xs">CTA: {block.ctaLabel}</p>
+                        </div>
+                      ))}
+
+                      {currentVariant.warnings.length > 0 ? (
+                        <div className="rounded-xl border border-amber-300 bg-amber-50 px-3 py-2 text-xs leading-5 text-amber-800">
+                          <p className="mb-1 font-semibold uppercase tracking-[0.12em]">Warnings</p>
+                          {currentVariant.warnings.map((warning, idx) => (
+                            <p key={`${warning}-${idx}`}>- {warning}</p>
+                          ))}
+                        </div>
+                      ) : null}
+
+                      <button type="button" className={`btn-ghost ${CONTROL_BUTTON_CLASS} w-full`} onClick={() => void copyText(formatVariantClipboard(currentVariant), "Variant")}>
+                        <Copy className="mr-1 h-4 w-4" />
+                        Copy full variant
+                      </button>
+                    </>
+                  ) : null}
+                </div>
+              )}
+            </div>
+          </article>
+        </aside>
       </div>
+
+      {brandDrawerOpen ? (
+        <div className="fixed inset-0 z-[220]">
+          <button type="button" tabIndex={-1} className="absolute inset-0 bg-slate-950/45 backdrop-blur-sm" onClick={closeBrandDrawer} aria-label="Close brand kit drawer" />
+          <aside
+            ref={brandDrawerRef}
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby="saveurs-brand-kit-title"
+            className="absolute right-0 top-0 h-full w-full max-w-[520px] border-l border-[color:var(--color-border)] bg-[color:var(--color-surface)] shadow-2xl"
+          >
+            <header className="sticky top-0 z-10 flex items-center justify-between border-b border-[color:var(--color-border)] bg-[color:var(--color-surface)] px-4 py-3.5 sm:px-5 sm:py-4">
+              <div className="flex items-center gap-2">
+                <Palette className="h-5 w-5 text-[color:var(--color-primary)]" />
+                <div>
+                  <p className="text-xs uppercase tracking-[0.2em] text-[var(--color-muted)]">Brand</p>
+                  <h3 id="saveurs-brand-kit-title" className="text-lg font-semibold text-[color:var(--color-text)]">Saveurs Brand Kit</h3>
+                </div>
+              </div>
+              <button ref={brandDrawerCloseButtonRef} type="button" className={`btn-ghost ${CONTROL_BUTTON_CLASS}`} onClick={closeBrandDrawer}>
+                Close
+              </button>
+            </header>
+
+            <div className="h-[calc(100%-124px)] overflow-y-auto px-4 py-3.5 sm:h-[calc(100%-132px)] sm:px-5 sm:py-4">
+              <div className="space-y-2.5 sm:space-y-3">
+                <label className="space-y-1 text-sm">
+                  <span className={FIELD_LABEL_CLASS}>Brand name</span>
+                  <input className="input w-full" value={brandProfile.brandName} onChange={(event) => setBrandProfile((prev) => ({ ...prev, brandName: event.target.value }))} />
+                </label>
+                <label className="space-y-1 text-sm">
+                  <span className={FIELD_LABEL_CLASS}>Audience</span>
+                  <textarea className="input min-h-[70px] w-full" value={brandProfile.audience} onChange={(event) => setBrandProfile((prev) => ({ ...prev, audience: event.target.value }))} lang="fr" spellCheck />
+                </label>
+                <label className="space-y-1 text-sm">
+                  <span className={FIELD_LABEL_CLASS}>Tone summary</span>
+                  <textarea className="input min-h-[70px] w-full" value={brandProfile.toneSummary} onChange={(event) => setBrandProfile((prev) => ({ ...prev, toneSummary: event.target.value }))} lang="fr" spellCheck />
+                </label>
+                <label className="space-y-1 text-sm">
+                  <span className={FIELD_LABEL_CLASS}>Tone do (line by line)</span>
+                  <textarea className="input min-h-[88px] w-full" value={brandProfile.toneDo.join("\n")} onChange={(event) => setBrandProfile((prev) => ({ ...prev, toneDo: splitLines(event.target.value) }))} lang="fr" spellCheck />
+                </label>
+                <label className="space-y-1 text-sm">
+                  <span className={FIELD_LABEL_CLASS}>Tone don't (line by line)</span>
+                  <textarea className="input min-h-[88px] w-full" value={brandProfile.toneDont.join("\n")} onChange={(event) => setBrandProfile((prev) => ({ ...prev, toneDont: splitLines(event.target.value) }))} lang="fr" spellCheck />
+                </label>
+                <label className="space-y-1 text-sm">
+                  <span className={FIELD_LABEL_CLASS}>Mandatory terms (comma separated)</span>
+                  <input className="input w-full" value={brandProfile.mandatoryTerms.join(", ")} onChange={(event) => setBrandProfile((prev) => ({ ...prev, mandatoryTerms: splitCsv(event.target.value) }))} />
+                </label>
+                <label className="space-y-1 text-sm">
+                  <span className={FIELD_LABEL_CLASS}>Forbidden terms (comma separated)</span>
+                  <input className="input w-full" value={brandProfile.forbiddenTerms.join(", ")} onChange={(event) => setBrandProfile((prev) => ({ ...prev, forbiddenTerms: splitCsv(event.target.value) }))} />
+                </label>
+                <label className="space-y-1 text-sm">
+                  <span className={FIELD_LABEL_CLASS}>Proof points (line by line)</span>
+                  <textarea className="input min-h-[88px] w-full" value={brandProfile.proofPoints.join("\n")} onChange={(event) => setBrandProfile((prev) => ({ ...prev, proofPoints: splitLines(event.target.value) }))} lang="fr" spellCheck />
+                </label>
+                <label className="space-y-1 text-sm">
+                  <span className={FIELD_LABEL_CLASS}>CTA style</span>
+                  <input className="input w-full" value={brandProfile.ctaStyle} onChange={(event) => setBrandProfile((prev) => ({ ...prev, ctaStyle: event.target.value }))} lang="fr" />
+                </label>
+                <label className="space-y-1 text-sm">
+                  <span className={FIELD_LABEL_CLASS}>Legal guardrails</span>
+                  <textarea className="input min-h-[88px] w-full" value={brandProfile.legalGuardrails || ""} onChange={(event) => setBrandProfile((prev) => ({ ...prev, legalGuardrails: event.target.value || null }))} lang="fr" spellCheck />
+                </label>
+              </div>
+            </div>
+
+            <footer className="sticky bottom-0 border-t border-[color:var(--color-border)] bg-[color:var(--color-surface)] px-4 py-3 sm:px-5">
+              <div className="flex items-center justify-end gap-2">
+                <button type="button" className={`btn-ghost ${CONTROL_BUTTON_CLASS}`} onClick={closeBrandDrawer}>
+                  Cancel
+                </button>
+                <button type="button" className={`btn-primary ${CONTROL_BUTTON_CLASS}`} disabled={savingBrand} onClick={() => void saveBrandProfile()}>
+                  {savingBrand ? (
+                    <span className="flex items-center gap-2">
+                      <Loader2 className="h-4 w-4 animate-spin" />
+                      Saving
+                    </span>
+                  ) : (
+                    "Save Brand Kit"
+                  )}
+                </button>
+              </div>
+            </footer>
+          </aside>
+        </div>
+      ) : null}
     </section>
   );
 }
