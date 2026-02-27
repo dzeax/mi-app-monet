@@ -190,6 +190,22 @@ function blockType(value: unknown, fallback: BrevoBlockType): BrevoBlockType {
   return fallback;
 }
 
+function resolveUniqueBlockId(
+  candidate: string | null | undefined,
+  fallback: string,
+  usedIds: Set<string>
+): string {
+  const base = clean(candidate || '') || fallback;
+  let next = base;
+  let suffix = 2;
+  while (usedIds.has(next.toLowerCase())) {
+    next = `${base}-${suffix}`;
+    suffix += 1;
+  }
+  usedIds.add(next.toLowerCase());
+  return next;
+}
+
 function normalizeBrief(
   value: unknown,
   fallback: EmailCopyBrief,
@@ -197,6 +213,7 @@ function normalizeBrief(
 ): EmailCopyBrief {
   const objectValue = value && typeof value === 'object' ? (value as Record<string, unknown>) : {};
   const rawBlocks = Array.isArray(objectValue.blocks) ? objectValue.blocks : [];
+  const usedBlockIds = new Set<string>();
   const blocks = (rawBlocks.length ? rawBlocks : fallback.blocks).map((entry, idx) => {
     const asObj = entry && typeof entry === 'object' ? (entry as Record<string, unknown>) : {};
     const fallbackBlock = fallback.blocks[idx] ?? fallback.blocks[0];
@@ -215,8 +232,11 @@ function normalizeBrief(
       fallbackBlock.layoutSpec && typeof fallbackBlock.layoutSpec === 'object'
         ? (fallbackBlock.layoutSpec as Record<string, unknown>)
         : null;
+    const incomingId = nullable(asObj.id);
+    const fallbackId = fallbackBlock?.id ?? `block-${idx + 1}`;
+    const id = resolveUniqueBlockId(incomingId ?? fallbackId, `block-${idx + 1}`, usedBlockIds);
     return {
-      id: `block-${idx + 1}`,
+      id,
       blockType: type,
       sourceTitle: trimTo(
         sanitizePlanningText(nullable(asObj.sourceTitle) ?? fallbackBlock.sourceTitle ?? ''),
@@ -569,9 +589,10 @@ function canonicalizeOptimizedBrief(
     });
   }
 
+  const usedBlockIds = new Set<string>();
   const capped = normalized.slice(0, 12).map((block, index) => ({
     ...block,
-    id: `block-${index + 1}`,
+    id: resolveUniqueBlockId(block.id, `block-${index + 1}`, usedBlockIds),
   }));
   if (normalized.length > 12) warnings.push('Block list was capped to 12 blocks.');
 

@@ -2,6 +2,20 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
+  closestCenter,
+  DndContext,
+  DragOverlay,
+  KeyboardSensor,
+  PointerSensor,
+  useSensor,
+  useSensors,
+  type DragCancelEvent,
+  type DragEndEvent,
+  type DragOverEvent,
+  type DragStartEvent,
+} from "@dnd-kit/core";
+import { arrayMove, sortableKeyboardCoordinates } from "@dnd-kit/sortable";
+import {
   CheckCircle2,
   Copy,
   FileText,
@@ -16,10 +30,12 @@ import {
 } from "lucide-react";
 
 import { parseEmailCopyBrief } from "@/lib/crm/emailCopyBriefParser";
+import { BlockLibraryPanel } from "@/components/crm/emailCopy/builder/BlockLibraryPanel";
+import { EMAIL_CANVAS_DROP_ZONE_ID, EmailCanvas } from "@/components/crm/emailCopy/builder/EmailCanvas";
+import { BlockInspectorPanel } from "@/components/crm/emailCopy/builder/BlockInspectorPanel";
 import {
   getDefaultTemplateForType,
   getTemplateDef,
-  getTemplatesForType,
   isTemplateCompatibleWithType,
 } from "@/lib/crm/emailCopy/templates/templateRegistry";
 import { BlockTemplateRenderer } from "@/components/crm/emailCopy/templates/BlockTemplateRenderer";
@@ -90,6 +106,20 @@ type OptimizeApiPayload = EmailCopyOptimizeResult & {
   action: "optimize";
   runGroupId: string;
   latencyMs: number;
+  selection?: {
+    requestedBlockId: string | null;
+    selectedBlockId: string | null;
+    retained: boolean;
+  };
+  optimizeSummary?: {
+    before?: { blockCount?: number; blockTypeCounts?: Record<string, number> };
+    after?: { blockCount?: number; blockTypeCounts?: Record<string, number> };
+    selection?: {
+      requestedBlockId: string | null;
+      selectedBlockId: string | null;
+      retained: boolean;
+    };
+  };
 };
 
 type GenerateApiPayload = {
@@ -107,6 +137,19 @@ type QaApiPayload = {
   latencyMs: number;
   result: EmailCopyQaResult;
 };
+
+type BuilderDragState =
+  | {
+      source: "canvas";
+      blockId: string;
+      label: string;
+    }
+  | {
+      source: "library";
+      blockType: BrevoBlockType;
+      label: string;
+      itemId: string;
+    };
 
 type TrackStep = "parse" | "mapping";
 
@@ -309,6 +352,114 @@ function normalizeBrief(brief: EmailCopyBrief, clientSlug: string): EmailCopyBri
   };
 }
 
+function summarizeBlockTypes(blocks: EmailCopyBrief["blocks"]): Record<string, number> {
+  return blocks.reduce<Record<string, number>>((accumulator, block) => {
+    accumulator[block.blockType] = (accumulator[block.blockType] ?? 0) + 1;
+    return accumulator;
+  }, {});
+}
+
+function ensureUniqueBriefBlockIds(blocks: EmailCopyBrief["blocks"]): EmailCopyBrief["blocks"] {
+  const used = new Set<string>();
+  return blocks.map((block, index) => {
+    const base = clean(block.id || "") || `block-${index + 1}`;
+    let candidate = base;
+    let suffix = 2;
+    while (used.has(candidate.toLowerCase())) {
+      candidate = `${base}-${suffix}`;
+      suffix += 1;
+    }
+    used.add(candidate.toLowerCase());
+    if (candidate === block.id) return block;
+    return { ...block, id: candidate };
+  });
+}
+
+function canonicalizeOptimizedBriefForBuilder(input: {
+  optimizedBrief: EmailCopyBrief;
+  previousBrief: EmailCopyBrief;
+  clientSlug: string;
+}): EmailCopyBrief {
+  const normalized = normalizeBrief(input.optimizedBrief, input.clientSlug);
+  const previousCount = Math.max(input.previousBrief.blocks.length, 1);
+  const maxBlocks = Math.min(24, Math.max(12, previousCount * 3));
+  let blocks = ensureUniqueBriefBlockIds(normalized.blocks).slice(0, maxBlocks);
+
+  blocks = blocks.map((block) => {
+    const templateState = resolveTemplateState({
+      clientSlug: input.clientSlug,
+      blockType: block.blockType,
+      templateKey: block.templateKey,
+      layoutSpec: block.layoutSpec,
+    });
+    return {
+      ...block,
+      templateKey: templateState.templateKey,
+      layoutSpec: templateState.layoutSpec,
+    };
+  });
+
+  const heroIndexes = blocks
+    .map((block, index) => (block.blockType === "hero" ? index : -1))
+    .filter((index) => index >= 0);
+  if (heroIndexes.length === 0 && blocks.length > 0) {
+    const templateState = resolveTemplateState({
+      clientSlug: input.clientSlug,
+      blockType: "hero",
+      templateKey: blocks[0].templateKey,
+      layoutSpec: blocks[0].layoutSpec,
+    });
+    blocks[0] = {
+      ...blocks[0],
+      blockType: "hero",
+      templateKey: templateState.templateKey,
+      layoutSpec: templateState.layoutSpec,
+    };
+  } else if (heroIndexes.length > 1) {
+    heroIndexes.slice(1).forEach((index) => {
+      const templateState = resolveTemplateState({
+        clientSlug: input.clientSlug,
+        blockType: "image_text_side_by_side",
+        templateKey: blocks[index].templateKey,
+        layoutSpec: blocks[index].layoutSpec,
+      });
+      blocks[index] = {
+        ...blocks[index],
+        blockType: "image_text_side_by_side",
+        templateKey: templateState.templateKey,
+        layoutSpec: templateState.layoutSpec,
+      };
+    });
+  }
+
+  const normalizeGroupRemainder = (type: BrevoBlockType, expectedGroup: number) => {
+    const indexes = blocks
+      .map((block, index) => (block.blockType === type ? index : -1))
+      .filter((index) => index >= 0);
+    const remainder = indexes.length % expectedGroup;
+    if (remainder === 0) return;
+    indexes.slice(-remainder).forEach((index) => {
+      const templateState = resolveTemplateState({
+        clientSlug: input.clientSlug,
+        blockType: "image_text_side_by_side",
+        templateKey: blocks[index].templateKey,
+        layoutSpec: blocks[index].layoutSpec,
+      });
+      blocks[index] = {
+        ...blocks[index],
+        blockType: "image_text_side_by_side",
+        templateKey: templateState.templateKey,
+        layoutSpec: templateState.layoutSpec,
+      };
+    });
+  };
+
+  normalizeGroupRemainder("three_columns", 3);
+  normalizeGroupRemainder("two_columns", 2);
+
+  return { ...normalized, blocks: ensureUniqueBriefBlockIds(blocks) };
+}
+
 function normalizeBrand(profile: EmailCopyBrandProfile): EmailCopyBrandProfile {
   return {
     ...profile,
@@ -370,6 +521,28 @@ function createRunGroupId(): string {
   return `run-${Date.now()}-${Math.round(Math.random() * 1_000_000)}`;
 }
 
+function createNextBlockId(blocks: EmailCopyBrief["blocks"]): string {
+  const takenIds = new Set(blocks.map((block) => clean(block.id).toLowerCase()).filter(Boolean));
+  let nextIndex = blocks.length + 1;
+  let candidate = `block-${nextIndex}`;
+  while (takenIds.has(candidate.toLowerCase())) {
+    nextIndex += 1;
+    candidate = `block-${nextIndex}`;
+  }
+  return candidate;
+}
+
+function cloneBlockLayoutSpec(
+  layoutSpec: Record<string, unknown> | null | undefined
+): Record<string, unknown> | undefined {
+  if (!layoutSpec || typeof layoutSpec !== "object") return undefined;
+  try {
+    return JSON.parse(JSON.stringify(layoutSpec)) as Record<string, unknown>;
+  } catch {
+    return { ...layoutSpec };
+  }
+}
+
 export default function CrmEmailCopyGeneratorView({ clientSlug, clientLabel }: CrmEmailCopyGeneratorViewProps) {
   const [rawBriefInput, setRawBriefInput] = useState("");
   const [brief, setBrief] = useState<EmailCopyBrief>(() => createEmptyBrief(clientSlug));
@@ -403,14 +576,24 @@ export default function CrmEmailCopyGeneratorView({ clientSlug, clientLabel }: C
   const [previewVisibilityByBlock, setPreviewVisibilityByBlock] = useState<Record<string, boolean>>({});
   const [warningVisibilityByBlock, setWarningVisibilityByBlock] = useState<Record<string, boolean>>({});
   const [activeStep, setActiveStep] = useState<WizardStepId>("brief");
+  const [prefersReducedMotion, setPrefersReducedMotion] = useState(false);
+  const [transitioningToGenerate, setTransitioningToGenerate] = useState(false);
+  const [step3EntryMounted, setStep3EntryMounted] = useState(false);
   const [brandDrawerOpen, setBrandDrawerOpen] = useState(false);
   const [mobileOutputOpen, setMobileOutputOpen] = useState(false);
-  const [expandedBlockId, setExpandedBlockId] = useState<string>("block-1");
+  const [selectedBlockId, setSelectedBlockId] = useState<string | null>("block-1");
+  const [mobileLibraryOpen, setMobileLibraryOpen] = useState(false);
+  const [mobileInspectorOpen, setMobileInspectorOpen] = useState(false);
+  const [libraryCollapsed, setLibraryCollapsed] = useState(false);
+  const [canvasInlineEditMode, setCanvasInlineEditMode] = useState(false);
+  const [activeDragState, setActiveDragState] = useState<BuilderDragState | null>(null);
+  const [dragInsertIndex, setDragInsertIndex] = useState<number | null>(null);
   const brandKitButtonRef = useRef<HTMLButtonElement | null>(null);
   const brandDrawerRef = useRef<HTMLElement | null>(null);
   const brandDrawerCloseButtonRef = useRef<HTMLButtonElement | null>(null);
   const lastFocusedElementRef = useRef<HTMLElement | null>(null);
   const drawerOpenedRef = useRef(false);
+  const stepTransitionTimerRef = useRef<number | null>(null);
 
   const currentVariant = useMemo(
     () => variants.find((variant) => variant.index === activeVariant) || null,
@@ -428,6 +611,18 @@ export default function CrmEmailCopyGeneratorView({ clientSlug, clientLabel }: C
     () => (currentVariant ? visualQaByVariant[currentVariant.index] || null : null),
     [currentVariant, visualQaByVariant]
   );
+  const selectedBlockIndex = useMemo(
+    () => (selectedBlockId ? brief.blocks.findIndex((block) => block.id === selectedBlockId) : -1),
+    [brief.blocks, selectedBlockId]
+  );
+  const selectedBlock = useMemo(
+    () => (selectedBlockIndex >= 0 ? brief.blocks[selectedBlockIndex] : null),
+    [brief.blocks, selectedBlockIndex]
+  );
+  const dndSensors = useSensors(
+    useSensor(PointerSensor, { activationConstraint: { distance: 6 } }),
+    useSensor(KeyboardSensor, { coordinateGetter: sortableKeyboardCoordinates })
+  );
 
   const briefReady = useMemo(() => briefLooksStarted(brief, rawBriefInput), [brief, rawBriefInput]);
   const blocksReady = useMemo(
@@ -444,6 +639,75 @@ export default function CrmEmailCopyGeneratorView({ clientSlug, clientLabel }: C
       ).length,
     [brief.blocks]
   );
+  const incompleteBlockIds = useMemo(
+    () =>
+      brief.blocks
+        .filter(
+          (block) => !(clean(block.id).length > 0 && clean(block.sourceContent || block.sourceTitle || "").length > 0)
+        )
+        .map((block) => block.id),
+    [brief.blocks]
+  );
+  const readinessPercent = useMemo(() => {
+    if (!brief.blocks.length) return 0;
+    return Math.max(0, Math.min(100, Math.round((mappedBlocksCount / brief.blocks.length) * 100)));
+  }, [brief.blocks.length, mappedBlocksCount]);
+
+  useEffect(() => {
+    if (!brief.blocks.length) {
+      if (selectedBlockId !== null) setSelectedBlockId(null);
+      return;
+    }
+    if (!selectedBlockId || !brief.blocks.some((block) => block.id === selectedBlockId)) {
+      setSelectedBlockId(brief.blocks[0].id);
+    }
+  }, [brief.blocks, selectedBlockId]);
+
+  useEffect(() => {
+    if (activeStep === "blocks") return;
+    setActiveDragState(null);
+    setDragInsertIndex(null);
+    if (stepTransitionTimerRef.current !== null) {
+      window.clearTimeout(stepTransitionTimerRef.current);
+      stepTransitionTimerRef.current = null;
+    }
+    if (transitioningToGenerate) setTransitioningToGenerate(false);
+  }, [activeStep, transitioningToGenerate]);
+
+  useEffect(() => {
+    if (typeof window === "undefined" || typeof window.matchMedia !== "function") return;
+    const mediaQuery = window.matchMedia("(prefers-reduced-motion: reduce)");
+    const syncPreference = () => setPrefersReducedMotion(mediaQuery.matches);
+    syncPreference();
+    if (typeof mediaQuery.addEventListener === "function") {
+      mediaQuery.addEventListener("change", syncPreference);
+      return () => mediaQuery.removeEventListener("change", syncPreference);
+    }
+    mediaQuery.addListener(syncPreference);
+    return () => mediaQuery.removeListener(syncPreference);
+  }, []);
+
+  useEffect(() => {
+    if (activeStep !== "generate") {
+      setStep3EntryMounted(false);
+      return;
+    }
+    if (prefersReducedMotion) {
+      setStep3EntryMounted(true);
+      return;
+    }
+    setStep3EntryMounted(false);
+    const animationFrame = window.requestAnimationFrame(() => setStep3EntryMounted(true));
+    return () => window.cancelAnimationFrame(animationFrame);
+  }, [activeStep, prefersReducedMotion]);
+
+  useEffect(() => {
+    return () => {
+      if (stepTransitionTimerRef.current !== null) {
+        window.clearTimeout(stepTransitionTimerRef.current);
+      }
+    };
+  }, []);
 
   const stepMeta = useMemo(
     () => [
@@ -567,7 +831,7 @@ export default function CrmEmailCopyGeneratorView({ clientSlug, clientLabel }: C
           setBrief(loadedBrief);
           setBriefStatus(payload.selectedBrief.status || "");
           setRawBriefInput(loadedBrief.rawBriefText || "");
-          setExpandedBlockId(loadedBrief.blocks[0]?.id || "block-1");
+          setSelectedBlockId(loadedBrief.blocks[0]?.id || null);
           setRunGroupId(createRunGroupId());
           setExtractResult(null);
           setOptimizeResult(null);
@@ -641,6 +905,11 @@ export default function CrmEmailCopyGeneratorView({ clientSlug, clientLabel }: C
           layoutSpec: cloneLayoutSpec(templateDef?.defaultLayoutSpec),
         };
         return { ...prev, blocks: nextBlocks };
+      }
+
+      if (key === "id" && currentBlock.id === selectedBlockId) {
+        const nextId = String(value || "").trim();
+        setSelectedBlockId(nextId || currentBlock.id);
       }
 
       nextBlocks[blockIndex] = { ...currentBlock, [key]: value };
@@ -744,34 +1013,43 @@ export default function CrmEmailCopyGeneratorView({ clientSlug, clientLabel }: C
     setActiveVariant(1);
     setActiveStep("brief");
     setMobileOutputOpen(false);
-    setExpandedBlockId(nextBrief.blocks[0].id);
+    setSelectedBlockId(nextBrief.blocks[0]?.id || null);
+    setActiveDragState(null);
+    setDragInsertIndex(null);
   };
 
-  const addBlock = () => {
+  const insertBlockAt = (blockType: BrevoBlockType, insertAtIndex?: number | null) => {
     setBrief((prev) => {
-      const nextId = `block-${prev.blocks.length + 1}`;
+      const nextId = createNextBlockId(prev.blocks);
       const templateState = resolveTemplateState({
         clientSlug,
-        blockType: "image_text_side_by_side",
+        blockType,
       });
-      setExpandedBlockId(nextId);
+      const nextIndex =
+        typeof insertAtIndex === "number"
+          ? Math.min(Math.max(insertAtIndex, 0), prev.blocks.length)
+          : prev.blocks.length;
+      const nextBlocks = [...prev.blocks];
+      nextBlocks.splice(nextIndex, 0, {
+        id: nextId,
+        blockType,
+        sourceTitle: null,
+        sourceContent: null,
+        ctaLabel: null,
+        ctaUrl: null,
+        templateKey: templateState.templateKey,
+        layoutSpec: templateState.layoutSpec,
+      });
+      setSelectedBlockId(nextId);
       return {
         ...prev,
-        blocks: [
-          ...prev.blocks,
-          {
-            id: nextId,
-            blockType: "image_text_side_by_side",
-            sourceTitle: null,
-            sourceContent: null,
-            ctaLabel: null,
-            ctaUrl: null,
-            templateKey: templateState.templateKey,
-            layoutSpec: templateState.layoutSpec,
-          },
-        ],
+        blocks: nextBlocks,
       };
     });
+  };
+
+  const addBlock = (blockType: BrevoBlockType = "image_text_side_by_side") => {
+    insertBlockAt(blockType, null);
   };
 
   const removeBlock = (blockIndex: number) => {
@@ -779,8 +1057,9 @@ export default function CrmEmailCopyGeneratorView({ clientSlug, clientLabel }: C
       if (prev.blocks.length <= 1) return prev;
       const removed = prev.blocks[blockIndex];
       const remaining = prev.blocks.filter((_, index) => index !== blockIndex);
-      if (removed?.id === expandedBlockId) {
-        setExpandedBlockId(remaining[0]?.id || "block-1");
+      if (removed?.id === selectedBlockId) {
+        const nearestIndex = Math.min(blockIndex, Math.max(remaining.length - 1, 0));
+        setSelectedBlockId(remaining[nearestIndex]?.id || null);
       }
       return {
         ...prev,
@@ -788,6 +1067,167 @@ export default function CrmEmailCopyGeneratorView({ clientSlug, clientLabel }: C
       };
     });
   };
+
+  const moveBlock = (fromIndex: number, toIndex: number) => {
+    setBrief((prev) => {
+      if (
+        fromIndex < 0 ||
+        toIndex < 0 ||
+        fromIndex >= prev.blocks.length ||
+        toIndex >= prev.blocks.length ||
+        fromIndex === toIndex
+      ) {
+        return prev;
+      }
+      const nextBlocks = arrayMove(prev.blocks, fromIndex, toIndex);
+      return { ...prev, blocks: nextBlocks };
+    });
+  };
+
+  const duplicateBlock = (blockIndex: number) => {
+    setBrief((prev) => {
+      const source = prev.blocks[blockIndex];
+      if (!source) return prev;
+      const nextId = createNextBlockId(prev.blocks);
+      const duplicate = {
+        ...source,
+        id: nextId,
+        layoutSpec: cloneBlockLayoutSpec(source.layoutSpec) ?? source.layoutSpec,
+      };
+      const nextBlocks = [...prev.blocks];
+      nextBlocks.splice(blockIndex + 1, 0, duplicate);
+      setSelectedBlockId(nextId);
+      return { ...prev, blocks: nextBlocks };
+    });
+  };
+
+  const getBlockIndexById = useCallback(
+    (blockId: string) => brief.blocks.findIndex((block) => block.id === blockId),
+    [brief.blocks]
+  );
+
+  const handleInlineCanvasCommit = useCallback(
+    (input: { blockId: string; field: "sourceTitle" | "sourceContent"; value: string }) => {
+      const blockIndex = getBlockIndexById(input.blockId);
+      if (blockIndex < 0) return;
+      const nextValue = input.value.trim();
+      updateBlockField(
+        blockIndex,
+        input.field,
+        nextValue.length ? nextValue : null
+      );
+    },
+    [getBlockIndexById]
+  );
+
+  const resolveLibraryInsertionIndex = useCallback(
+    (event: DragOverEvent | DragEndEvent) => {
+      const over = event.over;
+      const overId = over ? String(over.id) : "";
+      if (!overId) return null;
+      if (overId === EMAIL_CANVAS_DROP_ZONE_ID) return brief.blocks.length;
+      const overIndex = getBlockIndexById(overId);
+      if (overIndex < 0) return null;
+      if (!over) return null;
+      const translatedTop = event.active.rect.current.translated?.top;
+      const overMiddle = over.rect.top + over.rect.height / 2;
+      const afterTarget = typeof translatedTop === "number" ? translatedTop > overMiddle : false;
+      return overIndex + (afterTarget ? 1 : 0);
+    },
+    [brief.blocks.length, getBlockIndexById]
+  );
+
+  const handleBuilderDragStart = useCallback(
+    (event: DragStartEvent) => {
+      const currentData = (event.active.data.current ?? {}) as {
+        source?: "canvas" | "library";
+        blockId?: string;
+        blockType?: BrevoBlockType;
+        name?: string;
+        itemId?: string;
+      };
+      if (currentData.source === "canvas") {
+        const blockId = currentData.blockId || String(event.active.id);
+        const block = brief.blocks.find((entry) => entry.id === blockId);
+        setActiveDragState({
+          source: "canvas",
+          blockId,
+          label: block ? `Block ${block.id}` : "Block",
+        });
+        setDragInsertIndex(null);
+        return;
+      }
+      if (currentData.source === "library" && currentData.blockType) {
+        setActiveDragState({
+          source: "library",
+          blockType: currentData.blockType,
+          itemId: currentData.itemId || String(event.active.id),
+          label: currentData.name || "New block",
+        });
+        setDragInsertIndex(brief.blocks.length);
+      }
+    },
+    [brief.blocks]
+  );
+
+  const handleBuilderDragOver = useCallback(
+    (event: DragOverEvent) => {
+      if (activeDragState?.source !== "library") return;
+      const nextIndex = resolveLibraryInsertionIndex(event);
+      setDragInsertIndex(nextIndex);
+    },
+    [activeDragState?.source, resolveLibraryInsertionIndex]
+  );
+
+  const handleBuilderDragCancel = useCallback((_event: DragCancelEvent) => {
+    setActiveDragState(null);
+    setDragInsertIndex(null);
+  }, []);
+
+  const handleBuilderDragEnd = useCallback(
+    (event: DragEndEvent) => {
+      const finalizedDrag = activeDragState;
+      setActiveDragState(null);
+      const insertIndexFromEvent = resolveLibraryInsertionIndex(event);
+      if (finalizedDrag?.source === "library") {
+        const overId = event.over ? String(event.over.id) : "";
+        const droppedOnCanvas =
+          overId === EMAIL_CANVAS_DROP_ZONE_ID || getBlockIndexById(overId) >= 0;
+        const insertionIndex =
+          dragInsertIndex ??
+          insertIndexFromEvent ??
+          (droppedOnCanvas ? brief.blocks.length : null);
+        if (droppedOnCanvas && insertionIndex !== null) {
+          insertBlockAt(finalizedDrag.blockType, insertionIndex);
+          setMobileLibraryOpen(false);
+        }
+        setDragInsertIndex(null);
+        return;
+      }
+
+      if (finalizedDrag?.source === "canvas") {
+        const overId = event.over ? String(event.over.id) : "";
+        if (!overId || overId === EMAIL_CANVAS_DROP_ZONE_ID) {
+          setDragInsertIndex(null);
+          return;
+        }
+        const fromIndex = getBlockIndexById(finalizedDrag.blockId);
+        const toIndex = getBlockIndexById(overId);
+        if (fromIndex >= 0 && toIndex >= 0 && fromIndex !== toIndex) {
+          moveBlock(fromIndex, toIndex);
+          setSelectedBlockId(finalizedDrag.blockId);
+        }
+      }
+      setDragInsertIndex(null);
+    },
+    [
+      activeDragState,
+      brief.blocks.length,
+      dragInsertIndex,
+      getBlockIndexById,
+      resolveLibraryInsertionIndex,
+    ]
+  );
 
   const saveBrief = useCallback(async () => {
     setSavingBrief(true);
@@ -868,7 +1308,7 @@ export default function CrmEmailCopyGeneratorView({ clientSlug, clientLabel }: C
     const nextRunGroupId = createRunGroupId();
     setBrief(normalizeBrief(parsed.brief, clientSlug));
     setBriefStatus(parsed.metadata.status || "");
-    setExpandedBlockId(parsed.brief.blocks[0]?.id || "block-1");
+    setSelectedBlockId(parsed.brief.blocks[0]?.id || null);
     setExtractResult(null);
     setOptimizeResult(null);
     setQaResult(null);
@@ -917,7 +1357,7 @@ export default function CrmEmailCopyGeneratorView({ clientSlug, clientLabel }: C
 
       setBrief(normalizeBrief(payload.brief, clientSlug));
       setBriefStatus(payload.status || "");
-      setExpandedBlockId(payload.brief.blocks[0]?.id || "block-1");
+      setSelectedBlockId(payload.brief.blocks[0]?.id || null);
       setExtractResult(payload);
       setOptimizeResult(null);
       setQaResult(null);
@@ -960,6 +1400,11 @@ export default function CrmEmailCopyGeneratorView({ clientSlug, clientLabel }: C
     }
     setOptimizing(true);
     try {
+      const previousSelectedBlockId = selectedBlockId;
+      const briefForOptimize = normalizeBrief(
+        { ...brief, rawBriefText: rawBriefInput || brief.rawBriefText || null },
+        clientSlug
+      );
       const response = await fetch("/api/ai/email-copy", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -969,19 +1414,32 @@ export default function CrmEmailCopyGeneratorView({ clientSlug, clientLabel }: C
           model,
           briefId: activeBriefId,
           runGroupId,
+          selectedBlockId: previousSelectedBlockId,
           brandProfile: normalizeBrand(brandProfile),
-          brief: normalizeBrief(
-            { ...brief, rawBriefText: rawBriefInput || brief.rawBriefText || null },
-            clientSlug
-          ),
+          brief: briefForOptimize,
         }),
       });
       const payload = (await response.json().catch(() => null)) as OptimizeApiPayload | null;
       if (!response.ok || !payload) throw new Error((payload as { error?: string } | null)?.error || `AI optimize failed (${response.status})`);
 
-      setBrief(normalizeBrief(payload.brief, clientSlug));
-      setExpandedBlockId(payload.brief.blocks[0]?.id || "block-1");
-      setOptimizeResult(payload);
+      const canonicalBrief = canonicalizeOptimizedBriefForBuilder({
+        optimizedBrief: payload.brief,
+        previousBrief: briefForOptimize,
+        clientSlug,
+      });
+      const apiSelectedBlockId = payload.selection?.selectedBlockId ?? null;
+      const retainedPreviousSelection =
+        Boolean(previousSelectedBlockId) &&
+        canonicalBrief.blocks.some((block) => block.id === previousSelectedBlockId);
+      const nextSelectedBlockId = retainedPreviousSelection
+        ? previousSelectedBlockId
+        : apiSelectedBlockId && canonicalBrief.blocks.some((block) => block.id === apiSelectedBlockId)
+          ? apiSelectedBlockId
+          : canonicalBrief.blocks[0]?.id || null;
+
+      setBrief(canonicalBrief);
+      setSelectedBlockId(nextSelectedBlockId);
+      setOptimizeResult({ ...payload, brief: canonicalBrief });
       setQaResult(null);
       setQaDetailsOpen(false);
       setPreviewVisibilityByBlock({});
@@ -1003,6 +1461,21 @@ export default function CrmEmailCopyGeneratorView({ clientSlug, clientLabel }: C
           warningCount: payload.warnings?.length || 0,
           changeCount: payload.changes?.length || 0,
           evidenceCount: payload.evidence?.length || 0,
+          optimizeSummary: {
+            before: {
+              blockCount: briefForOptimize.blocks.length,
+              blockTypeCounts: summarizeBlockTypes(briefForOptimize.blocks),
+            },
+            after: {
+              blockCount: canonicalBrief.blocks.length,
+              blockTypeCounts: summarizeBlockTypes(canonicalBrief.blocks),
+            },
+            selection: {
+              requestedBlockId: previousSelectedBlockId || null,
+              selectedBlockId: nextSelectedBlockId,
+              retained: retainedPreviousSelection,
+            },
+          },
         },
       });
       showSuccess(payload.source === "local-fallback" ? "AI optimize completed with local fallback." : "AI optimize completed.");
@@ -1083,6 +1556,10 @@ export default function CrmEmailCopyGeneratorView({ clientSlug, clientLabel }: C
           event: "pre_generate_snapshot",
           mappedBlocksCount,
           totalBlocks: mappingSnapshot.blocks.length,
+          blocksWithTemplateKey: mappingSnapshot.blocks.filter((block) => Boolean(block.templateKey)).length,
+          blocksWithLayoutSpec: mappingSnapshot.blocks.filter(
+            (block) => Boolean(block.layoutSpec && typeof block.layoutSpec === "object")
+          ).length,
           variantCount,
         },
       });
@@ -1165,6 +1642,35 @@ export default function CrmEmailCopyGeneratorView({ clientSlug, clientLabel }: C
     document.getElementById("email-copy-output-panel")?.scrollIntoView({ behavior: "smooth", block: "start" });
     setMobileOutputOpen(true);
   }, []);
+
+  const focusFirstIncompleteBlock = useCallback(() => {
+    if (!incompleteBlockIds.length) return;
+    const targetId = incompleteBlockIds[0];
+    setSelectedBlockId(targetId);
+    const targetElement = Array.from(
+      document.querySelectorAll<HTMLElement>("[data-canvas-block-id]")
+    ).find((element) => element.dataset.canvasBlockId === targetId);
+    targetElement?.scrollIntoView({ behavior: "smooth", block: "center" });
+  }, [incompleteBlockIds]);
+
+  const goToGenerateStep = useCallback(() => {
+    if (!blocksReady || transitioningToGenerate) return;
+
+    if (prefersReducedMotion) {
+      setActiveStep("generate");
+      return;
+    }
+
+    setTransitioningToGenerate(true);
+    if (stepTransitionTimerRef.current !== null) {
+      window.clearTimeout(stepTransitionTimerRef.current);
+    }
+    stepTransitionTimerRef.current = window.setTimeout(() => {
+      setTransitioningToGenerate(false);
+      stepTransitionTimerRef.current = null;
+      setActiveStep("generate");
+    }, 350);
+  }, [blocksReady, prefersReducedMotion, transitioningToGenerate]);
 
   useEffect(() => {
     const handleKeyboardShortcuts = (event: KeyboardEvent) => {
@@ -1263,6 +1769,59 @@ export default function CrmEmailCopyGeneratorView({ clientSlug, clientLabel }: C
     </div>
   );
 
+  const inspectorPanel = (
+    <BlockInspectorPanel
+      clientSlug={clientSlug}
+      selectedBlock={selectedBlock}
+      selectedBlockIndex={selectedBlockIndex}
+      totalBlocks={brief.blocks.length}
+      onUpdateBlockField={updateBlockField}
+      onDuplicateBlock={duplicateBlock}
+      onRemoveBlock={removeBlock}
+      onCopyBlockId={(blockId) => void copyText(blockId, "Block ID")}
+    />
+  );
+  const showOutputPanel = activeStep === "generate";
+  const compactBuilderHeader = activeStep === "blocks";
+  const step3EntryClass = prefersReducedMotion
+    ? ""
+    : step3EntryMounted
+      ? "opacity-100 translate-y-0"
+      : "opacity-0 translate-y-1";
+  const step2ButtonsDisabled = transitioningToGenerate;
+  const headerPrimaryTooltip =
+    activeStep === "blocks" && !blocksReady
+      ? "Complete block sources to enable generation"
+      : undefined;
+  const headerPrimaryDisabled =
+    activeStep === "blocks"
+      ? !blocksReady || transitioningToGenerate
+      : activeStep === "generate"
+        ? generating
+        : false;
+  const headerPrimaryLabel =
+    activeStep === "brief"
+      ? "Continue to mapping"
+      : activeStep === "blocks"
+        ? transitioningToGenerate
+          ? "Switching"
+          : "Go to Generate"
+        : generating
+          ? "Generating"
+          : "Generate variants";
+
+  const handleHeaderPrimaryAction = () => {
+    if (activeStep === "brief") {
+      setActiveStep("blocks");
+      return;
+    }
+    if (activeStep === "blocks") {
+      goToGenerateStep();
+      return;
+    }
+    void generateCopy();
+  };
+
   return (
     <section className="space-y-4 sm:space-y-6" data-page="crm-email-copy-generator">
       <a
@@ -1271,131 +1830,114 @@ export default function CrmEmailCopyGeneratorView({ clientSlug, clientLabel }: C
       >
         Skip to form
       </a>
-      <a
-        href="#email-copy-output-panel"
-        className="sr-only focus:not-sr-only focus:fixed focus:left-36 focus:top-4 focus:z-[260] focus:rounded-md focus:bg-[color:var(--color-surface)] focus:px-3 focus:py-2 focus:text-xs focus:font-medium focus:text-[color:var(--color-text)]"
+      {showOutputPanel ? (
+        <a
+          href="#email-copy-output-panel"
+          className="sr-only focus:not-sr-only focus:fixed focus:left-36 focus:top-4 focus:z-[260] focus:rounded-md focus:bg-[color:var(--color-surface)] focus:px-3 focus:py-2 focus:text-xs focus:font-medium focus:text-[color:var(--color-text)]"
+        >
+          Skip to output
+        </a>
+      ) : null}
+      <header
+        className={[
+          "relative overflow-hidden rounded-2xl border border-[color:var(--color-border)] bg-[color:var(--color-surface)] px-4 shadow-sm sm:rounded-3xl sm:px-6",
+          compactBuilderHeader ? "py-3 sm:py-4" : "py-4 sm:py-6",
+        ].join(" ")}
       >
-        Skip to output
-      </a>
-      <header className="relative overflow-hidden rounded-2xl border border-[color:var(--color-border)] bg-[color:var(--color-surface)] px-4 py-4 shadow-sm sm:rounded-3xl sm:px-6 sm:py-6">
         <div className="pointer-events-none absolute inset-0 bg-[radial-gradient(120%_120%_at_0%_0%,rgba(14,165,233,0.18),transparent_60%),radial-gradient(120%_120%_at_80%_0%,rgba(99,102,241,0.16),transparent_55%)]" />
-        <div className="relative z-10 space-y-4 sm:space-y-5">
-          <div className="flex flex-col gap-3 lg:flex-row lg:items-start lg:justify-between">
-            <div>
-              <p className="text-xs uppercase tracking-[0.3em] text-[color:var(--color-text)]/65">CRM</p>
-              <div className="mt-2 flex flex-wrap items-center gap-2.5 sm:gap-3">
-                <h1 className="text-xl font-semibold text-[color:var(--color-text)] sm:text-2xl">Email Copy Generator</h1>
-                <span className="rounded-full border border-[color:var(--color-primary)] bg-[color:var(--color-primary)]/10 px-2.5 py-1 text-xs font-semibold text-[color:var(--color-primary)]">
-                  {clientLabel ?? clientSlug}
-                </span>
-              </div>
-              <p className="mt-2 text-xs text-[color:var(--color-text)]/72 sm:text-sm">
-                French output only, vouvoiement enforced, and Brevo block limits built-in.
-              </p>
-              <p className="mt-1 text-[11px] text-[color:var(--color-text)]/62 sm:text-xs">
-                Shortcuts: Alt+1/2/3 step, Alt+B Brand Kit, Alt+O Output, Ctrl/Cmd+S Save brief, Ctrl/Cmd+Enter Generate.
-              </p>
+        <div
+          className={[
+            "relative z-10",
+            compactBuilderHeader ? "space-y-3 sm:space-y-4" : "space-y-4 sm:space-y-5",
+          ].join(" ")}
+        >
+          <div>
+            <p className="text-xs uppercase tracking-[0.3em] text-[color:var(--color-text)]/65">CRM</p>
+            <div className={compactBuilderHeader ? "mt-1.5 flex flex-wrap items-center gap-2 sm:gap-2.5" : "mt-2 flex flex-wrap items-center gap-2.5 sm:gap-3"}>
+              <h1 className="text-xl font-semibold text-[color:var(--color-text)] sm:text-2xl">Email Copy Generator</h1>
+              <span className="rounded-full border border-[color:var(--color-primary)] bg-[color:var(--color-primary)]/10 px-2.5 py-1 text-xs font-semibold text-[color:var(--color-primary)]">
+                {clientLabel ?? clientSlug}
+              </span>
             </div>
-
-            <div className="w-full rounded-xl border border-[color:var(--color-border)] bg-[color:var(--color-surface)] p-2 shadow-sm lg:w-auto">
-              <div className="grid gap-2 sm:grid-cols-[minmax(0,1fr)_auto]">
-                <select className="input h-9 min-w-0 w-full text-xs sm:min-w-[220px] sm:text-sm" value={selectedBriefId} onChange={(event) => setSelectedBriefId(event.target.value)}>
-                  <option value="">{loading ? "Loading briefs..." : "Select saved brief"}</option>
-                  {briefs.map((item) => (
-                    <option key={item.id} value={item.id}>
-                      {item.campaignName}
-                      {item.sendDate ? ` | ${item.sendDate}` : ""}
-                    </option>
-                  ))}
-                </select>
-                <button type="button" className={`btn-ghost ${CONTROL_BUTTON_CLASS}`} disabled={!selectedBriefId} onClick={() => void fetchWorkspace(selectedBriefId)}>
-                  Load
-                </button>
-              </div>
-
-              <div className="mt-2 grid grid-cols-2 gap-2 sm:flex sm:flex-wrap sm:items-center">
-                <button type="button" className={`btn-ghost ${CONTROL_BUTTON_CLASS}`} onClick={startNewBrief}>
-                  New
-                </button>
-                <button
-                  ref={brandKitButtonRef}
-                  type="button"
-                  className={`btn-ghost ${CONTROL_BUTTON_CLASS}`}
-                  onClick={openBrandDrawer}
-                  aria-keyshortcuts="Alt+B"
-                >
-                  Brand Kit
-                </button>
-                <button
-                  type="button"
-                  className={`btn-ghost ${CONTROL_BUTTON_CLASS}`}
-                  disabled={savingBrief}
-                  onClick={() => void saveBrief()}
-                  aria-keyshortcuts="Control+S Meta+S"
-                >
-                  {savingBrief ? "Saving..." : "Save Brief"}
-                </button>
-                <button
-                  type="button"
-                  className={`btn-primary ${CONTROL_BUTTON_CLASS}`}
-                  disabled={generating}
-                  onClick={() => void generateCopy()}
-                  aria-keyshortcuts="Control+Enter Meta+Enter"
-                >
-                  {generating ? (
-                    <span className="flex items-center gap-2">
-                      <Loader2 className="h-4 w-4 animate-spin" />
-                      Generating
-                    </span>
-                  ) : (
-                    "Generate"
-                  )}
-                </button>
-              </div>
-            </div>
+            <p className={compactBuilderHeader ? "mt-1.5 text-xs text-[color:var(--color-text)]/72 sm:text-sm" : "mt-2 text-xs text-[color:var(--color-text)]/72 sm:text-sm"}>
+              Create and optimize Saveurs et Vie CRM email copy aligned with Brevo block structure.
+            </p>
           </div>
 
-          <div className="grid grid-cols-2 gap-2 sm:gap-3 lg:grid-cols-4">
-            <div className="kpi-frame p-3 sm:p-4">
-              <p className="text-[10px] uppercase tracking-[0.2em] text-[color:var(--color-text)]/55 sm:text-xs">Saved Briefs</p>
-              <p className="mt-1.5 text-xl font-semibold text-[color:var(--color-text)] sm:mt-2 sm:text-2xl">{briefs.length}</p>
-              <p className="mt-1 text-[10px] text-[var(--color-muted)] sm:text-xs">Reusable campaign history</p>
-            </div>
-            <div className="kpi-frame p-3 sm:p-4">
-              <p className="text-[10px] uppercase tracking-[0.2em] text-[color:var(--color-text)]/55 sm:text-xs">Blocks</p>
-              <p className="mt-1.5 text-xl font-semibold text-[color:var(--color-text)] sm:mt-2 sm:text-2xl">{brief.blocks.length}</p>
-              <p className="mt-1 text-[10px] text-[var(--color-muted)] sm:text-xs">Brevo sections mapped</p>
-            </div>
-            <div className="kpi-frame p-3 sm:p-4">
-              <p className="text-[10px] uppercase tracking-[0.2em] text-[color:var(--color-text)]/55 sm:text-xs">Variants</p>
-              <p className="mt-1.5 text-xl font-semibold text-[color:var(--color-text)] sm:mt-2 sm:text-2xl">{variants.length}</p>
-              <p className="mt-1 text-[10px] text-[var(--color-muted)] sm:text-xs">Generated alternatives</p>
-            </div>
-            <div className="kpi-frame p-3 sm:p-4">
-              <p className="text-[10px] uppercase tracking-[0.2em] text-[color:var(--color-text)]/55 sm:text-xs">Current Step</p>
-              <p className="mt-1.5 text-sm font-semibold text-[color:var(--color-text)] sm:mt-2 sm:text-lg">
-                {stepMeta.find((step) => step.id === activeStep)?.title}
-              </p>
-              <p className="mt-1 text-[10px] text-[var(--color-muted)] sm:text-xs">Guided authoring flow</p>
+          <div className={compactBuilderHeader ? "w-full overflow-x-auto rounded-xl border border-[var(--color-border)] bg-[var(--color-surface)] p-1 shadow-sm" : "w-full overflow-x-auto rounded-xl border border-[var(--color-border)] bg-[var(--color-surface)] p-1.5 shadow-sm"}>
+            <div className="flex min-w-max items-center gap-2 whitespace-nowrap">
+              <select className="input h-8 min-w-[240px] text-xs sm:min-w-[280px] sm:text-sm" value={selectedBriefId} onChange={(event) => setSelectedBriefId(event.target.value)}>
+                <option value="">{loading ? "Loading briefs..." : "Select saved brief"}</option>
+                {briefs.map((item) => (
+                  <option key={item.id} value={item.id}>
+                    {item.campaignName}
+                    {item.sendDate ? ` | ${item.sendDate}` : ""}
+                  </option>
+                ))}
+              </select>
+              <button type="button" className="btn-ghost flex h-8 items-center gap-2 px-3 text-xs sm:text-sm" disabled={!selectedBriefId} onClick={() => void fetchWorkspace(selectedBriefId)}>
+                Load
+              </button>
+              <div className="mx-1 h-5 w-px shrink-0 bg-[var(--color-border)]" />
+              <button type="button" className="btn-ghost flex h-8 items-center gap-2 px-3 text-xs sm:text-sm" onClick={startNewBrief}>
+                New
+              </button>
+              <button
+                ref={brandKitButtonRef}
+                type="button"
+                className="btn-ghost flex h-8 items-center gap-2 px-3 text-xs sm:text-sm"
+                onClick={openBrandDrawer}
+                aria-keyshortcuts="Alt+B"
+              >
+                Brand Kit
+              </button>
+              <button
+                type="button"
+                className="btn-ghost flex h-8 items-center gap-2 px-3 text-xs sm:text-sm"
+                disabled={savingBrief}
+                onClick={() => void saveBrief()}
+                aria-keyshortcuts="Control+S Meta+S"
+              >
+                {savingBrief ? "Saving..." : "Save Brief"}
+              </button>
+              <div className="mx-1 h-5 w-px shrink-0 bg-[var(--color-border)]" />
+              <span className="inline-flex" title={headerPrimaryDisabled ? headerPrimaryTooltip : undefined}>
+                <button
+                  type="button"
+                  className="btn-primary flex h-8 items-center gap-2 px-4 text-xs shadow-sm sm:text-sm"
+                  disabled={headerPrimaryDisabled}
+                  onClick={handleHeaderPrimaryAction}
+                  aria-keyshortcuts={activeStep === "generate" ? "Control+Enter Meta+Enter" : undefined}
+                  aria-label={headerPrimaryLabel}
+                >
+                  {(activeStep === "generate" && generating) || (activeStep === "blocks" && transitioningToGenerate) ? (
+                    <span className="flex items-center gap-2">
+                      <Loader2 className="h-4 w-4 animate-spin" />
+                      {headerPrimaryLabel}
+                    </span>
+                  ) : (
+                    headerPrimaryLabel
+                  )}
+                </button>
+              </span>
             </div>
           </div>
         </div>
       </header>
 
-      <div className="grid gap-4 sm:gap-5 xl:grid-cols-[minmax(0,1.12fr)_minmax(0,0.88fr)]">
-        <div id="email-copy-main-panel" className="space-y-4 sm:space-y-5">
-          {stepNavigation}
+      {transitioningToGenerate ? (
+        <div
+          role="status"
+          aria-live="polite"
+          className="pointer-events-none fixed right-4 top-[calc(var(--content-sticky-top)+0.75rem)] z-[250] max-w-[320px] rounded-xl border border-[color:var(--color-border)] bg-[color:var(--color-surface)]/95 px-3 py-2 shadow-lg backdrop-blur-sm"
+        >
+          <p className="text-sm font-semibold text-[color:var(--color-text)]">Switching to Generate &amp; Review</p>
+          <p className="mt-0.5 text-xs text-[var(--color-muted)]">Preparing your draft workspace…</p>
+        </div>
+      ) : null}
 
-          <div className="xl:hidden">
-            <button
-              type="button"
-              className={`btn-ghost ${CONTROL_BUTTON_CLASS} flex w-full items-center justify-between`}
-              onClick={scrollToOutput}
-            >
-              <span>Review output</span>
-              <span className="text-[var(--color-muted)]">{variants.length} variant(s)</span>
-            </button>
-          </div>
+      <div id="email-copy-main-panel" className="space-y-4 sm:space-y-5">
+        {stepNavigation}
 
           {activeStep === "brief" ? (
             <article className="card p-3.5 ring-1 ring-[color:var(--color-primary)]/40 sm:p-5 lg:p-6">
@@ -1500,21 +2042,21 @@ export default function CrmEmailCopyGeneratorView({ clientSlug, clientLabel }: C
           ) : null}
 
           {activeStep === "blocks" ? (
-            <article className="card p-3.5 ring-1 ring-[color:var(--color-primary)]/40 sm:p-5 lg:p-6">
+            <article className="card p-3.5 ring-1 ring-[color:var(--color-primary)]/40 sm:p-5 lg:p-6" aria-busy={transitioningToGenerate}>
             <div className="flex flex-col gap-3 sm:flex-row sm:flex-wrap sm:items-center sm:justify-between">
               <div>
                 <p className="text-xs uppercase tracking-[0.2em] text-[var(--color-muted)]">Step 2</p>
-                <h2 className="text-lg font-semibold text-[color:var(--color-text)]">Block Mapping</h2>
+                <h2 className="text-lg font-semibold text-[color:var(--color-text)]">Block Mapping Builder</h2>
               </div>
               <div className="grid w-full grid-cols-4 gap-2 sm:flex sm:w-auto sm:items-center">
-                <button type="button" className={`btn-ghost ${CONTROL_BUTTON_CLASS}`} onClick={() => setActiveStep("brief")}>
+                <button type="button" className={`btn-ghost ${CONTROL_BUTTON_CLASS}`} onClick={() => setActiveStep("brief")} disabled={step2ButtonsDisabled}>
                   Back
                 </button>
                 <button
                   type="button"
                   className={`btn-primary ${CONTROL_BUTTON_CLASS}`}
                   onClick={() => void runAiOptimize()}
-                  disabled={optimizing || !briefReady}
+                  disabled={optimizing || !briefReady || step2ButtonsDisabled}
                 >
                   {optimizing ? (
                     <span className="flex items-center gap-1.5">
@@ -1528,25 +2070,110 @@ export default function CrmEmailCopyGeneratorView({ clientSlug, clientLabel }: C
                     </span>
                   )}
                 </button>
-                <button type="button" className={`btn-ghost ${CONTROL_BUTTON_CLASS}`} onClick={addBlock}>
+                <button type="button" className={`btn-ghost ${CONTROL_BUTTON_CLASS}`} onClick={() => addBlock()} disabled={step2ButtonsDisabled}>
                   <Plus className="mr-1 h-4 w-4" />
                   Add block
                 </button>
-                <button type="button" className={`btn-primary ${CONTROL_BUTTON_CLASS}`} onClick={() => setActiveStep("generate")} disabled={!blocksReady}>
-                  Next
+                <button type="button" className={`btn-primary ${CONTROL_BUTTON_CLASS}`} onClick={goToGenerateStep} disabled={!blocksReady || step2ButtonsDisabled}>
+                  {transitioningToGenerate ? (
+                    <span className="flex items-center gap-1.5">
+                      <Loader2 className="h-4 w-4 animate-spin" />
+                      Switching
+                    </span>
+                  ) : (
+                    "Next"
+                  )}
                 </button>
               </div>
             </div>
 
-            <div className="mt-3 flex flex-wrap items-center justify-between gap-2 rounded-xl border border-[color:var(--color-border)] bg-[color:var(--color-surface-2)]/55 px-3 py-2 text-xs">
-              <span className="text-[var(--color-muted)]">
-                {mappedBlocksCount}/{brief.blocks.length} blocks have enough source content.
+            <div className="mt-2 flex flex-wrap items-center gap-2">
+              <button
+                type="button"
+                className={[
+                  `btn-ghost ${CONTROL_BUTTON_CLASS}`,
+                  canvasInlineEditMode
+                    ? "border-[color:var(--color-primary)] bg-[color:var(--color-primary)]/12 text-[color:var(--color-primary)]"
+                    : "",
+                ].join(" ")}
+                onClick={() => setCanvasInlineEditMode((prev) => !prev)}
+                aria-pressed={canvasInlineEditMode}
+                disabled={step2ButtonsDisabled}
+              >
+                Inline edit: {canvasInlineEditMode ? "On" : "Off"}
+              </button>
+              <span className="text-xs text-[var(--color-muted)]">
+                {canvasInlineEditMode
+                  ? "Click title/content in selected canvas block to edit."
+                  : "Enable inline edit to modify text directly on canvas."}
               </span>
-              {!blocksReady ? (
-                <span className="rounded-full bg-amber-100 px-2 py-0.5 font-semibold text-amber-700">Complete missing blocks</span>
-              ) : (
-                <span className="rounded-full bg-emerald-100 px-2 py-0.5 font-semibold text-emerald-700">Blocks ready</span>
-              )}
+            </div>
+
+            <div className="mt-2 grid grid-cols-2 gap-2 lg:hidden">
+              <button
+                type="button"
+                className={`btn-ghost ${CONTROL_BUTTON_CLASS}`}
+                onClick={() => setMobileLibraryOpen(true)}
+                disabled={step2ButtonsDisabled}
+              >
+                Library
+              </button>
+              <button
+                type="button"
+                className={`btn-ghost ${CONTROL_BUTTON_CLASS}`}
+                onClick={() => setMobileInspectorOpen(true)}
+                disabled={!selectedBlock || step2ButtonsDisabled}
+              >
+                Inspector
+              </button>
+            </div>
+
+            <div className="mt-3 rounded-xl border border-[color:var(--color-border)] bg-[color:var(--color-surface-2)]/55 px-3 py-2">
+              <div className="flex flex-wrap items-center justify-between gap-2">
+                <div className="min-w-0 flex-1">
+                  <div className="flex items-center justify-between gap-2">
+                    <p className="text-xs font-medium text-[color:var(--color-text)]/86">Blocks ready</p>
+                    <p className="text-xs text-[var(--color-muted)]">
+                      {mappedBlocksCount}/{brief.blocks.length}
+                    </p>
+                  </div>
+                  <div
+                    className="mt-1.5 h-1.5 w-full rounded-full bg-[color:var(--color-border)]/70"
+                    role="progressbar"
+                    aria-valuemin={0}
+                    aria-valuemax={100}
+                    aria-valuenow={readinessPercent}
+                    aria-label="Blocks readiness"
+                  >
+                    <div
+                      className={[
+                        "h-full rounded-full transition-all",
+                        readinessPercent === 100
+                          ? "bg-emerald-500"
+                          : readinessPercent === 0
+                            ? "bg-slate-400"
+                            : "bg-amber-500",
+                      ].join(" ")}
+                      style={{ width: `${readinessPercent}%` }}
+                      aria-hidden
+                    />
+                  </div>
+                </div>
+
+                {!blocksReady ? (
+                  <button
+                    type="button"
+                    className="btn-ghost h-8 px-2.5 text-xs"
+                    onClick={focusFirstIncompleteBlock}
+                  >
+                    Show incomplete blocks
+                  </button>
+                ) : (
+                  <span className="rounded-full bg-emerald-100 px-2 py-0.5 text-[11px] font-semibold text-emerald-700">
+                    All ready
+                  </span>
+                )}
+              </div>
             </div>
 
             {optimizeResult ? (
@@ -1567,130 +2194,144 @@ export default function CrmEmailCopyGeneratorView({ clientSlug, clientLabel }: C
               </div>
             ) : null}
 
-            <div className="mt-3 space-y-2.5 sm:mt-4 sm:space-y-3">
-              {brief.blocks.map((block, blockIndex) => {
-                const isExpanded = expandedBlockId === block.id;
-                const hardContentLimit = EMAIL_COPY_BLOCK_CONTENT_LIMITS[block.blockType];
-                const softContentLimit = EMAIL_COPY_BLOCK_SOFT_CONTENT_LIMITS[block.blockType];
-                const templateOptions = getTemplatesForType(block.blockType, clientSlug);
-                const sourceSize = countChars(block.sourceContent);
-                const overSoft = sourceSize > softContentLimit;
-                const hardRisk = sourceSize > hardContentLimit * 2;
-                return (
-                  <div key={`${block.id}-${blockIndex}`} className="rounded-2xl border border-[color:var(--color-border)] bg-[color:var(--color-surface)]">
+            <DndContext
+              sensors={dndSensors}
+              collisionDetection={closestCenter}
+              onDragStart={handleBuilderDragStart}
+              onDragOver={handleBuilderDragOver}
+              onDragCancel={handleBuilderDragCancel}
+              onDragEnd={handleBuilderDragEnd}
+            >
+              <div
+                className={[
+                  "mt-3 grid gap-3",
+                  libraryCollapsed
+                    ? "lg:grid-cols-[84px_minmax(0,1fr)_360px]"
+                    : "lg:grid-cols-[280px_minmax(0,1fr)_360px]",
+                ].join(" ")}
+              >
+                <aside id="email-copy-block-library" className="hidden lg:block">
+                  <BlockLibraryPanel
+                    clientSlug={clientSlug}
+                    collapsed={libraryCollapsed}
+                    onToggleCollapsed={() => setLibraryCollapsed((prev) => !prev)}
+                    onAddBlock={(blockType) => addBlock(blockType)}
+                  />
+                </aside>
+
+                <EmailCanvas
+                  clientSlug={clientSlug}
+                  blocks={brief.blocks}
+                  selectedBlockId={selectedBlockId}
+                  brandTheme={blockPreviewTheme}
+                  insertionIndex={activeDragState?.source === "library" ? dragInsertIndex : null}
+                  inlineEditMode={canvasInlineEditMode}
+                  onSelectBlock={(blockId) => setSelectedBlockId(blockId)}
+                  onInlineCommit={handleInlineCanvasCommit}
+                  onMoveUp={(index) => moveBlock(index, index - 1)}
+                  onMoveDown={(index) => moveBlock(index, index + 1)}
+                  onDuplicate={duplicateBlock}
+                  onDelete={removeBlock}
+                  onRequestAddBlock={() => {
+                    if (window.matchMedia("(max-width: 1023px)").matches) {
+                      setMobileLibraryOpen(true);
+                      return;
+                    }
+                    document.getElementById("email-copy-block-library")?.scrollIntoView({
+                      behavior: "smooth",
+                      block: "nearest",
+                    });
+                  }}
+                />
+
+                <aside className="hidden lg:block">{inspectorPanel}</aside>
+              </div>
+
+              {mobileLibraryOpen ? (
+              <div className="fixed inset-0 z-[215] lg:hidden">
+                <button
+                  type="button"
+                  tabIndex={-1}
+                  className="absolute inset-0 bg-slate-950/45"
+                  onClick={() => setMobileLibraryOpen(false)}
+                  aria-label="Close block library"
+                />
+                <aside className="absolute left-0 top-0 h-full w-full max-w-[320px] border-r border-[color:var(--color-border)] bg-[color:var(--color-surface)] p-3 shadow-2xl">
+                  <div className="mb-3 flex items-center justify-between">
+                    <p className="text-sm font-semibold text-[color:var(--color-text)]">Block Library</p>
                     <button
                       type="button"
-                      className={`flex w-full items-center justify-between gap-3 px-3 py-2.5 text-left sm:px-4 sm:py-3 ${FOCUS_RING_CLASS}`}
-                      onClick={() => setExpandedBlockId(isExpanded ? "" : block.id)}
-                      aria-expanded={isExpanded}
-                      aria-controls={`block-panel-${blockIndex}`}
+                      className={`btn-ghost h-8 px-2 text-xs ${FOCUS_RING_CLASS}`}
+                      onClick={() => setMobileLibraryOpen(false)}
                     >
-                      <div className="min-w-0">
-                        <p className="text-sm font-semibold text-[color:var(--color-text)]">
-                          {block.id} - {BLOCK_TYPE_OPTIONS.find((entry) => entry.value === block.blockType)?.label}
-                        </p>
-                        <p className="mt-0.5 text-xs text-[var(--color-muted)]">
-                          {sourceSize}/{softContentLimit} chars in source content (soft - hard {hardContentLimit})
-                        </p>
-                      </div>
-                      <div className="flex items-center gap-1.5">
-                        {hardRisk ? (
-                          <span className="rounded-full bg-red-100 px-2 py-0.5 text-[11px] font-semibold uppercase tracking-[0.08em] text-red-700">
-                            Hard risk
-                          </span>
-                        ) : null}
-                        <span
-                          className={[
-                            "rounded-full px-2 py-0.5 text-xs font-semibold",
-                            overSoft
-                              ? "bg-red-100 text-red-700"
-                              : sourceSize > 0
-                                ? "bg-emerald-100 text-emerald-700"
-                                : "bg-slate-100 text-slate-600",
-                          ].join(" ")}
-                        >
-                          {overSoft ? "Over soft limit" : sourceSize > 0 ? "Ready" : "Empty"}
-                        </span>
-                      </div>
+                      Close
                     </button>
-
-                    {isExpanded ? (
-                      <div id={`block-panel-${blockIndex}`} className="grid gap-2.5 border-t border-[color:var(--color-border)] px-3 py-3 sm:gap-3 sm:px-4 sm:py-4 md:grid-cols-2">
-                        <label className="space-y-1 text-sm">
-                          <span className={FIELD_LABEL_CLASS}>Block ID</span>
-                          <input className="input w-full" value={block.id} onChange={(event) => updateBlockField(blockIndex, "id", event.target.value)} />
-                        </label>
-                        <label className="space-y-1 text-sm">
-                          <span className={FIELD_LABEL_CLASS}>Type</span>
-                          <select className="input w-full" value={block.blockType} onChange={(event) => updateBlockField(blockIndex, "blockType", event.target.value as BrevoBlockType)}>
-                            {BLOCK_TYPE_OPTIONS.map((option) => (
-                              <option key={option.value} value={option.value}>
-                                {option.label}
-                              </option>
-                            ))}
-                          </select>
-                        </label>
-                        <label className="space-y-1 text-sm">
-                          <span className={FIELD_LABEL_CLASS}>Template</span>
-                          <select
-                            className="input w-full"
-                            value={
-                              getTemplateDef(block.templateKey, clientSlug)?.key ||
-                              getDefaultTemplateForType(block.blockType, clientSlug)
-                            }
-                            onChange={(event) =>
-                              updateBlockField(
-                                blockIndex,
-                                "templateKey",
-                                event.target.value ||
-                                  getDefaultTemplateForType(block.blockType, clientSlug)
-                              )
-                            }
-                          >
-                            {templateOptions.map((template) => (
-                              <option key={template.key} value={template.key}>
-                                {template.label}
-                              </option>
-                            ))}
-                          </select>
-                        </label>
-                        <label className="space-y-1 text-sm">
-                          <span className={FIELD_LABEL_CLASS}>
-                            Source title ({countChars(block.sourceTitle)}/{EMAIL_COPY_CHAR_LIMITS.title})
-                          </span>
-                          <input className="input w-full" value={block.sourceTitle || ""} onChange={(event) => updateBlockField(blockIndex, "sourceTitle", event.target.value || null)} lang="fr" />
-                        </label>
-                        <label className="space-y-1 text-sm">
-                          <span className={FIELD_LABEL_CLASS}>CTA label</span>
-                          <input className="input w-full" value={block.ctaLabel || ""} onChange={(event) => updateBlockField(blockIndex, "ctaLabel", event.target.value || null)} lang="fr" />
-                        </label>
-                        <label className="space-y-1 text-sm md:col-span-2">
-                          <span className={FIELD_LABEL_CLASS}>
-                            Source content ({countChars(block.sourceContent)}/{EMAIL_COPY_BLOCK_SOFT_CONTENT_LIMITS[block.blockType]} soft - {EMAIL_COPY_BLOCK_CONTENT_LIMITS[block.blockType]} hard)
-                          </span>
-                          <textarea className="input min-h-[90px] w-full" value={block.sourceContent || ""} onChange={(event) => updateBlockField(blockIndex, "sourceContent", event.target.value || null)} lang="fr" spellCheck />
-                        </label>
-                        <div className="md:col-span-2 flex justify-end">
-                          <button type="button" className={`btn-ghost ${CONTROL_BUTTON_CLASS} w-full sm:w-auto`} disabled={brief.blocks.length <= 1} onClick={() => removeBlock(blockIndex)}>
-                            <Trash2 className="mr-1 h-4 w-4" />
-                            Remove block
-                          </button>
-                        </div>
-                      </div>
-                    ) : null}
                   </div>
-                );
-              })}
-            </div>
+                  <BlockLibraryPanel
+                    clientSlug={clientSlug}
+                    showCollapseToggle={false}
+                    onAddBlock={(blockType) => {
+                      addBlock(blockType);
+                      setMobileLibraryOpen(false);
+                    }}
+                  />
+                </aside>
+              </div>
+              ) : null}
+
+              {mobileInspectorOpen ? (
+              <div className="fixed inset-0 z-[216] lg:hidden">
+                <button
+                  type="button"
+                  tabIndex={-1}
+                  className="absolute inset-0 bg-slate-950/45"
+                  onClick={() => setMobileInspectorOpen(false)}
+                  aria-label="Close block inspector"
+                />
+                <aside className="absolute right-0 top-0 h-full w-full max-w-[380px] border-l border-[color:var(--color-border)] bg-[color:var(--color-surface)] p-3 shadow-2xl">
+                  <div className="mb-3 flex items-center justify-between">
+                    <p className="text-sm font-semibold text-[color:var(--color-text)]">Inspector</p>
+                    <button
+                      type="button"
+                      className={`btn-ghost h-8 px-2 text-xs ${FOCUS_RING_CLASS}`}
+                      onClick={() => setMobileInspectorOpen(false)}
+                    >
+                      Close
+                    </button>
+                  </div>
+                  <div className="max-h-[calc(100vh-84px)] overflow-y-auto pr-1">{inspectorPanel}</div>
+                </aside>
+              </div>
+              ) : null}
+
+              <DragOverlay dropAnimation={null}>
+                {activeDragState ? (
+                  <div className="rounded-lg border border-[color:var(--color-primary)]/40 bg-[color:var(--color-surface)] px-3 py-2 text-xs font-semibold text-[color:var(--color-text)] shadow-lg">
+                    {activeDragState.source === "library"
+                      ? `+ ${activeDragState.label}`
+                      : activeDragState.label}
+                  </div>
+                ) : null}
+              </DragOverlay>
+            </DndContext>
             </article>
           ) : null}
 
           {activeStep === "generate" ? (
-            <article className="card p-3.5 ring-1 ring-[color:var(--color-primary)]/40 sm:p-5 lg:p-6">
+            <article
+              className={[
+                "card p-3.5 ring-1 ring-[color:var(--color-primary)]/40 sm:p-5 lg:p-6",
+                prefersReducedMotion ? "" : "transition-[opacity,transform] duration-250 ease-out",
+                step3EntryClass,
+              ].join(" ")}
+            >
             <div className="flex flex-col gap-3 sm:flex-row sm:flex-wrap sm:items-center sm:justify-between">
               <div>
                 <p className="text-xs uppercase tracking-[0.2em] text-[var(--color-muted)]">Step 3</p>
-                <h2 className="text-lg font-semibold text-[color:var(--color-text)]">Generate & Save</h2>
+                <h2 className="text-lg font-semibold text-[color:var(--color-text)]">Generate & Review</h2>
+                <p className="mt-1 text-xs text-[var(--color-muted)] sm:text-sm">
+                  Generate variants, run QA, and review copy output before exporting to Brevo.
+                </p>
               </div>
               <button type="button" className={`btn-ghost ${CONTROL_BUTTON_CLASS} w-full sm:w-auto`} onClick={() => setActiveStep("blocks")}>
                 Back
@@ -1722,7 +2363,7 @@ export default function CrmEmailCopyGeneratorView({ clientSlug, clientLabel }: C
 
             {!generatedReady ? (
               <div className="mt-3 rounded-xl border border-dashed border-[color:var(--color-border)] bg-[color:var(--color-surface-2)]/45 px-3 py-2 text-xs text-[var(--color-muted)]">
-                Generate variants to populate the sticky output panel and enable Save drafts.
+                Generate variants to populate the review workspace and enable Save drafts.
               </div>
             ) : null}
 
@@ -1765,17 +2406,59 @@ export default function CrmEmailCopyGeneratorView({ clientSlug, clientLabel }: C
                 {savingDrafts ? "Saving..." : "Save drafts"}
               </button>
             </div>
+
+            {qaResult ? (
+              <div className="mt-3 rounded-xl border border-[color:var(--color-border)] bg-[color:var(--color-surface-2)]/55 px-3 py-2 text-xs">
+                <div className="flex flex-wrap items-center justify-between gap-2">
+                  <p className="font-semibold text-[color:var(--color-text)]">QA snapshot</p>
+                  <span
+                    className={[
+                      "rounded-full px-2 py-0.5 text-[11px] font-semibold uppercase tracking-[0.08em]",
+                      qaResult.overall === "fail"
+                        ? "bg-red-100 text-red-700"
+                        : qaResult.overall === "warn"
+                          ? "bg-amber-100 text-amber-700"
+                          : "bg-emerald-100 text-emerald-700",
+                    ].join(" ")}
+                  >
+                    {qaResult.overall}
+                  </span>
+                </div>
+                <p className="mt-1 text-[var(--color-muted)]">
+                  {qaResult.model} · {qaResult.source} ·{" "}
+                  {qaResult.checks.filter((check) => check.status === "pass").length}/{qaResult.checks.length} checks pass
+                </p>
+                {currentVisualQa ? (
+                  <p className="mt-1 text-[var(--color-muted)]">
+                    Active variant visual warnings: {currentVisualQa.totalWarnings}
+                  </p>
+                ) : null}
+                <button
+                  type="button"
+                  className={`btn-ghost mt-2 h-8 px-2.5 text-xs ${FOCUS_RING_CLASS}`}
+                  onClick={scrollToOutput}
+                >
+                  Open full review
+                </button>
+              </div>
+            ) : null}
             </article>
           ) : null}
-        </div>
 
-        <aside className="xl:sticky xl:top-[calc(var(--content-sticky-top)+1rem)] xl:self-start">
-          <article id="email-copy-output-panel" className="card overflow-hidden">
+        {showOutputPanel ? (
+          <article
+            id="email-copy-output-panel"
+            className={[
+              "card overflow-hidden",
+              prefersReducedMotion ? "" : "transition-[opacity,transform] duration-250 ease-out",
+              step3EntryClass,
+            ].join(" ")}
+          >
             <header className="border-b border-[color:var(--color-border)] px-4 py-3 sm:px-5 sm:py-4">
               <div className="flex flex-wrap items-start justify-between gap-2 sm:gap-3">
                 <div>
                   <p className="text-xs uppercase tracking-[0.2em] text-[var(--color-muted)]">Review</p>
-                  <h2 className="text-base font-semibold text-[color:var(--color-text)] sm:text-lg">Output</h2>
+                  <h2 className="text-base font-semibold text-[color:var(--color-text)] sm:text-lg">Review Output</h2>
                 </div>
                 <div className="flex items-center gap-2 sm:gap-3">
                   <div className="text-right text-[11px] text-[var(--color-muted)] sm:text-xs">
@@ -1790,7 +2473,7 @@ export default function CrmEmailCopyGeneratorView({ clientSlug, clientLabel }: C
                   </div>
                   <button
                     type="button"
-                    className={`btn-ghost ${CONTROL_BUTTON_CLASS} px-2.5 xl:hidden`}
+                    className={`btn-ghost ${CONTROL_BUTTON_CLASS} px-2.5`}
                     onClick={() => setMobileOutputOpen((prev) => !prev)}
                     aria-expanded={mobileOutputOpen}
                     aria-controls="email-copy-output-content"
@@ -1804,8 +2487,7 @@ export default function CrmEmailCopyGeneratorView({ clientSlug, clientLabel }: C
             <div
               id="email-copy-output-content"
               className={[
-                "p-4 sm:p-5 max-h-[68vh] overflow-y-auto overscroll-contain",
-                "xl:max-h-[calc(100vh-var(--content-sticky-top)-8.5rem)]",
+                "p-4 sm:p-5",
                 mobileOutputOpen ? "block" : "hidden xl:block",
               ].join(" ")}
             >
@@ -2097,7 +2779,7 @@ export default function CrmEmailCopyGeneratorView({ clientSlug, clientLabel }: C
               )}
             </div>
           </article>
-        </aside>
+        ) : null}
       </div>
 
       {brandDrawerOpen ? (

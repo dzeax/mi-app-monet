@@ -36,6 +36,7 @@ type RawGeneratedBlock = {
   blockId?: unknown;
   type?: unknown;
   templateKey?: unknown;
+  layoutSpec?: unknown;
   title?: unknown;
   subtitle?: unknown;
   content?: unknown;
@@ -700,9 +701,10 @@ function buildPrompt(input: {
     'Each block must be a complete standalone message, never sentence fragments.',
     'three_columns and two_columns blocks must read like concise standalone cards, not split pieces of one sentence.',
     'Avoid repeating the exact same subtitle on every block.',
+    'Preserve templateKey and layoutSpec from block instructions; do not invent template identifiers.',
     'Each block must include renderSlots aligned to templateKey and keep semantic consistency with title/subtitle/content/ctaLabel.',
     'Return strict JSON only with this shape:',
-    '{"variants":[{"subject":"","preheader":"","blocks":[{"blockId":"","type":"","templateKey":"","title":"","subtitle":"","content":"","ctaLabel":"","renderSlots":{}}]}]}',
+    '{"variants":[{"subject":"","preheader":"","blocks":[{"blockId":"","type":"","templateKey":"","layoutSpec":{},"title":"","subtitle":"","content":"","ctaLabel":"","renderSlots":{}}]}]}',
     'Each variant must include all requested blocks and keep the same block ids.',
     `Brand profile JSON: ${JSON.stringify(input.brandProfile)}`,
     `Brief JSON: ${JSON.stringify(input.brief)}`,

@@ -15,6 +15,11 @@ import {
   SAVEURS_DEFAULT_BRAND_PROFILE,
   type EmailCopyBrief,
 } from '@/lib/crm/emailCopyConfig';
+import {
+  getDefaultTemplateForType,
+  getTemplateDef,
+  isTemplateCompatibleWithType,
+} from '@/lib/crm/emailCopy/templates/templateRegistry';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
@@ -106,6 +111,7 @@ const extractSchema = commonSchema.extend({
 const optimizeSchema = commonSchema.extend({
   action: z.literal('optimize'),
   brief: briefSchema,
+  selectedBlockId: z.string().nullable().optional(),
 });
 
 const generateSchema = commonSchema.extend({
@@ -261,6 +267,47 @@ function summarizeBrief(brief: EmailCopyBrief | null, rawBriefText?: string | nu
       sourceContentPreview: (block.sourceContent || '').slice(0, 120),
     })),
   };
+}
+
+function summarizeBlockDistribution(brief: EmailCopyBrief | null) {
+  if (!brief) {
+    return { blockCount: 0, blockTypeCounts: {} as Record<string, number> };
+  }
+  const blockTypeCounts = brief.blocks.reduce<Record<string, number>>((accumulator, block) => {
+    accumulator[block.blockType] = (accumulator[block.blockType] ?? 0) + 1;
+    return accumulator;
+  }, {});
+  return { blockCount: brief.blocks.length, blockTypeCounts };
+}
+
+function cleanText(value: string): string {
+  return value.replace(/\u2800+/g, ' ').replace(/\s+/g, ' ').trim();
+}
+
+function canonicalizeBriefForGeneration(brief: EmailCopyBrief, clientSlug: string): EmailCopyBrief {
+  const blocks = brief.blocks.map((block, index) => {
+    const fallbackTemplateKey = getDefaultTemplateForType(block.blockType, clientSlug);
+    const incomingTemplateDef = getTemplateDef(block.templateKey ?? null, clientSlug);
+    const templateKey =
+      isTemplateCompatibleWithType(block.templateKey ?? null, block.blockType, clientSlug) &&
+      incomingTemplateDef
+        ? incomingTemplateDef.key
+        : fallbackTemplateKey;
+    const templateDef = getTemplateDef(templateKey, clientSlug);
+    const layoutSpec =
+      block.layoutSpec && typeof block.layoutSpec === 'object'
+        ? { ...block.layoutSpec }
+        : { ...(templateDef?.defaultLayoutSpec ?? {}) };
+
+    return {
+      ...block,
+      id: cleanText(block.id || '') || `block-${index + 1}`,
+      templateKey,
+      layoutSpec,
+    };
+  });
+
+  return { ...brief, blocks };
 }
 
 function detailParts(error: unknown): string[] {
@@ -453,6 +500,8 @@ export async function POST(request: Request) {
     if (normalizedPayload.action === 'optimize') {
       const mappingBeforeStarted = Date.now();
       const inputBriefSummary = summarizeBrief(normalizedPayload.brief, normalizedPayload.brief.rawBriefText ?? null);
+      const requestedSelectedBlockId = normalizedPayload.selectedBlockId ?? null;
+      const inputDistribution = summarizeBlockDistribution(normalizedPayload.brief);
       await persistAgentRun({
         supabase,
         auth,
@@ -467,11 +516,31 @@ export async function POST(request: Request) {
           step: 'mapping',
           sourceAction: 'optimize',
           phase: 'before',
+          selectedBlockId: requestedSelectedBlockId,
+          optimizeSummary: {
+            before: inputDistribution,
+            after: null,
+            selection: {
+              requestedBlockId: requestedSelectedBlockId,
+              selectedBlockId: null,
+              retained: false,
+            },
+          },
           briefSummary: inputBriefSummary,
         },
         responsePayload: {
           trackedAt: new Date().toISOString(),
           phase: 'before',
+          selectedBlockId: requestedSelectedBlockId,
+          optimizeSummary: {
+            before: inputDistribution,
+            after: null,
+            selection: {
+              requestedBlockId: requestedSelectedBlockId,
+              selectedBlockId: null,
+              retained: false,
+            },
+          },
           briefSummary: inputBriefSummary,
         },
         warnings: [],
@@ -485,6 +554,22 @@ export async function POST(request: Request) {
         model: normalizedPayload.model,
       });
       const latencyMs = Date.now() - startedAt;
+      const afterDistribution = summarizeBlockDistribution(result.brief);
+      const selectionRetained =
+        Boolean(requestedSelectedBlockId) &&
+        result.brief.blocks.some((block) => block.id === requestedSelectedBlockId);
+      const selectedBlockIdAfter = selectionRetained
+        ? requestedSelectedBlockId
+        : result.brief.blocks[0]?.id ?? null;
+      const optimizeSummary = {
+        before: inputDistribution,
+        after: afterDistribution,
+        selection: {
+          requestedBlockId: requestedSelectedBlockId,
+          selectedBlockId: selectedBlockIdAfter,
+          retained: selectionRetained,
+        },
+      };
       const mappingAfterStarted = Date.now();
       await persistAgentRun({
         supabase,
@@ -500,6 +585,7 @@ export async function POST(request: Request) {
           step: 'mapping',
           sourceAction: 'optimize',
           phase: 'after',
+          optimizeSummary,
           beforeSummary: inputBriefSummary,
           afterSummary: summarizeBrief(result.brief, normalizedPayload.brief.rawBriefText ?? null),
         },
@@ -507,6 +593,7 @@ export async function POST(request: Request) {
           trackedAt: new Date().toISOString(),
           phase: 'after',
           source: result.source,
+          optimizeSummary,
           warningCount: result.warnings.length,
           changeCount: result.changes.length,
           evidenceCount: result.evidence.length,
@@ -528,17 +615,26 @@ export async function POST(request: Request) {
         status: result.source === 'local-fallback' ? 'fallback' : 'success',
         requestPayload: {
           ...normalizedPayload,
+          optimizeSummary,
           briefSummary: inputBriefSummary,
         },
         responsePayload: {
           ...result,
+          optimizeSummary,
           beforeSummary: inputBriefSummary,
           afterSummary: summarizeBrief(result.brief, normalizedPayload.brief.rawBriefText ?? null),
         },
         warnings: result.warnings,
         latencyMs,
       });
-      return NextResponse.json({ action: 'optimize', runGroupId, latencyMs, ...result });
+      return NextResponse.json({
+        action: 'optimize',
+        runGroupId,
+        latencyMs,
+        selection: optimizeSummary.selection,
+        optimizeSummary,
+        ...result,
+      });
     }
 
     if (normalizedPayload.action === 'qa') {
@@ -568,9 +664,10 @@ export async function POST(request: Request) {
     }
 
     const generatePayload = normalizedPayload as z.infer<typeof generateSchema>;
+    const briefForGeneration = canonicalizeBriefForGeneration(generatePayload.brief, clientSlug);
     const generated = await generateEmailCopy({
       clientSlug,
-      brief: generatePayload.brief,
+      brief: briefForGeneration,
       brandProfile: generatePayload.brandProfile,
       variantCount: generatePayload.variantCount,
       model: generatePayload.model,
@@ -585,7 +682,10 @@ export async function POST(request: Request) {
       agentName: 'copy',
       model: generated.model,
       status: generated.source === 'local-fallback' ? 'fallback' : 'success',
-      requestPayload: generatePayload,
+      requestPayload: {
+        ...generatePayload,
+        brief: briefForGeneration,
+      },
       responsePayload: generated,
       warnings: generated.variants.flatMap((variant) => variant.warnings || []),
       latencyMs,

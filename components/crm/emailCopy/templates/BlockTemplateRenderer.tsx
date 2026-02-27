@@ -22,6 +22,13 @@ type BlockTemplateRendererProps = {
   brandTheme: BrandTheme;
   layoutSpec?: Record<string, unknown>;
   renderSlots?: unknown;
+  inlineEditing?: {
+    enabled?: boolean;
+    titleValue?: string | null;
+    contentValue?: string | null;
+    onTitleCommit?: (value: string) => void;
+    onContentCommit?: (value: string) => void;
+  };
 };
 
 const COMPONENT_BY_TEMPLATE_NAME: Record<TemplateName, (props: TemplateComponentProps) => ReactElement> = {
@@ -38,6 +45,7 @@ export function BlockTemplateRenderer({
   brandTheme,
   layoutSpec,
   renderSlots,
+  inlineEditing,
 }: BlockTemplateRendererProps) {
   if (templateKey && !getTemplateDef(templateKey)) {
     return (
@@ -68,6 +76,7 @@ export function BlockTemplateRenderer({
       brandTheme={brandTheme}
       data={(renderSlots && typeof renderSlots === "object" ? (renderSlots as BlockPreviewData) : blockData)}
       layoutSpec={layoutSpec && Object.keys(layoutSpec).length ? layoutSpec : templateDef?.defaultLayoutSpec}
+      inlineEditing={inlineEditing}
     />
   );
 }

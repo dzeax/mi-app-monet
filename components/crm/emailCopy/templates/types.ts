@@ -18,4 +18,11 @@ export type TemplateComponentProps = {
   brandTheme: BrandTheme;
   data: BlockPreviewData;
   layoutSpec?: Record<string, unknown>;
+  inlineEditing?: {
+    enabled?: boolean;
+    titleValue?: string | null;
+    contentValue?: string | null;
+    onTitleCommit?: (value: string) => void;
+    onContentCommit?: (value: string) => void;
+  };
 };
