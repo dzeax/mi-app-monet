@@ -21,6 +21,13 @@ export const EMAIL_COPY_BLOCK_CONTENT_LIMITS: Record<BrevoBlockType, number> = {
   image_text_side_by_side: EMAIL_COPY_CHAR_LIMITS.imageTextSideBySideContent,
 };
 
+export const EMAIL_COPY_BLOCK_SOFT_CONTENT_LIMITS: Record<BrevoBlockType, number> = {
+  hero: 700,
+  three_columns: 220,
+  two_columns: 240,
+  image_text_side_by_side: 320,
+};
+
 export const DEFAULT_EMAIL_COPY_VARIANT_COUNT = 3;
 export const MAX_EMAIL_COPY_VARIANT_COUNT = 5;
 
@@ -45,6 +52,8 @@ export type EmailCopyBriefBlock = {
   sourceContent?: string | null;
   ctaLabel?: string | null;
   ctaUrl?: string | null;
+  templateKey?: string;
+  layoutSpec?: Record<string, unknown>;
 };
 
 export type EmailCopyBrief = {
@@ -70,6 +79,9 @@ export type EmailCopyGeneratedBlock = {
   subtitle: string;
   content: string;
   ctaLabel: string;
+  templateKey?: string;
+  layoutSpec?: Record<string, unknown>;
+  renderSlots?: unknown;
   charCount: {
     title: number;
     subtitle: number;
@@ -90,6 +102,64 @@ export type EmailCopyGenerateResult = {
   model: string;
   fromCache: boolean;
   source: 'openai' | 'local-fallback';
+};
+
+export type EmailCopyAgentName = 'extract' | 'plan' | 'copy' | 'qa' | 'parse' | 'mapping';
+export type EmailCopyAgentSource = 'openai' | 'local-fallback';
+export type EmailCopyCheckStatus = 'pass' | 'warn' | 'fail';
+
+export type EmailCopyAgentEvidence = {
+  field: string;
+  sourceSnippet: string;
+  reason: string;
+};
+
+export type EmailCopyExtractResult = {
+  brief: EmailCopyBrief;
+  status: string | null;
+  warnings: string[];
+  evidence: EmailCopyAgentEvidence[];
+  model: string;
+  source: EmailCopyAgentSource;
+};
+
+export type EmailCopyPlanChangeAction = 'split' | 'reorder' | 'compress' | 'retag' | 'keep';
+
+export type EmailCopyPlanChange = {
+  blockId: string;
+  action: EmailCopyPlanChangeAction;
+  detail: string;
+};
+
+export type EmailCopyOptimizeResult = {
+  brief: EmailCopyBrief;
+  changes: EmailCopyPlanChange[];
+  warnings: string[];
+  evidence: EmailCopyAgentEvidence[];
+  model: string;
+  source: EmailCopyAgentSource;
+};
+
+export type EmailCopyQaCheck = {
+  id: string;
+  label: string;
+  status: EmailCopyCheckStatus;
+  message: string;
+};
+
+export type EmailCopyQaVariantReport = {
+  variantIndex: number;
+  status: EmailCopyCheckStatus;
+  issues: string[];
+  evidence: EmailCopyAgentEvidence[];
+};
+
+export type EmailCopyQaResult = {
+  overall: EmailCopyCheckStatus;
+  checks: EmailCopyQaCheck[];
+  variantReports: EmailCopyQaVariantReport[];
+  model: string;
+  source: EmailCopyAgentSource;
 };
 
 export const SAVEURS_DEFAULT_BRAND_PROFILE: EmailCopyBrandProfile = {

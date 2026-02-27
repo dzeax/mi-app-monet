@@ -31,6 +31,8 @@ const briefBlockSchema = z.object({
   sourceContent: z.string().nullable().optional(),
   ctaLabel: z.string().nullable().optional(),
   ctaUrl: z.string().nullable().optional(),
+  templateKey: z.string().optional(),
+  layoutSpec: z.record(z.string(), z.unknown()).optional(),
 });
 
 const briefSchema = z.object({
@@ -56,6 +58,9 @@ const variantBlockSchema = z.object({
   subtitle: z.string(),
   content: z.string(),
   ctaLabel: z.string(),
+  templateKey: z.string().optional(),
+  layoutSpec: z.record(z.string(), z.unknown()).optional(),
+  renderSlots: z.unknown().optional(),
   charCount: z.object({
     title: z.number(),
     subtitle: z.number(),

@@ -1,0 +1,55 @@
+"use client";
+
+import type { TemplateComponentProps } from "@/components/crm/emailCopy/templates/types";
+import { parseContentForPreview, stringValue } from "@/components/crm/emailCopy/templates/components/contentUtils";
+
+export function SvSideBySideImageTextV1({ brandTheme, data }: TemplateComponentProps) {
+  const title = stringValue(data.title) || "Image + text block";
+  const subtitle = stringValue(data.subtitle);
+  const body = stringValue(data.body) || stringValue(data.content);
+  const ctaLabel = stringValue(data.ctaLabel) || "Call to action";
+  const imageAlt = stringValue(data.imageAlt) || "Image slot";
+  const content = parseContentForPreview(body);
+
+  return (
+    <div
+      className="rounded-xl border border-[color:var(--color-border)] p-4 shadow-sm"
+      style={{
+        backgroundColor: brandTheme.backgroundColor,
+        borderRadius: brandTheme.radius,
+        fontFamily: brandTheme.fontFamily,
+      }}
+    >
+      <p className="text-[11px] uppercase tracking-[0.12em] text-[color:var(--color-text)]/65">Side-by-side preview</p>
+      <div className="mt-3 grid gap-3 sm:grid-cols-[0.9fr_1.1fr]">
+        <div
+          className="flex min-h-[120px] items-center justify-center rounded-lg border border-dashed text-xs font-medium"
+          style={{ borderColor: brandTheme.secondaryColor, color: brandTheme.secondaryColor }}
+        >
+          {imageAlt}
+        </div>
+        <div>
+          <h4 className="text-base font-semibold text-[color:var(--color-text)]">{title}</h4>
+          {subtitle ? (
+            <p className="mt-1 text-sm text-[color:var(--color-text)]/70">{subtitle}</p>
+          ) : null}
+          {content.isList ? (
+            <ul className="mt-2 list-disc space-y-1 pl-5 text-sm text-[color:var(--color-text)]">
+              {content.items.map((item, index) => (
+                <li key={`${item}-${index}`}>{item}</li>
+              ))}
+            </ul>
+          ) : (
+            <p className="mt-2 text-sm text-[color:var(--color-text)]">{content.text || "No content yet."}</p>
+          )}
+          <span
+            className="mt-3 inline-flex h-8 items-center rounded-md px-3 text-xs font-semibold"
+            style={{ backgroundColor: brandTheme.primaryColor, color: "#ffffff" }}
+          >
+            {ctaLabel}
+          </span>
+        </div>
+      </div>
+    </div>
+  );
+}

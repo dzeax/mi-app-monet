@@ -3,6 +3,12 @@ import OpenAI from 'openai';
 import type { EasyInputMessage, ResponseCreateParamsNonStreaming } from 'openai/resources/responses/responses';
 
 import {
+  getDefaultTemplateForType,
+  getTemplateDef,
+  getTemplateNameFromKey,
+  isTemplateCompatibleWithType,
+} from '@/lib/crm/emailCopy/templates/templateRegistry';
+import {
   DEFAULT_EMAIL_COPY_VARIANT_COUNT,
   EMAIL_COPY_BLOCK_CONTENT_LIMITS,
   EMAIL_COPY_CHAR_LIMITS,
@@ -22,15 +28,19 @@ type GenerateEmailCopyParams = {
   brandProfile?: EmailCopyBrandProfile | null;
   brief: EmailCopyBrief;
   variantCount?: number;
-  model?: 'gpt-5-mini' | 'gpt-4-turbo' | 'gpt-4o-mini';
+  model?: 'gpt-5.2' | 'gpt-4.1' | 'gpt-5-mini' | 'gpt-4-turbo' | 'gpt-4o-mini';
 };
 
 type RawGeneratedBlock = {
   id?: unknown;
+  blockId?: unknown;
+  type?: unknown;
+  templateKey?: unknown;
   title?: unknown;
   subtitle?: unknown;
   content?: unknown;
   ctaLabel?: unknown;
+  renderSlots?: unknown;
 };
 
 type RawVariant = {
@@ -41,10 +51,11 @@ type RawVariant = {
 
 const EMAIL_COPY_CACHE = new Map<string, EmailCopyGenerateResult>();
 
-const OPENAI_MODEL_DEFAULT = process.env.OPENAI_EMAIL_COPY_MODEL ?? 'gpt-4o-mini';
-const EMAIL_COPY_ALLOWED_MODELS = new Set(['gpt-5-mini', 'gpt-4-turbo', 'gpt-4o-mini']);
+const OPENAI_MODEL_DEFAULT = process.env.OPENAI_EMAIL_COPY_MODEL ?? 'gpt-4.1';
+const EMAIL_COPY_ALLOWED_MODELS = new Set(['gpt-5.2', 'gpt-4.1', 'gpt-5-mini', 'gpt-4-turbo', 'gpt-4o-mini']);
 const EMAIL_COPY_OPENAI_TIMEOUT_MS = 18_000;
 const INFORMAL_FRENCH_PATTERN = /(?:\btu\b|\btoi\b|\bton\b|\bta\b|\btes\b|\bt['’])/i;
+const ARTIFACT_PATTERN = /(?:^\+|template|voir\s+bloc|inscription\s+newsletter|https?:\/\/)/i;
 
 const openaiClient = new OpenAI({
   apiKey: process.env.OPENAI_API_KEY,
@@ -59,13 +70,39 @@ function toSafeString(value: unknown): string {
   return typeof value === 'string' ? sanitizeWhitespace(value) : '';
 }
 
+function toSafeRecord(value: unknown): Record<string, unknown> | null {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return null;
+  return value as Record<string, unknown>;
+}
+
+function toStringArray(value: unknown): string[] {
+  if (!Array.isArray(value)) return [];
+  return value.map((entry) => toSafeString(entry)).filter(Boolean);
+}
+
 function charCount(value: string): number {
   return [...value].length;
 }
 
+function cleanGeneratedText(value: string): string {
+  return sanitizeWhitespace(
+    value
+      .replace(/^["'`“”]+|["'`“”]+$/g, '')
+      .replace(/\s*[\r\n]+\s*/g, ' ')
+      .replace(/\s+\+\s+/g, ' ')
+  );
+}
+
 function trimToLimit(value: string, limit: number): string {
-  if (charCount(value) <= limit) return value;
-  return [...value].slice(0, limit).join('').trim();
+  const cleaned = cleanGeneratedText(value);
+  if (charCount(cleaned) <= limit) return cleaned;
+
+  const slice = [...cleaned].slice(0, limit).join('').trim();
+  const lastWhitespace = slice.lastIndexOf(' ');
+  if (lastWhitespace >= Math.floor(limit * 0.55)) {
+    return slice.slice(0, lastWhitespace).replace(/[,:;.!?'"`(\[]+$/g, '').trim();
+  }
+  return slice.replace(/[,:;.!?'"`(\[]+$/g, '').trim();
 }
 
 function ensureWithinLimit(
@@ -75,7 +112,7 @@ function ensureWithinLimit(
   warnings: string[]
 ): string {
   const trimmed = trimToLimit(input, limit);
-  if (trimmed !== input) {
+  if (trimmed !== cleanGeneratedText(input)) {
     warnings.push(`${warningLabel} trimmed to ${limit} chars.`);
   }
   return trimmed;
@@ -199,16 +236,189 @@ function uniqueWarnings(input: string[]): string[] {
   });
 }
 
-function createFallbackBlock(sourceBlock: EmailCopyBriefBlock, offerSummary: string): EmailCopyGeneratedBlock {
+function stripArtifacts(value: string): string {
+  const lines = value
+    .split(/\r?\n/)
+    .map((line) => cleanGeneratedText(line))
+    .filter((line) => Boolean(line) && !ARTIFACT_PATTERN.test(line));
+  return cleanGeneratedText(lines.join(' '));
+}
+
+function splitContentSentences(value: string): string[] {
+  return cleanGeneratedText(value)
+    .split(/(?<=[.!?;:])\s+/)
+    .map((entry) => cleanGeneratedText(entry))
+    .filter(Boolean);
+}
+
+function splitContentIntoBullets(value: string, maxItems: number, maxChars: number): string[] {
+  const safe = value || '';
+  const lineBullets = safe
+    .split(/\r?\n/)
+    .map((entry) => entry.trim())
+    .filter(Boolean)
+    .filter((line) => /^\s*(?:[-*•]+\s*)/.test(line))
+    .map((line) => line.replace(/^\s*(?:[-*•]+\s*)/, '').trim())
+    .filter(Boolean);
+  if (lineBullets.length >= 2) {
+    return lineBullets.slice(0, maxItems).map((entry) => trimToLimit(entry, maxChars));
+  }
+
+  if (safe.includes('•')) {
+    const splitBullets = safe
+      .split('•')
+      .map((entry) => cleanGeneratedText(entry))
+      .filter(Boolean);
+    if (splitBullets.length >= 2) {
+      return splitBullets.slice(0, maxItems).map((entry) => trimToLimit(entry, maxChars));
+    }
+  }
+
+  const sentenceBullets = splitContentSentences(safe).slice(0, maxItems).map((entry) => trimToLimit(entry, maxChars));
+  if (sentenceBullets.length >= 2) return sentenceBullets;
+
+  const compact = cleanGeneratedText(safe);
+  if (!compact) return [];
+  return [trimToLimit(compact, maxChars)];
+}
+
+function splitCardsFromContent(value: string, count: number, maxChars: number): string[] {
+  const bullets = splitContentIntoBullets(value, count, maxChars);
+  if (bullets.length >= count) return bullets.slice(0, count);
+
+  const sentences = splitContentSentences(value);
+  if (sentences.length >= count) {
+    return sentences.slice(0, count).map((entry) => trimToLimit(entry, maxChars));
+  }
+
+  const words = cleanGeneratedText(value).split(/\s+/).filter(Boolean);
+  if (!words.length) return Array.from({ length: count }, (_, index) => `Card ${index + 1}`);
+  const chunkSize = Math.max(1, Math.ceil(words.length / count));
+  const chunks: string[] = [];
+  for (let index = 0; index < count; index += 1) {
+    const start = index * chunkSize;
+    const end = index === count - 1 ? words.length : (index + 1) * chunkSize;
+    const chunk = words.slice(start, end).join(' ').trim();
+    chunks.push(trimToLimit(chunk || chunks[chunks.length - 1] || words.join(' '), maxChars));
+  }
+  return chunks;
+}
+
+function fallbackSubtitleByType(blockType: EmailCopyBriefBlock['blockType']): string {
+  if (blockType === 'three_columns') return 'Des options claires, adaptees a vos besoins.';
+  if (blockType === 'two_columns') return 'Choisissez la formule qui vous convient.';
+  if (blockType === 'image_text_side_by_side') return 'Un accompagnement concret, simple et rassurant.';
+  return 'Un service humain et rassurant, pense pour votre quotidien.';
+}
+
+function resolveTemplateKeyForBlock(
+  rawTemplateKey: string,
+  sourceBlock: EmailCopyBriefBlock,
+  clientSlug: string
+): string {
+  if (isTemplateCompatibleWithType(rawTemplateKey, sourceBlock.blockType, clientSlug)) {
+    return getTemplateDef(rawTemplateKey, clientSlug)?.key ?? rawTemplateKey;
+  }
+  if (
+    isTemplateCompatibleWithType(sourceBlock.templateKey ?? null, sourceBlock.blockType, clientSlug) &&
+    sourceBlock.templateKey
+  ) {
+    return getTemplateDef(sourceBlock.templateKey, clientSlug)?.key ?? sourceBlock.templateKey;
+  }
+  return getDefaultTemplateForType(sourceBlock.blockType, clientSlug);
+}
+
+function canonicalizeRenderSlots(input: {
+  templateKey: string;
+  sourceBlock: EmailCopyBriefBlock;
+  incoming: unknown;
+  title: string;
+  subtitle: string;
+  content: string;
+  ctaLabel: string;
+}): Record<string, unknown> {
+  const sourceContent = stripArtifacts(input.sourceBlock.sourceContent || '');
+  const incoming = toSafeRecord(input.incoming) ?? {};
+  const templateName = getTemplateNameFromKey(input.templateKey);
+
+  if (templateName === 'hero.simple') {
+    return {
+      headline: trimToLimit(toSafeString(incoming.headline) || input.title, EMAIL_COPY_CHAR_LIMITS.title),
+      subheadline: trimToLimit(toSafeString(incoming.subheadline) || input.subtitle, EMAIL_COPY_CHAR_LIMITS.subtitle),
+      body: trimToLimit(toSafeString(incoming.body) || input.content, EMAIL_COPY_BLOCK_CONTENT_LIMITS.hero),
+      ctaLabel: trimToLimit(toSafeString(incoming.ctaLabel) || input.ctaLabel, 40),
+    };
+  }
+
+  if (templateName === 'twoCards.text') {
+    const leftIncoming = toSafeRecord(incoming.left);
+    const rightIncoming = toSafeRecord(incoming.right);
+    const bullets = splitContentIntoBullets(sourceContent || input.content, 6, 40);
+    const leftFallbackBullets = bullets.slice(0, 3);
+    const rightFallbackBullets = bullets.slice(3, 6);
+    const leftBullets = toStringArray(leftIncoming?.bullets).slice(0, 3);
+    const rightBullets = toStringArray(rightIncoming?.bullets).slice(0, 3);
+    const leftFinal = (leftBullets.length ? leftBullets : leftFallbackBullets).map((entry) => trimToLimit(entry, 40));
+    const rightFinal = (rightBullets.length ? rightBullets : rightFallbackBullets).map((entry) => trimToLimit(entry, 40));
+
+    return {
+      left: {
+        title: trimToLimit(toSafeString(leftIncoming?.title) || trimToLimit(input.title || 'Formule 1', 33), 33),
+        bullets: leftFinal.length ? leftFinal : [trimToLimit(input.content, 40)],
+        emphasis: trimToLimit(toSafeString(leftIncoming?.emphasis), 40),
+      },
+      right: {
+        title: trimToLimit(toSafeString(rightIncoming?.title) || 'Formule 2', 33),
+        bullets: rightFinal.length ? rightFinal : [trimToLimit(input.subtitle || input.content, 40)],
+        emphasis: trimToLimit(toSafeString(rightIncoming?.emphasis), 40),
+      },
+    };
+  }
+
+  if (templateName === 'threeCards.text') {
+    const incomingCards = Array.isArray(incoming.cards) ? incoming.cards : [];
+    const fallbackBodies = splitCardsFromContent(sourceContent || input.content, 3, 65);
+    const cards = Array.from({ length: 3 }, (_, index) => {
+      const cardIncoming = toSafeRecord(incomingCards[index]);
+      return {
+        title: trimToLimit(toSafeString(cardIncoming?.title) || `Option ${index + 1}`, 33),
+        body: trimToLimit(toSafeString(cardIncoming?.body) || fallbackBodies[index] || input.content, 65),
+      };
+    });
+    return { cards };
+  }
+
+  if (templateName === 'sideBySide.imageText') {
+    return {
+      title: trimToLimit(toSafeString(incoming.title) || input.title, 33),
+      body: trimToLimit(toSafeString(incoming.body) || input.content, EMAIL_COPY_BLOCK_CONTENT_LIMITS.image_text_side_by_side),
+      ctaLabel: trimToLimit(toSafeString(incoming.ctaLabel) || input.ctaLabel, 40),
+      imageAlt: trimToLimit(toSafeString(incoming.imageAlt), 90),
+    };
+  }
+
+  return {
+    title: input.title,
+    subtitle: input.subtitle,
+    content: input.content,
+    ctaLabel: input.ctaLabel,
+  };
+}
+
+function createFallbackBlock(
+  sourceBlock: EmailCopyBriefBlock,
+  offerSummary: string,
+  clientSlug: string
+): EmailCopyGeneratedBlock {
   const warnings: string[] = [];
   const contentLimit = EMAIL_COPY_BLOCK_CONTENT_LIMITS[sourceBlock.blockType];
-  const titleSeed = sourceBlock.sourceTitle || 'Une solution adaptee pour vous';
-  const subtitleSeed = 'Un service humain et rassurant, pense pour votre quotidien.';
+  const titleSeed = stripArtifacts(sourceBlock.sourceTitle || 'Une solution adaptee pour vous');
+  const subtitleSeed = fallbackSubtitleByType(sourceBlock.blockType);
   const contentSeed =
-    sourceBlock.sourceContent ||
-    offerSummary ||
+    stripArtifacts(sourceBlock.sourceContent || '') ||
+    stripArtifacts(offerSummary || '') ||
     'Decouvrez un accompagnement simple, des menus adaptes et une livraison a domicile en toute confiance.';
-  const ctaSeed = sourceBlock.ctaLabel || 'Je decouvre';
+  const ctaSeed = stripArtifacts(sourceBlock.ctaLabel || 'Je decouvre');
 
   const title = ensureWithinLimit(titleSeed, EMAIL_COPY_CHAR_LIMITS.title, `Block ${sourceBlock.id} title`, warnings);
   const subtitle = ensureWithinLimit(
@@ -219,6 +429,16 @@ function createFallbackBlock(sourceBlock: EmailCopyBriefBlock, offerSummary: str
   );
   const content = ensureWithinLimit(contentSeed, contentLimit, `Block ${sourceBlock.id} content`, warnings);
   const ctaLabel = trimToLimit(ctaSeed, 40);
+  const templateKey = resolveTemplateKeyForBlock('', sourceBlock, clientSlug);
+  const renderSlots = canonicalizeRenderSlots({
+    templateKey,
+    sourceBlock,
+    incoming: null,
+    title,
+    subtitle,
+    content,
+    ctaLabel,
+  });
 
   return {
     id: sourceBlock.id,
@@ -227,6 +447,9 @@ function createFallbackBlock(sourceBlock: EmailCopyBriefBlock, offerSummary: str
     subtitle,
     content,
     ctaLabel,
+    templateKey,
+    layoutSpec: sourceBlock.layoutSpec,
+    renderSlots,
     charCount: {
       title: charCount(title),
       subtitle: charCount(subtitle),
@@ -236,6 +459,7 @@ function createFallbackBlock(sourceBlock: EmailCopyBriefBlock, offerSummary: str
 }
 
 function buildFallbackVariants(input: {
+  clientSlug: string;
   brief: EmailCopyBrief;
   variantCount: number;
   warning?: string;
@@ -277,7 +501,8 @@ function buildFallbackVariants(input: {
     const blocks = input.brief.blocks.map((block) => {
       const fallbackBlock = createFallbackBlock(
         block,
-        input.brief.offerSummary || input.brief.objective || input.brief.rawBriefText || ''
+        input.brief.offerSummary || input.brief.objective || input.brief.rawBriefText || '',
+        input.clientSlug
       );
       checkPronoun(fallbackBlock.title, `Variant ${index + 1} block ${block.id} title`, warnings);
       checkPronoun(fallbackBlock.subtitle, `Variant ${index + 1} block ${block.id} subtitle`, warnings);
@@ -300,17 +525,26 @@ function normalizeBlock(
   rawBlock: RawGeneratedBlock | null,
   sourceBlock: EmailCopyBriefBlock,
   variantIndex: number,
-  warnings: string[]
+  warnings: string[],
+  clientSlug: string
 ): EmailCopyGeneratedBlock {
   const contentLimit = EMAIL_COPY_BLOCK_CONTENT_LIMITS[sourceBlock.blockType];
-  const titleSeed = toSafeString(rawBlock?.title) || sourceBlock.sourceTitle || 'Une solution adaptee pour vous';
-  const subtitleSeed =
-    toSafeString(rawBlock?.subtitle) || 'Un accompagnement clair et rassurant pour votre quotidien.';
-  const contentSeed =
-    toSafeString(rawBlock?.content) ||
-    sourceBlock.sourceContent ||
-    'Decouvrez des menus adaptes et une livraison a domicile en toute confiance.';
-  const ctaSeed = toSafeString(rawBlock?.ctaLabel) || sourceBlock.ctaLabel || 'Je decouvre';
+  const rawTitle = toSafeString(rawBlock?.title);
+  const rawSubtitle = toSafeString(rawBlock?.subtitle);
+  const rawContent = toSafeString(rawBlock?.content);
+  const rawCta = toSafeString(rawBlock?.ctaLabel);
+  const rawTemplateKey = toSafeString(rawBlock?.templateKey);
+  const templateKey = resolveTemplateKeyForBlock(rawTemplateKey, sourceBlock, clientSlug);
+  const titleSeed = stripArtifacts(rawTitle || sourceBlock.sourceTitle || 'Une solution adaptee pour vous');
+  const subtitleSeed = stripArtifacts(rawSubtitle || fallbackSubtitleByType(sourceBlock.blockType));
+  const contentSeed = stripArtifacts(
+    rawContent || sourceBlock.sourceContent || 'Decouvrez des menus adaptes et une livraison a domicile en toute confiance.'
+  );
+  const ctaSeed = stripArtifacts(rawCta || sourceBlock.ctaLabel || 'Je decouvre');
+
+  if ((rawContent && ARTIFACT_PATTERN.test(rawContent)) || (rawTitle && ARTIFACT_PATTERN.test(rawTitle))) {
+    warnings.push(`Variant ${variantIndex} block ${sourceBlock.id} included brief artifacts and was cleaned.`);
+  }
 
   const title = ensureWithinLimit(
     titleSeed,
@@ -331,6 +565,15 @@ function normalizeBlock(
     warnings
   );
   const ctaLabel = trimToLimit(ctaSeed, 40);
+  const renderSlots = canonicalizeRenderSlots({
+    templateKey,
+    sourceBlock,
+    incoming: rawBlock?.renderSlots,
+    title,
+    subtitle,
+    content,
+    ctaLabel,
+  });
 
   checkPronoun(title, `Variant ${variantIndex} block ${sourceBlock.id} title`, warnings);
   checkPronoun(subtitle, `Variant ${variantIndex} block ${sourceBlock.id} subtitle`, warnings);
@@ -343,6 +586,9 @@ function normalizeBlock(
     subtitle,
     content,
     ctaLabel,
+    templateKey,
+    layoutSpec: sourceBlock.layoutSpec,
+    renderSlots,
     charCount: {
       title: charCount(title),
       subtitle: charCount(subtitle),
@@ -351,20 +597,28 @@ function normalizeBlock(
   };
 }
 
-function normalizeVariant(rawVariant: RawVariant | null, brief: EmailCopyBrief, variantIndex: number): EmailCopyVariant {
+function normalizeVariant(
+  rawVariant: RawVariant | null,
+  brief: EmailCopyBrief,
+  variantIndex: number,
+  clientSlug: string
+): EmailCopyVariant {
   const warnings: string[] = [];
   const rawBlocks = Array.isArray(rawVariant?.blocks) ? (rawVariant?.blocks as RawGeneratedBlock[]) : [];
   const rawBlockById = new Map<string, RawGeneratedBlock>();
   rawBlocks.forEach((block) => {
     const id = toSafeString(block?.id);
-    if (!id) return;
-    rawBlockById.set(id, block);
+    const blockId = toSafeString(block?.blockId);
+    if (id) rawBlockById.set(id, block);
+    if (blockId) rawBlockById.set(blockId, block);
   });
 
-  const subjectSeed =
-    toSafeString(rawVariant?.subject) || brief.sourceSubject || 'Votre solution Saveurs et Vie, pour vous';
-  const preheaderSeed =
-    toSafeString(rawVariant?.preheader) || brief.sourcePreheader || 'Des menus adaptes pour votre quotidien.';
+  const subjectSeed = stripArtifacts(
+    toSafeString(rawVariant?.subject) || brief.sourceSubject || 'Votre solution Saveurs et Vie, pour vous'
+  );
+  const preheaderSeed = stripArtifacts(
+    toSafeString(rawVariant?.preheader) || brief.sourcePreheader || 'Des menus adaptes pour votre quotidien.'
+  );
 
   const subject = ensureWithinLimit(
     subjectSeed,
@@ -385,7 +639,7 @@ function normalizeVariant(rawVariant: RawVariant | null, brief: EmailCopyBrief, 
   const blocks = brief.blocks.map((sourceBlock, sourceIndex) => {
     const byId = rawBlockById.get(sourceBlock.id) ?? null;
     const byIndex = rawBlocks[sourceIndex] ?? null;
-    return normalizeBlock(byId ?? byIndex, sourceBlock, variantIndex, warnings);
+    return normalizeBlock(byId ?? byIndex, sourceBlock, variantIndex, warnings, clientSlug);
   });
 
   return {
@@ -406,6 +660,19 @@ function buildPrompt(input: {
   const blockInstructions = input.brief.blocks.map((block) => ({
     id: block.id,
     blockType: block.blockType,
+    templateKey: block.templateKey || getDefaultTemplateForType(block.blockType, input.clientSlug),
+    layoutSpec:
+      block.layoutSpec ??
+      getTemplateDef(
+        block.templateKey || getDefaultTemplateForType(block.blockType, input.clientSlug),
+        input.clientSlug
+      )?.defaultLayoutSpec ??
+      {},
+    slotSchema:
+      getTemplateDef(
+        block.templateKey || getDefaultTemplateForType(block.blockType, input.clientSlug),
+        input.clientSlug
+      )?.slotsSchema ?? {},
     titleLimit: EMAIL_COPY_CHAR_LIMITS.title,
     subtitleLimit: EMAIL_COPY_CHAR_LIMITS.subtitle,
     contentLimit: EMAIL_COPY_BLOCK_CONTENT_LIMITS[block.blockType],
@@ -425,10 +692,17 @@ function buildPrompt(input: {
     `Title max chars: ${EMAIL_COPY_CHAR_LIMITS.title}`,
     `Subtitle max chars: ${EMAIL_COPY_CHAR_LIMITS.subtitle}`,
     `Block content limits by type: ${JSON.stringify(EMAIL_COPY_BLOCK_CONTENT_LIMITS)}`,
+    'Source mapping fields can be over these limits. Final output must always respect hard limits.',
     'Do not invent promotions, numbers, deadlines, prices, conditions, or medical claims.',
     'Respect the brief facts exactly. When uncertain, stay generic and safe.',
+    'Never truncate words. Rewrite shorter copy to fit limits naturally.',
+    'Never output brief artifacts: URLs, template notes, "+", raw instructions, dangling quotes or dangling punctuation.',
+    'Each block must be a complete standalone message, never sentence fragments.',
+    'three_columns and two_columns blocks must read like concise standalone cards, not split pieces of one sentence.',
+    'Avoid repeating the exact same subtitle on every block.',
+    'Each block must include renderSlots aligned to templateKey and keep semantic consistency with title/subtitle/content/ctaLabel.',
     'Return strict JSON only with this shape:',
-    '{"variants":[{"subject":"","preheader":"","blocks":[{"id":"","title":"","subtitle":"","content":"","ctaLabel":""}]}]}',
+    '{"variants":[{"subject":"","preheader":"","blocks":[{"blockId":"","type":"","templateKey":"","title":"","subtitle":"","content":"","ctaLabel":"","renderSlots":{}}]}]}',
     'Each variant must include all requested blocks and keep the same block ids.',
     `Brand profile JSON: ${JSON.stringify(input.brandProfile)}`,
     `Brief JSON: ${JSON.stringify(input.brief)}`,
@@ -518,7 +792,7 @@ export async function generateEmailCopy({
     const parsedVariants = parseRawVariants(rawOutput);
     variants = parsedVariants
       .slice(0, safeVariantCount)
-      .map((variant, index) => normalizeVariant(variant, brief, index + 1));
+      .map((variant, index) => normalizeVariant(variant, brief, index + 1, clientSlug));
   }
 
   if (!variants.length) {
@@ -526,6 +800,7 @@ export async function generateEmailCopy({
       throw (lastError instanceof Error ? lastError : new Error('Email copy generation failed.'));
     }
     variants = buildFallbackVariants({
+      clientSlug,
       brief,
       variantCount: safeVariantCount,
       warning: 'Local fallback used after OpenAI instability.',
@@ -535,6 +810,7 @@ export async function generateEmailCopy({
 
   if (variants.length < safeVariantCount) {
     const fallback = buildFallbackVariants({
+      clientSlug,
       brief,
       variantCount: safeVariantCount - variants.length,
       warning: 'Variant backfilled with local fallback.',
@@ -560,4 +836,3 @@ export async function generateEmailCopy({
 }
 
 export type { GenerateEmailCopyParams };
-

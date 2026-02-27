@@ -11,19 +11,37 @@ import {
   Plus,
   Sparkles,
   Trash2,
+  Bot,
+  ShieldCheck,
 } from "lucide-react";
 
 import { parseEmailCopyBrief } from "@/lib/crm/emailCopyBriefParser";
 import {
+  getDefaultTemplateForType,
+  getTemplateDef,
+  getTemplatesForType,
+  isTemplateCompatibleWithType,
+} from "@/lib/crm/emailCopy/templates/templateRegistry";
+import { BlockTemplateRenderer } from "@/components/crm/emailCopy/templates/BlockTemplateRenderer";
+import type { BrandTheme } from "@/components/crm/emailCopy/templates/types";
+import {
   DEFAULT_EMAIL_COPY_VARIANT_COUNT,
   EMAIL_COPY_BLOCK_CONTENT_LIMITS,
+  EMAIL_COPY_BLOCK_SOFT_CONTENT_LIMITS,
   EMAIL_COPY_CHAR_LIMITS,
   SAVEURS_DEFAULT_BRAND_PROFILE,
   type BrevoBlockType,
   type EmailCopyBrandProfile,
   type EmailCopyBrief,
+  type EmailCopyExtractResult,
+  type EmailCopyOptimizeResult,
+  type EmailCopyQaResult,
   type EmailCopyVariant,
 } from "@/lib/crm/emailCopyConfig";
+import {
+  runVisualQaForVariant,
+  type VisualQaResult,
+} from "@/lib/crm/emailCopy/qa/visualQa";
 import { showError, showSuccess } from "@/utils/toast";
 
 type CrmEmailCopyGeneratorViewProps = {
@@ -60,7 +78,44 @@ type WorkspacePayload = {
   drafts: DraftRecord[];
 };
 
-type GenerationModel = "gpt-5-mini" | "gpt-4-turbo" | "gpt-4o-mini";
+type AgentSource = "openai" | "local-fallback";
+
+type ExtractApiPayload = EmailCopyExtractResult & {
+  action: "extract";
+  runGroupId: string;
+  latencyMs: number;
+};
+
+type OptimizeApiPayload = EmailCopyOptimizeResult & {
+  action: "optimize";
+  runGroupId: string;
+  latencyMs: number;
+};
+
+type GenerateApiPayload = {
+  action: "generate";
+  runGroupId: string;
+  latencyMs: number;
+  variants: EmailCopyVariant[];
+  model: string;
+  source: AgentSource;
+};
+
+type QaApiPayload = {
+  action: "qa";
+  runGroupId: string;
+  latencyMs: number;
+  result: EmailCopyQaResult;
+};
+
+type TrackStep = "parse" | "mapping";
+
+type GenerationModel =
+  | "gpt-5.2"
+  | "gpt-4.1"
+  | "gpt-5-mini"
+  | "gpt-4-turbo"
+  | "gpt-4o-mini";
 type WizardStepId = "brief" | "blocks" | "generate";
 
 const BLOCK_TYPE_OPTIONS: Array<{ value: BrevoBlockType; label: string }> = [
@@ -71,6 +126,8 @@ const BLOCK_TYPE_OPTIONS: Array<{ value: BrevoBlockType; label: string }> = [
 ];
 
 const MODEL_OPTIONS: Array<{ value: GenerationModel; label: string }> = [
+  { value: "gpt-5.2", label: "GPT-5.2 (quality)" },
+  { value: "gpt-4.1", label: "GPT-4.1 (structured)" },
   { value: "gpt-4o-mini", label: "GPT-4o mini (recommended)" },
   { value: "gpt-5-mini", label: "GPT-5 mini (creative)" },
   { value: "gpt-4-turbo", label: "GPT-4 Turbo (stable)" },
@@ -83,8 +140,74 @@ const FOCUS_RING_CLASS =
 const CONTROL_BUTTON_CLASS = `h-9 px-3 text-xs sm:text-sm ${FOCUS_RING_CLASS}`;
 const OUTPUT_META_CLASS = "text-[11px] uppercase tracking-[0.16em] text-[color:var(--color-text)]/72 sm:text-xs sm:tracking-[0.2em]";
 const OUTPUT_CARD_CLASS = "rounded-xl border border-[color:var(--color-border)] bg-[color:var(--color-surface-2)]/72 p-3 sm:p-3.5";
+const DEFAULT_BLOCK_PREVIEW_THEME: BrandTheme = {
+  primaryColor: "#0ea5a8",
+  secondaryColor: "#1f2937",
+  backgroundColor: "#f8fafc",
+  radius: "0.75rem",
+  fontFamily: "inherit",
+};
 
-function createEmptyBrief(): EmailCopyBrief {
+function stringFromUnknown(value: unknown): string | null {
+  return typeof value === "string" && value.trim().length > 0 ? value.trim() : null;
+}
+
+function resolveBrandTheme(profile: EmailCopyBrandProfile): BrandTheme {
+  const raw = profile as unknown as Record<string, unknown>;
+  const nested = raw.brandTheme && typeof raw.brandTheme === "object"
+    ? (raw.brandTheme as Record<string, unknown>)
+    : {};
+  return {
+    primaryColor:
+      stringFromUnknown(nested.primaryColor) ||
+      stringFromUnknown(raw.primaryColor) ||
+      DEFAULT_BLOCK_PREVIEW_THEME.primaryColor,
+    secondaryColor:
+      stringFromUnknown(nested.secondaryColor) ||
+      stringFromUnknown(raw.secondaryColor) ||
+      DEFAULT_BLOCK_PREVIEW_THEME.secondaryColor,
+    backgroundColor:
+      stringFromUnknown(nested.backgroundColor) ||
+      stringFromUnknown(raw.backgroundColor) ||
+      DEFAULT_BLOCK_PREVIEW_THEME.backgroundColor,
+    radius:
+      stringFromUnknown(nested.radius) ||
+      stringFromUnknown(raw.radius) ||
+      DEFAULT_BLOCK_PREVIEW_THEME.radius,
+    fontFamily:
+      stringFromUnknown(nested.fontFamily) ||
+      stringFromUnknown(raw.fontFamily) ||
+      DEFAULT_BLOCK_PREVIEW_THEME.fontFamily,
+  };
+}
+
+function cloneLayoutSpec(value: Record<string, unknown> | null | undefined): Record<string, unknown> {
+  if (!value || typeof value !== "object") return {};
+  return { ...value };
+}
+
+function resolveTemplateState(input: {
+  clientSlug: string;
+  blockType: BrevoBlockType;
+  templateKey?: string | null;
+  layoutSpec?: Record<string, unknown> | null;
+}) {
+  const fallbackTemplate = getDefaultTemplateForType(input.blockType, input.clientSlug);
+  const templateKey = isTemplateCompatibleWithType(input.templateKey, input.blockType, input.clientSlug)
+    ? (getTemplateDef(input.templateKey, input.clientSlug)?.key ?? fallbackTemplate)
+    : fallbackTemplate;
+  const templateDef = getTemplateDef(templateKey, input.clientSlug);
+  const layoutSpec =
+    input.layoutSpec && typeof input.layoutSpec === "object"
+      ? cloneLayoutSpec(input.layoutSpec)
+      : cloneLayoutSpec(templateDef?.defaultLayoutSpec);
+  return { templateKey, layoutSpec };
+}
+
+function createEmptyBrief(clientSlug: string): EmailCopyBrief {
+  const heroTemplate = resolveTemplateState({ clientSlug, blockType: "hero" });
+  const threeColumnsTemplate = resolveTemplateState({ clientSlug, blockType: "three_columns" });
+  const twoColumnsTemplate = resolveTemplateState({ clientSlug, blockType: "two_columns" });
   return {
     campaignName: "Nouvelle campagne",
     sendDate: null,
@@ -99,7 +222,16 @@ function createEmptyBrief(): EmailCopyBrief {
     sourcePreheader: null,
     rawBriefText: null,
     blocks: [
-      { id: "block-1", blockType: "hero", sourceTitle: null, sourceContent: null, ctaLabel: null, ctaUrl: null },
+      {
+        id: "block-1",
+        blockType: "hero",
+        sourceTitle: null,
+        sourceContent: null,
+        ctaLabel: null,
+        ctaUrl: null,
+        templateKey: heroTemplate.templateKey,
+        layoutSpec: heroTemplate.layoutSpec,
+      },
       {
         id: "block-2",
         blockType: "three_columns",
@@ -107,8 +239,19 @@ function createEmptyBrief(): EmailCopyBrief {
         sourceContent: null,
         ctaLabel: null,
         ctaUrl: null,
+        templateKey: threeColumnsTemplate.templateKey,
+        layoutSpec: threeColumnsTemplate.layoutSpec,
       },
-      { id: "block-3", blockType: "two_columns", sourceTitle: null, sourceContent: null, ctaLabel: null, ctaUrl: null },
+      {
+        id: "block-3",
+        blockType: "two_columns",
+        sourceTitle: null,
+        sourceContent: null,
+        ctaLabel: null,
+        ctaUrl: null,
+        templateKey: twoColumnsTemplate.templateKey,
+        layoutSpec: twoColumnsTemplate.layoutSpec,
+      },
     ],
   };
 }
@@ -135,7 +278,7 @@ function countChars(value: string | null | undefined): number {
   return value ? [...value].length : 0;
 }
 
-function normalizeBrief(brief: EmailCopyBrief): EmailCopyBrief {
+function normalizeBrief(brief: EmailCopyBrief, clientSlug: string): EmailCopyBrief {
   return {
     ...brief,
     campaignName: clean(brief.campaignName || "Nouvelle campagne"),
@@ -150,6 +293,12 @@ function normalizeBrief(brief: EmailCopyBrief): EmailCopyBrief {
     sourceSubject: brief.sourceSubject ? clean(brief.sourceSubject) : null,
     sourcePreheader: brief.sourcePreheader ? clean(brief.sourcePreheader) : null,
     blocks: brief.blocks.map((block, idx) => ({
+      ...resolveTemplateState({
+        clientSlug,
+        blockType: block.blockType,
+        templateKey: block.templateKey,
+        layoutSpec: block.layoutSpec,
+      }),
       id: clean(block.id) || `block-${idx + 1}`,
       blockType: block.blockType,
       sourceTitle: block.sourceTitle ? block.sourceTitle.trim() : null,
@@ -214,28 +363,45 @@ function isTypingElement(target: EventTarget | null): boolean {
   return tagName === "input" || tagName === "textarea" || tagName === "select" || target.isContentEditable;
 }
 
+function createRunGroupId(): string {
+  if (typeof crypto !== "undefined" && typeof crypto.randomUUID === "function") {
+    return crypto.randomUUID();
+  }
+  return `run-${Date.now()}-${Math.round(Math.random() * 1_000_000)}`;
+}
+
 export default function CrmEmailCopyGeneratorView({ clientSlug, clientLabel }: CrmEmailCopyGeneratorViewProps) {
   const [rawBriefInput, setRawBriefInput] = useState("");
-  const [brief, setBrief] = useState<EmailCopyBrief>(() => createEmptyBrief());
+  const [brief, setBrief] = useState<EmailCopyBrief>(() => createEmptyBrief(clientSlug));
   const [briefStatus, setBriefStatus] = useState("");
   const [brandProfile, setBrandProfile] = useState<EmailCopyBrandProfile>(SAVEURS_DEFAULT_BRAND_PROFILE);
 
   const [variantCount, setVariantCount] = useState(DEFAULT_EMAIL_COPY_VARIANT_COUNT);
-  const [model, setModel] = useState<GenerationModel>("gpt-4o-mini");
+  const [model, setModel] = useState<GenerationModel>("gpt-4.1");
   const [variants, setVariants] = useState<EmailCopyVariant[]>([]);
   const [activeVariant, setActiveVariant] = useState(1);
   const [generatedModel, setGeneratedModel] = useState<string | null>(null);
   const [generatedSource, setGeneratedSource] = useState<"openai" | "local-fallback" | null>(null);
+  const [runGroupId, setRunGroupId] = useState<string>(() => createRunGroupId());
+  const [extractResult, setExtractResult] = useState<EmailCopyExtractResult | null>(null);
+  const [optimizeResult, setOptimizeResult] = useState<EmailCopyOptimizeResult | null>(null);
+  const [qaResult, setQaResult] = useState<EmailCopyQaResult | null>(null);
 
   const [briefs, setBriefs] = useState<BriefSummary[]>([]);
   const [activeBriefId, setActiveBriefId] = useState<string | null>(null);
   const [selectedBriefId, setSelectedBriefId] = useState("");
 
   const [loading, setLoading] = useState(true);
+  const [extracting, setExtracting] = useState(false);
+  const [optimizing, setOptimizing] = useState(false);
   const [generating, setGenerating] = useState(false);
+  const [runningQa, setRunningQa] = useState(false);
   const [savingBrief, setSavingBrief] = useState(false);
   const [savingBrand, setSavingBrand] = useState(false);
   const [savingDrafts, setSavingDrafts] = useState(false);
+  const [qaDetailsOpen, setQaDetailsOpen] = useState(false);
+  const [previewVisibilityByBlock, setPreviewVisibilityByBlock] = useState<Record<string, boolean>>({});
+  const [warningVisibilityByBlock, setWarningVisibilityByBlock] = useState<Record<string, boolean>>({});
   const [activeStep, setActiveStep] = useState<WizardStepId>("brief");
   const [brandDrawerOpen, setBrandDrawerOpen] = useState(false);
   const [mobileOutputOpen, setMobileOutputOpen] = useState(false);
@@ -249,6 +415,18 @@ export default function CrmEmailCopyGeneratorView({ clientSlug, clientLabel }: C
   const currentVariant = useMemo(
     () => variants.find((variant) => variant.index === activeVariant) || null,
     [variants, activeVariant]
+  );
+  const blockPreviewTheme = useMemo(() => resolveBrandTheme(brandProfile), [brandProfile]);
+  const visualQaByVariant = useMemo<Record<number, VisualQaResult>>(() => {
+    const map: Record<number, VisualQaResult> = {};
+    variants.forEach((variant) => {
+      map[variant.index] = runVisualQaForVariant({ variant, theme: blockPreviewTheme });
+    });
+    return map;
+  }, [variants, blockPreviewTheme]);
+  const currentVisualQa = useMemo(
+    () => (currentVariant ? visualQaByVariant[currentVariant.index] || null : null),
+    [currentVariant, visualQaByVariant]
   );
 
   const briefReady = useMemo(() => briefLooksStarted(brief, rawBriefInput), [brief, rawBriefInput]);
@@ -381,13 +559,22 @@ export default function CrmEmailCopyGeneratorView({ clientSlug, clientLabel }: C
         setBriefs(payload.briefs || []);
 
         if (payload.selectedBrief?.id) {
-          const loadedBrief = (payload.selectedBrief.brief as EmailCopyBrief | null) || createEmptyBrief();
+          const loadedBriefRaw =
+            (payload.selectedBrief.brief as EmailCopyBrief | null) || createEmptyBrief(clientSlug);
+          const loadedBrief = normalizeBrief(loadedBriefRaw, clientSlug);
           setActiveBriefId(payload.selectedBrief.id);
           setSelectedBriefId(payload.selectedBrief.id);
           setBrief(loadedBrief);
           setBriefStatus(payload.selectedBrief.status || "");
           setRawBriefInput(loadedBrief.rawBriefText || "");
           setExpandedBlockId(loadedBrief.blocks[0]?.id || "block-1");
+          setRunGroupId(createRunGroupId());
+          setExtractResult(null);
+          setOptimizeResult(null);
+          setQaResult(null);
+          setQaDetailsOpen(false);
+          setPreviewVisibilityByBlock({});
+          setWarningVisibilityByBlock({});
           setActiveStep("blocks");
         }
 
@@ -425,13 +612,120 @@ export default function CrmEmailCopyGeneratorView({ clientSlug, clientLabel }: C
     setBrief((prev) => {
       const nextBlocks = [...prev.blocks];
       if (!nextBlocks[blockIndex]) return prev;
-      nextBlocks[blockIndex] = { ...nextBlocks[blockIndex], [key]: value };
+      const currentBlock = nextBlocks[blockIndex];
+
+      if (key === "blockType") {
+        const nextType = value as BrevoBlockType;
+        const nextTemplate = resolveTemplateState({
+          clientSlug,
+          blockType: nextType,
+          templateKey: currentBlock.templateKey,
+          layoutSpec: currentBlock.layoutSpec,
+        });
+        nextBlocks[blockIndex] = {
+          ...currentBlock,
+          blockType: nextType,
+          templateKey: nextTemplate.templateKey,
+          layoutSpec: nextTemplate.layoutSpec,
+        };
+        return { ...prev, blocks: nextBlocks };
+      }
+
+      if (key === "templateKey") {
+        const templateKey =
+          (value as string | null) || getDefaultTemplateForType(currentBlock.blockType, clientSlug);
+        const templateDef = getTemplateDef(templateKey, clientSlug);
+        nextBlocks[blockIndex] = {
+          ...currentBlock,
+          templateKey: templateDef?.key || templateKey,
+          layoutSpec: cloneLayoutSpec(templateDef?.defaultLayoutSpec),
+        };
+        return { ...prev, blocks: nextBlocks };
+      }
+
+      nextBlocks[blockIndex] = { ...currentBlock, [key]: value };
       return { ...prev, blocks: nextBlocks };
     });
   };
 
+  const getPreviewStateKey = useCallback(
+    (variantIndex: number, blockId: string, blockIndex: number) => `${variantIndex}:${blockId}:${blockIndex}`,
+    []
+  );
+  const getWarningStateKey = useCallback(
+    (variantIndex: number, blockId: string, blockIndex: number) => `warn:${variantIndex}:${blockId}:${blockIndex}`,
+    []
+  );
+  const getOutputBlockAnchorId = useCallback(
+    (variantIndex: number, blockId: string, blockIndex: number) =>
+      `email-copy-output-block-${variantIndex}-${blockIndex}-${blockId.replace(/[^a-zA-Z0-9_-]/g, "-")}`,
+    []
+  );
+
+  const toggleBlockPreview = useCallback((stateKey: string) => {
+    setPreviewVisibilityByBlock((prev) => ({ ...prev, [stateKey]: !prev[stateKey] }));
+  }, []);
+  const toggleBlockWarnings = useCallback((stateKey: string) => {
+    setWarningVisibilityByBlock((prev) => ({ ...prev, [stateKey]: !prev[stateKey] }));
+  }, []);
+  const scrollToOutputBlock = useCallback(
+    (variantIndex: number, blockId: string, blockIndex: number) => {
+      setActiveStep("generate");
+      setActiveVariant(variantIndex);
+      setMobileOutputOpen(true);
+      const targetId = getOutputBlockAnchorId(variantIndex, blockId, blockIndex);
+      window.setTimeout(() => {
+        document.getElementById(targetId)?.scrollIntoView({ behavior: "smooth", block: "center" });
+      }, 80);
+    },
+    [getOutputBlockAnchorId]
+  );
+
+  const trackStepEvent = useCallback(
+    async (input: {
+      step: TrackStep;
+      brief?: EmailCopyBrief;
+      rawBriefText?: string | null;
+      context?: Record<string, unknown>;
+      runGroupId?: string;
+    }) => {
+      const trackedRawBriefText =
+        input.rawBriefText ?? rawBriefInput ?? input.brief?.rawBriefText ?? brief.rawBriefText ?? null;
+      const briefToTrack = normalizeBrief({
+        ...(input.brief ?? brief),
+        rawBriefText: trackedRawBriefText,
+      }, clientSlug);
+
+      try {
+        const response = await fetch("/api/ai/email-copy", {
+          method: "POST",
+          keepalive: true,
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            action: "track",
+            clientSlug,
+            model,
+            briefId: activeBriefId,
+            runGroupId: input.runGroupId || runGroupId,
+            step: input.step,
+            rawBriefText: trackedRawBriefText,
+            brief: briefToTrack,
+            context: input.context || {},
+          }),
+        });
+        if (!response.ok) {
+          const payload = await response.json().catch(() => null);
+          console.warn("[email-copy] track event rejected", response.status, payload);
+        }
+      } catch (error) {
+        console.warn("[email-copy] track event failed", error);
+      }
+    },
+    [activeBriefId, brief, clientSlug, model, rawBriefInput, runGroupId]
+  );
+
   const startNewBrief = () => {
-    const nextBrief = createEmptyBrief();
+    const nextBrief = createEmptyBrief(clientSlug);
     setActiveBriefId(null);
     setSelectedBriefId("");
     setBriefStatus("");
@@ -440,6 +734,13 @@ export default function CrmEmailCopyGeneratorView({ clientSlug, clientLabel }: C
     setVariants([]);
     setGeneratedModel(null);
     setGeneratedSource(null);
+    setRunGroupId(createRunGroupId());
+    setExtractResult(null);
+    setOptimizeResult(null);
+    setQaResult(null);
+    setQaDetailsOpen(false);
+    setPreviewVisibilityByBlock({});
+    setWarningVisibilityByBlock({});
     setActiveVariant(1);
     setActiveStep("brief");
     setMobileOutputOpen(false);
@@ -449,6 +750,10 @@ export default function CrmEmailCopyGeneratorView({ clientSlug, clientLabel }: C
   const addBlock = () => {
     setBrief((prev) => {
       const nextId = `block-${prev.blocks.length + 1}`;
+      const templateState = resolveTemplateState({
+        clientSlug,
+        blockType: "image_text_side_by_side",
+      });
       setExpandedBlockId(nextId);
       return {
         ...prev,
@@ -461,6 +766,8 @@ export default function CrmEmailCopyGeneratorView({ clientSlug, clientLabel }: C
             sourceContent: null,
             ctaLabel: null,
             ctaUrl: null,
+            templateKey: templateState.templateKey,
+            layoutSpec: templateState.layoutSpec,
           },
         ],
       };
@@ -485,6 +792,20 @@ export default function CrmEmailCopyGeneratorView({ clientSlug, clientLabel }: C
   const saveBrief = useCallback(async () => {
     setSavingBrief(true);
     try {
+      const briefPayload = normalizeBrief(
+        { ...brief, rawBriefText: rawBriefInput || brief.rawBriefText || null },
+        clientSlug
+      );
+      void trackStepEvent({
+        step: "mapping",
+        brief: briefPayload,
+        rawBriefText: rawBriefInput || brief.rawBriefText || null,
+        context: {
+          event: "manual_save_snapshot",
+          status: briefStatus || null,
+        },
+      });
+
       const response = await fetch("/api/crm/email-copy", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -493,7 +814,7 @@ export default function CrmEmailCopyGeneratorView({ clientSlug, clientLabel }: C
           client: clientSlug,
           briefId: activeBriefId,
           status: briefStatus || null,
-          brief: normalizeBrief({ ...brief, rawBriefText: rawBriefInput || brief.rawBriefText || null }),
+          brief: briefPayload,
         }),
       });
 
@@ -513,7 +834,7 @@ export default function CrmEmailCopyGeneratorView({ clientSlug, clientLabel }: C
     } finally {
       setSavingBrief(false);
     }
-  }, [activeBriefId, brief, briefStatus, clientSlug, fetchWorkspace, rawBriefInput]);
+  }, [activeBriefId, brief, briefStatus, clientSlug, fetchWorkspace, rawBriefInput, trackStepEvent]);
 
   const saveBrandProfile = async () => {
     setSavingBrand(true);
@@ -544,12 +865,195 @@ export default function CrmEmailCopyGeneratorView({ clientSlug, clientLabel }: C
       return;
     }
     const parsed = parseEmailCopyBrief(rawBriefInput);
-    setBrief(parsed.brief);
+    const nextRunGroupId = createRunGroupId();
+    setBrief(normalizeBrief(parsed.brief, clientSlug));
     setBriefStatus(parsed.metadata.status || "");
     setExpandedBlockId(parsed.brief.blocks[0]?.id || "block-1");
+    setExtractResult(null);
+    setOptimizeResult(null);
+    setQaResult(null);
+    setQaDetailsOpen(false);
+    setVariants([]);
+    setGeneratedModel(null);
+    setGeneratedSource(null);
+    setRunGroupId(nextRunGroupId);
     setActiveStep("blocks");
+    void trackStepEvent({
+      step: "parse",
+      runGroupId: nextRunGroupId,
+      rawBriefText: rawBriefInput,
+      brief: parsed.brief,
+      context: {
+        event: "manual_parse",
+        parser: "local",
+        status: parsed.metadata.status || null,
+      },
+    });
     showSuccess("Brief parsed.");
   };
+
+  const runAiExtract = async () => {
+    if (!clean(rawBriefInput).length) {
+      showError("Paste a brief before running AI extract.");
+      return;
+    }
+    setExtracting(true);
+    try {
+      const response = await fetch("/api/ai/email-copy", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          action: "extract",
+          clientSlug,
+          model,
+          briefId: activeBriefId,
+          runGroupId,
+          rawBriefText: rawBriefInput,
+          brandProfile: normalizeBrand(brandProfile),
+        }),
+      });
+      const payload = (await response.json().catch(() => null)) as ExtractApiPayload | null;
+      if (!response.ok || !payload) throw new Error((payload as { error?: string } | null)?.error || `AI extract failed (${response.status})`);
+
+      setBrief(normalizeBrief(payload.brief, clientSlug));
+      setBriefStatus(payload.status || "");
+      setExpandedBlockId(payload.brief.blocks[0]?.id || "block-1");
+      setExtractResult(payload);
+      setOptimizeResult(null);
+      setQaResult(null);
+      setQaDetailsOpen(false);
+      setPreviewVisibilityByBlock({});
+      setWarningVisibilityByBlock({});
+      setVariants([]);
+      setGeneratedModel(null);
+      setGeneratedSource(null);
+      const nextRunGroupId = payload.runGroupId || runGroupId;
+      setRunGroupId(nextRunGroupId);
+      setActiveStep("blocks");
+      void trackStepEvent({
+        step: "mapping",
+        runGroupId: nextRunGroupId,
+        rawBriefText: rawBriefInput,
+        brief: payload.brief,
+        context: {
+          event: "post_extract",
+          source: payload.source,
+          model: payload.model,
+          status: payload.status || null,
+          warningCount: payload.warnings?.length || 0,
+          evidenceCount: payload.evidence?.length || 0,
+        },
+      });
+      showSuccess(payload.source === "local-fallback" ? "AI extract completed with local fallback." : "AI extract completed.");
+    } catch (error) {
+      showError(error instanceof Error ? error.message : "Unable to run AI extract");
+    } finally {
+      setExtracting(false);
+    }
+  };
+
+  const runAiOptimize = async () => {
+    if (!briefReady) {
+      showError("Complete brief intake before optimization.");
+      setActiveStep("brief");
+      return;
+    }
+    setOptimizing(true);
+    try {
+      const response = await fetch("/api/ai/email-copy", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          action: "optimize",
+          clientSlug,
+          model,
+          briefId: activeBriefId,
+          runGroupId,
+          brandProfile: normalizeBrand(brandProfile),
+          brief: normalizeBrief(
+            { ...brief, rawBriefText: rawBriefInput || brief.rawBriefText || null },
+            clientSlug
+          ),
+        }),
+      });
+      const payload = (await response.json().catch(() => null)) as OptimizeApiPayload | null;
+      if (!response.ok || !payload) throw new Error((payload as { error?: string } | null)?.error || `AI optimize failed (${response.status})`);
+
+      setBrief(normalizeBrief(payload.brief, clientSlug));
+      setExpandedBlockId(payload.brief.blocks[0]?.id || "block-1");
+      setOptimizeResult(payload);
+      setQaResult(null);
+      setQaDetailsOpen(false);
+      setPreviewVisibilityByBlock({});
+      setWarningVisibilityByBlock({});
+      setVariants([]);
+      setGeneratedModel(null);
+      setGeneratedSource(null);
+      const nextRunGroupId = payload.runGroupId || runGroupId;
+      setRunGroupId(nextRunGroupId);
+      void trackStepEvent({
+        step: "mapping",
+        runGroupId: nextRunGroupId,
+        rawBriefText: rawBriefInput,
+        brief: payload.brief,
+        context: {
+          event: "post_optimize",
+          source: payload.source,
+          model: payload.model,
+          warningCount: payload.warnings?.length || 0,
+          changeCount: payload.changes?.length || 0,
+          evidenceCount: payload.evidence?.length || 0,
+        },
+      });
+      showSuccess(payload.source === "local-fallback" ? "AI optimize completed with local fallback." : "AI optimize completed.");
+    } catch (error) {
+      showError(error instanceof Error ? error.message : "Unable to run AI optimize");
+    } finally {
+      setOptimizing(false);
+    }
+  };
+
+  const runQa = useCallback(
+    async (variantsInput?: EmailCopyVariant[]) => {
+      const toReview = variantsInput && variantsInput.length ? variantsInput : variants;
+      if (!toReview.length) {
+        showError("Generate variants before QA.");
+        return null;
+      }
+      setRunningQa(true);
+      try {
+        const response = await fetch("/api/ai/email-copy", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            action: "qa",
+            clientSlug,
+            model,
+            briefId: activeBriefId,
+            runGroupId,
+            brandProfile: normalizeBrand(brandProfile),
+            brief: normalizeBrief(
+              { ...brief, rawBriefText: rawBriefInput || brief.rawBriefText || null },
+              clientSlug
+            ),
+            variants: toReview,
+          }),
+        });
+        const payload = (await response.json().catch(() => null)) as QaApiPayload | null;
+        if (!response.ok || !payload) throw new Error((payload as { error?: string } | null)?.error || `QA failed (${response.status})`);
+        setQaResult(payload.result);
+        setRunGroupId(payload.runGroupId || runGroupId);
+        setQaDetailsOpen(false);
+        return payload.result;
+      } catch (error) {
+        showError(error instanceof Error ? error.message : "Unable to run QA");
+        return null;
+      } finally {
+        setRunningQa(false);
+      }
+    },
+    [activeBriefId, brief, brandProfile, clientSlug, model, rawBriefInput, runGroupId, variants]
+  );
 
   const generateCopy = async () => {
     if (!briefReady) {
@@ -563,30 +1067,59 @@ export default function CrmEmailCopyGeneratorView({ clientSlug, clientLabel }: C
       return;
     }
 
+    setQaResult(null);
+    setQaDetailsOpen(false);
     setGenerating(true);
     try {
+      const mappingSnapshot = normalizeBrief(
+        { ...brief, rawBriefText: rawBriefInput || brief.rawBriefText || null },
+        clientSlug
+      );
+      void trackStepEvent({
+        step: "mapping",
+        brief: mappingSnapshot,
+        rawBriefText: rawBriefInput || brief.rawBriefText || null,
+        context: {
+          event: "pre_generate_snapshot",
+          mappedBlocksCount,
+          totalBlocks: mappingSnapshot.blocks.length,
+          variantCount,
+        },
+      });
+
       const response = await fetch("/api/ai/email-copy", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
+          action: "generate",
           clientSlug,
           model,
+          briefId: activeBriefId,
+          runGroupId,
           variantCount,
           brandProfile: normalizeBrand(brandProfile),
-          brief: normalizeBrief({ ...brief, rawBriefText: rawBriefInput || brief.rawBriefText || null }),
+          brief: mappingSnapshot,
         }),
       });
-      const payload = await response.json().catch(() => null);
-      if (!response.ok) throw new Error(payload?.error || `Generation failed (${response.status})`);
-      const generated = Array.isArray(payload?.variants) ? (payload.variants as EmailCopyVariant[]) : [];
+      const payload = (await response.json().catch(() => null)) as GenerateApiPayload | null;
+      if (!response.ok || !payload) throw new Error((payload as { error?: string } | null)?.error || `Generation failed (${response.status})`);
+      const generated = Array.isArray(payload?.variants) ? payload.variants : [];
       if (!generated.length) throw new Error("No variants generated.");
       setVariants(generated);
-      setGeneratedModel((payload?.model as string | undefined) || model);
-      setGeneratedSource((payload?.source as "openai" | "local-fallback" | undefined) || "openai");
+      setPreviewVisibilityByBlock({});
+      setWarningVisibilityByBlock({});
+      setGeneratedModel(payload.model || model);
+      setGeneratedSource(payload.source || "openai");
+      setRunGroupId(payload.runGroupId || runGroupId);
       setActiveVariant(generated[0].index);
       setActiveStep("generate");
       setMobileOutputOpen(true);
-      showSuccess("Variants generated.");
+      const qa = await runQa(generated);
+      if (qa) {
+        showSuccess("Variants generated and QA completed.");
+      } else {
+        showSuccess("Variants generated.");
+      }
     } catch (error) {
       showError(error instanceof Error ? error.message : "Unable to generate");
     } finally {
@@ -871,9 +1404,27 @@ export default function CrmEmailCopyGeneratorView({ clientSlug, clientLabel }: C
                 <p className="text-xs uppercase tracking-[0.2em] text-[var(--color-muted)]">Step 1</p>
                 <h2 className="text-lg font-semibold text-[color:var(--color-text)]">Brief Intake</h2>
               </div>
-              <div className="grid w-full grid-cols-2 gap-2 sm:flex sm:w-auto sm:items-center">
-                <button type="button" className={`btn-primary ${CONTROL_BUTTON_CLASS}`} onClick={handleParseBrief} disabled={!clean(rawBriefInput).length}>
+              <div className="grid w-full grid-cols-3 gap-2 sm:flex sm:w-auto sm:items-center">
+                <button type="button" className={`btn-ghost ${CONTROL_BUTTON_CLASS}`} onClick={handleParseBrief} disabled={!clean(rawBriefInput).length}>
                   Parse brief
+                </button>
+                <button
+                  type="button"
+                  className={`btn-primary ${CONTROL_BUTTON_CLASS}`}
+                  onClick={() => void runAiExtract()}
+                  disabled={extracting || !clean(rawBriefInput).length}
+                >
+                  {extracting ? (
+                    <span className="flex items-center gap-1.5">
+                      <Loader2 className="h-4 w-4 animate-spin" />
+                      AI Extract
+                    </span>
+                  ) : (
+                    <span className="flex items-center gap-1.5">
+                      <Bot className="h-4 w-4" />
+                      AI Extract
+                    </span>
+                  )}
                 </button>
                 <button type="button" className={`btn-ghost ${CONTROL_BUTTON_CLASS}`} onClick={() => setActiveStep("blocks")} disabled={!briefReady}>
                   Next
@@ -896,6 +1447,22 @@ export default function CrmEmailCopyGeneratorView({ clientSlug, clientLabel }: C
             {!clean(rawBriefInput).length ? (
               <div className="mt-3 rounded-xl border border-dashed border-[color:var(--color-border)] bg-[color:var(--color-surface-2)]/45 px-3 py-2 text-xs text-[var(--color-muted)]">
                 Paste the full brief first, then use Parse brief to prefill campaign and blocks.
+              </div>
+            ) : null}
+
+            {extractResult ? (
+              <div className="mt-3 rounded-xl border border-[color:var(--color-border)] bg-[color:var(--color-surface-2)]/55 px-3 py-2 text-xs">
+                <div className="flex flex-wrap items-center justify-between gap-2">
+                  <p className="font-semibold text-[color:var(--color-text)]">
+                    AI Extract · {extractResult.source === "local-fallback" ? "Fallback" : "OpenAI"}
+                  </p>
+                  <p className="text-[var(--color-muted)]">{extractResult.model}</p>
+                </div>
+                {extractResult.warnings.length > 0 ? (
+                  <p className="mt-1 text-amber-700">{extractResult.warnings[0]}</p>
+                ) : (
+                  <p className="mt-1 text-emerald-700">Extraction completed with structured fields ready for mapping.</p>
+                )}
               </div>
             ) : null}
 
@@ -939,9 +1506,27 @@ export default function CrmEmailCopyGeneratorView({ clientSlug, clientLabel }: C
                 <p className="text-xs uppercase tracking-[0.2em] text-[var(--color-muted)]">Step 2</p>
                 <h2 className="text-lg font-semibold text-[color:var(--color-text)]">Block Mapping</h2>
               </div>
-              <div className="grid w-full grid-cols-3 gap-2 sm:flex sm:w-auto sm:items-center">
+              <div className="grid w-full grid-cols-4 gap-2 sm:flex sm:w-auto sm:items-center">
                 <button type="button" className={`btn-ghost ${CONTROL_BUTTON_CLASS}`} onClick={() => setActiveStep("brief")}>
                   Back
+                </button>
+                <button
+                  type="button"
+                  className={`btn-primary ${CONTROL_BUTTON_CLASS}`}
+                  onClick={() => void runAiOptimize()}
+                  disabled={optimizing || !briefReady}
+                >
+                  {optimizing ? (
+                    <span className="flex items-center gap-1.5">
+                      <Loader2 className="h-4 w-4 animate-spin" />
+                      AI Optimize
+                    </span>
+                  ) : (
+                    <span className="flex items-center gap-1.5">
+                      <Bot className="h-4 w-4" />
+                      AI Optimize
+                    </span>
+                  )}
                 </button>
                 <button type="button" className={`btn-ghost ${CONTROL_BUTTON_CLASS}`} onClick={addBlock}>
                   <Plus className="mr-1 h-4 w-4" />
@@ -964,12 +1549,33 @@ export default function CrmEmailCopyGeneratorView({ clientSlug, clientLabel }: C
               )}
             </div>
 
+            {optimizeResult ? (
+              <div className="mt-3 rounded-xl border border-[color:var(--color-border)] bg-[color:var(--color-surface-2)]/55 px-3 py-2 text-xs">
+                <div className="flex flex-wrap items-center justify-between gap-2">
+                  <p className="font-semibold text-[color:var(--color-text)]">
+                    AI Optimize · {optimizeResult.source === "local-fallback" ? "Fallback" : "OpenAI"}
+                  </p>
+                  <p className="text-[var(--color-muted)]">
+                    {optimizeResult.model} · {optimizeResult.changes.length} changes
+                  </p>
+                </div>
+                {optimizeResult.warnings.length > 0 ? (
+                  <p className="mt-1 text-amber-700">{optimizeResult.warnings[0]}</p>
+                ) : (
+                  <p className="mt-1 text-emerald-700">Blocks optimized for limits and generation quality.</p>
+                )}
+              </div>
+            ) : null}
+
             <div className="mt-3 space-y-2.5 sm:mt-4 sm:space-y-3">
               {brief.blocks.map((block, blockIndex) => {
                 const isExpanded = expandedBlockId === block.id;
-                const contentLimit = EMAIL_COPY_BLOCK_CONTENT_LIMITS[block.blockType];
+                const hardContentLimit = EMAIL_COPY_BLOCK_CONTENT_LIMITS[block.blockType];
+                const softContentLimit = EMAIL_COPY_BLOCK_SOFT_CONTENT_LIMITS[block.blockType];
+                const templateOptions = getTemplatesForType(block.blockType, clientSlug);
                 const sourceSize = countChars(block.sourceContent);
-                const over = sourceSize > contentLimit;
+                const overSoft = sourceSize > softContentLimit;
+                const hardRisk = sourceSize > hardContentLimit * 2;
                 return (
                   <div key={`${block.id}-${blockIndex}`} className="rounded-2xl border border-[color:var(--color-border)] bg-[color:var(--color-surface)]">
                     <button
@@ -984,21 +1590,28 @@ export default function CrmEmailCopyGeneratorView({ clientSlug, clientLabel }: C
                           {block.id} - {BLOCK_TYPE_OPTIONS.find((entry) => entry.value === block.blockType)?.label}
                         </p>
                         <p className="mt-0.5 text-xs text-[var(--color-muted)]">
-                          {sourceSize}/{contentLimit} chars in source content
+                          {sourceSize}/{softContentLimit} chars in source content (soft - hard {hardContentLimit})
                         </p>
                       </div>
-                      <span
-                        className={[
-                          "rounded-full px-2 py-0.5 text-xs font-semibold",
-                          over
-                            ? "bg-red-100 text-red-700"
-                            : sourceSize > 0
-                              ? "bg-emerald-100 text-emerald-700"
-                              : "bg-slate-100 text-slate-600",
-                        ].join(" ")}
-                      >
-                        {over ? "Over limit" : sourceSize > 0 ? "Ready" : "Empty"}
-                      </span>
+                      <div className="flex items-center gap-1.5">
+                        {hardRisk ? (
+                          <span className="rounded-full bg-red-100 px-2 py-0.5 text-[11px] font-semibold uppercase tracking-[0.08em] text-red-700">
+                            Hard risk
+                          </span>
+                        ) : null}
+                        <span
+                          className={[
+                            "rounded-full px-2 py-0.5 text-xs font-semibold",
+                            overSoft
+                              ? "bg-red-100 text-red-700"
+                              : sourceSize > 0
+                                ? "bg-emerald-100 text-emerald-700"
+                                : "bg-slate-100 text-slate-600",
+                          ].join(" ")}
+                        >
+                          {overSoft ? "Over soft limit" : sourceSize > 0 ? "Ready" : "Empty"}
+                        </span>
+                      </div>
                     </button>
 
                     {isExpanded ? (
@@ -1018,6 +1631,30 @@ export default function CrmEmailCopyGeneratorView({ clientSlug, clientLabel }: C
                           </select>
                         </label>
                         <label className="space-y-1 text-sm">
+                          <span className={FIELD_LABEL_CLASS}>Template</span>
+                          <select
+                            className="input w-full"
+                            value={
+                              getTemplateDef(block.templateKey, clientSlug)?.key ||
+                              getDefaultTemplateForType(block.blockType, clientSlug)
+                            }
+                            onChange={(event) =>
+                              updateBlockField(
+                                blockIndex,
+                                "templateKey",
+                                event.target.value ||
+                                  getDefaultTemplateForType(block.blockType, clientSlug)
+                              )
+                            }
+                          >
+                            {templateOptions.map((template) => (
+                              <option key={template.key} value={template.key}>
+                                {template.label}
+                              </option>
+                            ))}
+                          </select>
+                        </label>
+                        <label className="space-y-1 text-sm">
                           <span className={FIELD_LABEL_CLASS}>
                             Source title ({countChars(block.sourceTitle)}/{EMAIL_COPY_CHAR_LIMITS.title})
                           </span>
@@ -1029,7 +1666,7 @@ export default function CrmEmailCopyGeneratorView({ clientSlug, clientLabel }: C
                         </label>
                         <label className="space-y-1 text-sm md:col-span-2">
                           <span className={FIELD_LABEL_CLASS}>
-                            Source content ({countChars(block.sourceContent)}/{EMAIL_COPY_BLOCK_CONTENT_LIMITS[block.blockType]})
+                            Source content ({countChars(block.sourceContent)}/{EMAIL_COPY_BLOCK_SOFT_CONTENT_LIMITS[block.blockType]} soft - {EMAIL_COPY_BLOCK_CONTENT_LIMITS[block.blockType]} hard)
                           </span>
                           <textarea className="input min-h-[90px] w-full" value={block.sourceContent || ""} onChange={(event) => updateBlockField(blockIndex, "sourceContent", event.target.value || null)} lang="fr" spellCheck />
                         </label>
@@ -1089,7 +1726,7 @@ export default function CrmEmailCopyGeneratorView({ clientSlug, clientLabel }: C
               </div>
             ) : null}
 
-            <div className="mt-4 grid grid-cols-2 gap-2 sm:flex sm:flex-wrap sm:items-center">
+            <div className="mt-4 grid grid-cols-3 gap-2 sm:flex sm:flex-wrap sm:items-center">
               <button
                 type="button"
                 className={`btn-primary ${CONTROL_BUTTON_CLASS}`}
@@ -1106,6 +1743,24 @@ export default function CrmEmailCopyGeneratorView({ clientSlug, clientLabel }: C
                   "Generate variants"
                 )}
               </button>
+              <button
+                type="button"
+                className={`btn-ghost ${CONTROL_BUTTON_CLASS}`}
+                disabled={runningQa || !variants.length}
+                onClick={() => void runQa()}
+              >
+                {runningQa ? (
+                  <span className="flex items-center gap-1.5">
+                    <Loader2 className="h-4 w-4 animate-spin" />
+                    Running QA
+                  </span>
+                ) : (
+                  <span className="flex items-center gap-1.5">
+                    <ShieldCheck className="h-4 w-4" />
+                    Run QA
+                  </span>
+                )}
+              </button>
               <button type="button" className={`btn-ghost ${CONTROL_BUTTON_CLASS}`} disabled={savingDrafts || !variants.length} onClick={() => void saveDrafts()}>
                 {savingDrafts ? "Saving..." : "Save drafts"}
               </button>
@@ -1115,7 +1770,7 @@ export default function CrmEmailCopyGeneratorView({ clientSlug, clientLabel }: C
         </div>
 
         <aside className="xl:sticky xl:top-[calc(var(--content-sticky-top)+1rem)] xl:self-start">
-          <article id="email-copy-output-panel" className="card overflow-hidden xl:h-full xl:max-h-[calc(100vh-var(--content-sticky-top)-2.2rem)]">
+          <article id="email-copy-output-panel" className="card overflow-hidden">
             <header className="border-b border-[color:var(--color-border)] px-4 py-3 sm:px-5 sm:py-4">
               <div className="flex flex-wrap items-start justify-between gap-2 sm:gap-3">
                 <div>
@@ -1146,7 +1801,14 @@ export default function CrmEmailCopyGeneratorView({ clientSlug, clientLabel }: C
               </div>
             </header>
 
-            <div id="email-copy-output-content" className={["p-4 sm:p-5", "xl:h-full xl:overflow-y-auto", mobileOutputOpen ? "block" : "hidden xl:block"].join(" ")}>
+            <div
+              id="email-copy-output-content"
+              className={[
+                "p-4 sm:p-5 max-h-[68vh] overflow-y-auto overscroll-contain",
+                "xl:max-h-[calc(100vh-var(--content-sticky-top)-8.5rem)]",
+                mobileOutputOpen ? "block" : "hidden xl:block",
+              ].join(" ")}
+            >
               {!variants.length ? (
                 <div className="rounded-2xl border border-dashed border-[color:var(--color-border)] bg-[color:var(--color-surface-2)]/45 p-4 text-[13px] leading-5 text-[var(--color-muted)] sm:p-5">
                   <p className="text-sm font-semibold text-[color:var(--color-text)]">No variants generated yet.</p>
@@ -1162,6 +1824,113 @@ export default function CrmEmailCopyGeneratorView({ clientSlug, clientLabel }: C
                 </div>
               ) : (
                 <div className="space-y-3.5 sm:space-y-4">
+                  {runningQa ? (
+                    <div className="rounded-xl border border-[color:var(--color-border)] bg-[color:var(--color-surface-2)]/65 px-3 py-2 text-xs text-[color:var(--color-text)]/80">
+                      <span className="inline-flex items-center gap-2">
+                        <Loader2 className="h-4 w-4 animate-spin" />
+                        Running QA checks...
+                      </span>
+                    </div>
+                  ) : null}
+
+                  {qaResult ? (
+                    <div className={OUTPUT_CARD_CLASS}>
+                      <div className="flex flex-wrap items-center justify-between gap-2">
+                        <p className={OUTPUT_META_CLASS}>QA Summary</p>
+                        <span
+                          className={[
+                            "rounded-full px-2 py-0.5 text-[11px] font-semibold uppercase tracking-[0.08em]",
+                            qaResult.overall === "fail"
+                              ? "bg-red-100 text-red-700"
+                              : qaResult.overall === "warn"
+                                ? "bg-amber-100 text-amber-700"
+                                : "bg-emerald-100 text-emerald-700",
+                          ].join(" ")}
+                        >
+                          {qaResult.overall}
+                        </span>
+                      </div>
+                      <p className="mt-1 text-xs text-[color:var(--color-text)]/70">
+                        {qaResult.model} · {qaResult.source}
+                      </p>
+                      <div className="mt-2 space-y-1 text-xs">
+                        {qaResult.checks.slice(0, 3).map((check) => (
+                          <p key={check.id} className="text-[color:var(--color-text)]/80">
+                            {check.status === "pass" ? "✓" : check.status === "warn" ? "!" : "✕"} {check.label}: {check.message}
+                          </p>
+                        ))}
+                      </div>
+                      {currentVisualQa ? (
+                        <p className="mt-1.5 text-xs text-[color:var(--color-text)]/72">
+                          Visual QA (active variant): {currentVisualQa.totalWarnings} warning(s).
+                        </p>
+                      ) : null}
+                      <button
+                        type="button"
+                        className={`btn-ghost mt-2 h-8 px-2.5 text-xs ${FOCUS_RING_CLASS}`}
+                        onClick={() => setQaDetailsOpen((prev) => !prev)}
+                      >
+                        {qaDetailsOpen ? "Hide details" : "Show details"}
+                      </button>
+                      {qaDetailsOpen ? (
+                        <div className="mt-2 space-y-2 rounded-lg border border-[color:var(--color-border)] bg-[color:var(--color-surface)] p-2.5 text-xs">
+                          {qaResult.variantReports.map((report) => (
+                            <div key={report.variantIndex}>
+                              <p className="font-semibold text-[color:var(--color-text)]">
+                                Variant {report.variantIndex} · {report.status}
+                              </p>
+                              {report.issues.length > 0 ? (
+                                <div className="mt-1 space-y-0.5 text-[color:var(--color-text)]/80">
+                                  {report.issues.map((issue, idx) => (
+                                    <p key={`${issue}-${idx}`}>- {issue}</p>
+                                  ))}
+                                </div>
+                              ) : (
+                                <p className="mt-1 text-emerald-700">No issues detected.</p>
+                              )}
+                            </div>
+                          ))}
+                          <div className="border-t border-[color:var(--color-border)] pt-2">
+                            <p className="font-semibold uppercase tracking-[0.12em] text-[color:var(--color-text)]/72">
+                              Visual QA
+                            </p>
+                            <div className="mt-1.5 space-y-2">
+                              {variants.map((variant) => {
+                                const visualReport = visualQaByVariant[variant.index];
+                                const warnings = visualReport?.warnings || [];
+                                return (
+                                  <div key={`visual-${variant.index}`}>
+                                    <p className="font-medium text-[color:var(--color-text)]/86">
+                                      Variant {variant.index} - {warnings.length} warning(s)
+                                    </p>
+                                    {warnings.length > 0 ? (
+                                      <div className="mt-1 space-y-1">
+                                        {warnings.map((warning, idx) => (
+                                          <button
+                                            key={`${warning.code}-${warning.blockId}-${idx}`}
+                                            type="button"
+                                            className={`block w-full rounded-md border border-[color:var(--color-border)] bg-[color:var(--color-surface-2)]/55 px-2 py-1 text-left text-[11px] text-[color:var(--color-text)]/82 ${FOCUS_RING_CLASS}`}
+                                            onClick={() =>
+                                              scrollToOutputBlock(variant.index, warning.blockId, warning.blockIndex)
+                                            }
+                                          >
+                                            [{warning.code}] Block {warning.blockIndex + 1}: {warning.message}
+                                          </button>
+                                        ))}
+                                      </div>
+                                    ) : (
+                                      <p className="mt-1 text-emerald-700">No visual warnings.</p>
+                                    )}
+                                  </div>
+                                );
+                              })}
+                            </div>
+                          </div>
+                        </div>
+                      ) : null}
+                    </div>
+                  ) : null}
+
                   <p className={OUTPUT_META_CLASS}>
                     Variants ({variants.length}){currentVariant ? ` - Active ${currentVariant.index}` : ""}
                   </p>
@@ -1213,23 +1982,101 @@ export default function CrmEmailCopyGeneratorView({ clientSlug, clientLabel }: C
                         <p className="mt-1.5 text-[13px] leading-5 text-[color:var(--color-text)] sm:text-sm">{currentVariant.preheader}</p>
                       </div>
 
-                      {currentVariant.blocks.map((block, index) => (
-                        <div key={`${block.id}-${index}`} className={OUTPUT_CARD_CLASS}>
-                          <div className="flex items-center justify-between gap-2">
-                            <p className={OUTPUT_META_CLASS}>
-                              Block {index + 1} - {BLOCK_TYPE_OPTIONS.find((entry) => entry.value === block.blockType)?.label ?? block.blockType}
-                            </p>
-                            <button type="button" className={`btn-ghost h-9 px-2.5 text-xs sm:text-sm ${FOCUS_RING_CLASS}`} onClick={() => void copyText(`${block.title}\n${block.subtitle}\n${block.content}\nCTA: ${block.ctaLabel}`, `Block ${index + 1}`)}>
-                              <Copy className="mr-1 h-3.5 w-3.5" />
-                              Copy
-                            </button>
+                      {currentVariant.blocks.map((block, index) => {
+                        const briefBlockForPreview =
+                          brief.blocks.find((entry) => entry.id === block.id) || brief.blocks[index];
+                        const resolvedTemplateKey =
+                          getTemplateDef(block.templateKey, clientSlug)?.key ||
+                          getTemplateDef(briefBlockForPreview?.templateKey, clientSlug)?.key ||
+                          getDefaultTemplateForType(block.blockType, clientSlug);
+                        const resolvedLayoutSpec =
+                          (block.layoutSpec as Record<string, unknown> | undefined) ||
+                          (briefBlockForPreview?.layoutSpec as Record<string, unknown> | undefined) ||
+                          getTemplateDef(resolvedTemplateKey, clientSlug)?.defaultLayoutSpec;
+                        const previewStateKey = getPreviewStateKey(currentVariant.index, block.id, index);
+                        const previewEnabled = Boolean(previewVisibilityByBlock[previewStateKey]);
+                        const outputBlockAnchorId = getOutputBlockAnchorId(currentVariant.index, block.id, index);
+                        const visualBlockWarnings =
+                          currentVisualQa?.blocks.find(
+                            (entry) => entry.blockId === block.id && entry.blockIndex === index
+                          )?.warnings || [];
+                        const warningStateKey = getWarningStateKey(currentVariant.index, block.id, index);
+                        const warningsExpanded = Boolean(warningVisibilityByBlock[warningStateKey]);
+
+                        return (
+                          <div id={outputBlockAnchorId} key={`${block.id}-${index}`} className={OUTPUT_CARD_CLASS}>
+                            <div className="flex items-center justify-between gap-2">
+                              <p className={OUTPUT_META_CLASS}>
+                                Block {index + 1} - {BLOCK_TYPE_OPTIONS.find((entry) => entry.value === block.blockType)?.label ?? block.blockType}
+                              </p>
+                              <div className="flex items-center gap-1.5">
+                                <span
+                                  className={[
+                                    "rounded-full px-2 py-0.5 text-[11px] font-semibold",
+                                    visualBlockWarnings.length > 0
+                                      ? "bg-amber-100 text-amber-700"
+                                      : "bg-slate-100 text-slate-600",
+                                  ].join(" ")}
+                                >
+                                  {visualBlockWarnings.length} warning{visualBlockWarnings.length === 1 ? "" : "s"}
+                                </span>
+                                {visualBlockWarnings.length > 0 ? (
+                                  <button
+                                    type="button"
+                                    className={`btn-ghost h-9 px-2.5 text-xs sm:text-sm ${FOCUS_RING_CLASS}`}
+                                    onClick={() => toggleBlockWarnings(warningStateKey)}
+                                    aria-expanded={warningsExpanded}
+                                  >
+                                    {warningsExpanded ? "Hide warnings" : "Warnings"}
+                                  </button>
+                                ) : null}
+                                <button
+                                  type="button"
+                                  className={`btn-ghost h-9 px-2.5 text-xs sm:text-sm ${FOCUS_RING_CLASS}`}
+                                  onClick={() => toggleBlockPreview(previewStateKey)}
+                                  aria-pressed={previewEnabled}
+                                >
+                                  {previewEnabled ? "Hide preview" : "Preview"}
+                                </button>
+                                <button type="button" className={`btn-ghost h-9 px-2.5 text-xs sm:text-sm ${FOCUS_RING_CLASS}`} onClick={() => void copyText(`${block.title}\n${block.subtitle}\n${block.content}\nCTA: ${block.ctaLabel}`, `Block ${index + 1}`)}>
+                                  <Copy className="mr-1 h-3.5 w-3.5" />
+                                  Copy
+                                </button>
+                              </div>
+                            </div>
+                            {previewEnabled ? (
+                              <div className="mt-2.5">
+                                <BlockTemplateRenderer
+                                  templateKey={resolvedTemplateKey}
+                                  blockType={block.blockType}
+                                  blockData={{
+                                    title: block.title,
+                                    subtitle: block.subtitle,
+                                    content: block.content,
+                                    ctaLabel: block.ctaLabel,
+                                  }}
+                                  brandTheme={blockPreviewTheme}
+                                  layoutSpec={resolvedLayoutSpec}
+                                  renderSlots={block.renderSlots}
+                                />
+                              </div>
+                            ) : null}
+                            {warningsExpanded && visualBlockWarnings.length > 0 ? (
+                              <div className="mt-2 rounded-lg border border-amber-300 bg-amber-50 px-2.5 py-2 text-[11px] text-amber-800">
+                                {visualBlockWarnings.map((warning, warningIndex) => (
+                                  <p key={`${warning.code}-${warning.field}-${warningIndex}`}>
+                                    [{warning.code}] {warning.message}
+                                  </p>
+                                ))}
+                              </div>
+                            ) : null}
+                            <p className="mt-1.5 text-[13px] font-semibold leading-5 text-[color:var(--color-text)] sm:text-sm">{block.title}</p>
+                            <p className="mt-1 text-[13px] leading-5 text-[color:var(--color-text)]/70 sm:text-sm">{block.subtitle}</p>
+                            <p className="mt-1.5 text-[13px] leading-5 text-[color:var(--color-text)] sm:text-sm">{block.content}</p>
+                            <p className="mt-1.5 text-[11px] uppercase tracking-[0.14em] text-[var(--color-text)]/64 sm:text-xs">CTA: {block.ctaLabel}</p>
                           </div>
-                          <p className="mt-1.5 text-[13px] font-semibold leading-5 text-[color:var(--color-text)] sm:text-sm">{block.title}</p>
-                          <p className="mt-1 text-[13px] leading-5 text-[color:var(--color-text)]/70 sm:text-sm">{block.subtitle}</p>
-                          <p className="mt-1.5 text-[13px] leading-5 text-[color:var(--color-text)] sm:text-sm">{block.content}</p>
-                          <p className="mt-1.5 text-[11px] uppercase tracking-[0.14em] text-[var(--color-text)]/64 sm:text-xs">CTA: {block.ctaLabel}</p>
-                        </div>
-                      ))}
+                        );
+                      })}
 
                       {currentVariant.warnings.length > 0 ? (
                         <div className="rounded-xl border border-amber-300 bg-amber-50 px-3 py-2 text-xs leading-5 text-amber-800">
