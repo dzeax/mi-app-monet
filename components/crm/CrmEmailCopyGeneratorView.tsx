@@ -1021,9 +1021,18 @@ export default function CrmEmailCopyGeneratorView({ clientSlug, clientLabel }: C
   const insertBlockAt = (blockType: BrevoBlockType, insertAtIndex?: number | null) => {
     setBrief((prev) => {
       const nextId = createNextBlockId(prev.blocks);
+      const preferredTemplateKey =
+        clientSlug === "saveurs-et-vie"
+          ? blockType === "image_text_side_by_side"
+            ? "sv.sideBySide.helpCta.v1"
+            : blockType === "two_columns"
+              ? "sv.twoCards.menuPastel.v1"
+              : null
+          : null;
       const templateState = resolveTemplateState({
         clientSlug,
         blockType,
+        templateKey: preferredTemplateKey,
       });
       const nextIndex =
         typeof insertAtIndex === "number"

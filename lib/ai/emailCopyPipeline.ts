@@ -5,6 +5,7 @@ import { parseEmailCopyBrief } from '@/lib/crm/emailCopyBriefParser';
 import {
   getDefaultTemplateForType,
   getTemplateDef,
+  getTemplateNameFromKey,
   isTemplateCompatibleWithType,
 } from '@/lib/crm/emailCopy/templates/templateRegistry';
 import {
@@ -745,6 +746,35 @@ function collectBlockIssue(
   });
 }
 
+type MenuPastelBullet = {
+  lead: string;
+  text: string;
+};
+
+function menuPastelBulletsFromSlots(renderSlots: unknown, side: 'left' | 'right'): MenuPastelBullet[] {
+  const root = renderSlots && typeof renderSlots === 'object' ? (renderSlots as Record<string, unknown>) : null;
+  const sideObject =
+    root?.[side] && typeof root[side] === 'object' && !Array.isArray(root[side])
+      ? (root[side] as Record<string, unknown>)
+      : null;
+  const bullets = Array.isArray(sideObject?.bullets) ? sideObject?.bullets : [];
+  return bullets
+    .map((entry) => {
+      const asObject = entry && typeof entry === 'object' && !Array.isArray(entry)
+        ? (entry as Record<string, unknown>)
+        : null;
+      return {
+        lead: str(asObject?.lead),
+        text: str(asObject?.text),
+      };
+    })
+    .filter((entry) => entry.lead || entry.text);
+}
+
+function hasMarkdownBoldMarkers(value: string): boolean {
+  return /(?:\*\*|__)/.test(value);
+}
+
 export async function reviewEmailCopyVariantsWithAgent(input: {
   clientSlug: string;
   brief: EmailCopyBrief;
@@ -787,6 +817,9 @@ export async function reviewEmailCopyVariantsWithAgent(input: {
 
     const subtitleSet = new Set<string>();
     variant.blocks.forEach((block, idx) => {
+      const templateName = getTemplateNameFromKey(
+        block.templateKey || getDefaultTemplateForType(block.blockType, input.clientSlug)
+      );
       if (charCount(block.title) > EMAIL_COPY_CHAR_LIMITS.title) {
         hardIssues += 1;
         status = maxSeverity(status, 'fail');
@@ -861,7 +894,66 @@ export async function reviewEmailCopyVariantsWithAgent(input: {
           'FAIL'
         );
       }
+
+      if (templateName === 'twoCards.menuPastel') {
+        const leftBullets = menuPastelBulletsFromSlots(block.renderSlots, 'left');
+        const rightBullets = menuPastelBulletsFromSlots(block.renderSlots, 'right');
+        const sides = [
+          { side: 'left' as const, bullets: leftBullets },
+          { side: 'right' as const, bullets: rightBullets },
+        ];
+
+        sides.forEach(({ side, bullets }) => {
+          if (bullets.length > 0 && (bullets.length < 3 || bullets.length > 5)) {
+            structureIssues += 1;
+            status = maxSeverity(status, 'warn');
+            issues.push(`WARN Block ${idx + 1} ${side}.bullets count is ${bullets.length} (expected 3-5).`);
+          }
+
+          bullets.forEach((bullet, bulletIndex) => {
+            const merged = `${bullet.lead} ${bullet.text}`.trim();
+            if (hasMarkdownBoldMarkers(merged)) {
+              structureIssues += 1;
+              status = maxSeverity(status, 'warn');
+              collectBlockIssue(
+                issues,
+                evidence,
+                variant.index,
+                idx,
+                `${side}.bullets.${bulletIndex}`,
+                merged,
+                'contains markdown bold markers; expected plain text.',
+                'WARN'
+              );
+            }
+
+            if (charCount(bullet.lead) > 24 || wordCount(bullet.lead) > 4 || /[.!?]/.test(bullet.lead)) {
+              structureIssues += 1;
+              status = maxSeverity(status, 'warn');
+              collectBlockIssue(
+                issues,
+                evidence,
+                variant.index,
+                idx,
+                `${side}.bullets.${bulletIndex}.lead`,
+                bullet.lead,
+                'lead should be short and not a full sentence.',
+                'WARN'
+              );
+            }
+          });
+        });
+      }
     });
+
+    const heuristicWarnings = variant.warnings.filter((warning) =>
+      /heuristic conversion applied/i.test(warning)
+    );
+    if (heuristicWarnings.length > 0) {
+      structureIssues += 1;
+      status = maxSeverity(status, 'warn');
+      issues.push(`WARN ${heuristicWarnings.length} heuristic slot conversions were applied.`);
+    }
 
     const heroCount = variant.blocks.filter((block) => block.blockType === 'hero').length;
     const threeColumnsCount = variant.blocks.filter((block) => block.blockType === 'three_columns').length;

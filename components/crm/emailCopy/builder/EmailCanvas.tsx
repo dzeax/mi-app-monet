@@ -253,7 +253,7 @@ export function EmailCanvas({
                   </div>
                 </div>
               ) : (
-                <div className="space-y-8 sm:space-y-9">
+                <div className="space-y-6 sm:space-y-8 lg:space-y-8">
                   {blocks.map((block, index) => (
                     <div key={block.id}>
                       {insertionIndex === index ? <InsertionIndicator /> : null}

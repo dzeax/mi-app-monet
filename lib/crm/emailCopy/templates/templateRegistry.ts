@@ -5,8 +5,10 @@ export const DEFAULT_TEMPLATE_CLIENT_SLUG = "saveurs-et-vie" as const;
 export type TemplateName =
   | "hero.simple"
   | "twoCards.text"
+  | "twoCards.menuPastel"
   | "threeCards.text"
-  | "sideBySide.imageText";
+  | "sideBySide.imageText"
+  | "sideBySide.helpCta";
 
 export type TemplateKey = `${string}.${TemplateName}.v1`;
 
@@ -30,8 +32,10 @@ const TEMPLATE_NAME_BY_TYPE: Record<BrevoBlockType, TemplateName> = {
 const LEGACY_TEMPLATE_ALIASES: Record<string, TemplateName> = {
   "sv.hero.simple.v1": "hero.simple",
   "sv.twoCards.text.v1": "twoCards.text",
+  "sv.twoCards.menuPastel.v1": "twoCards.menuPastel",
   "sv.threeCards.text.v1": "threeCards.text",
   "sv.sideBySide.imageText.v1": "sideBySide.imageText",
+  "sv.sideBySide.helpCta.v1": "sideBySide.helpCta",
 };
 
 function normalizeClientSlug(clientSlug: string | null | undefined): string {
@@ -42,8 +46,10 @@ function isTemplateName(value: string): value is TemplateName {
   return (
     value === "hero.simple" ||
     value === "twoCards.text" ||
+    value === "twoCards.menuPastel" ||
     value === "threeCards.text" ||
-    value === "sideBySide.imageText"
+    value === "sideBySide.imageText" ||
+    value === "sideBySide.helpCta"
   );
 }
 
@@ -136,6 +142,50 @@ export const TEMPLATE_REGISTRY: Record<string, TemplateDef> = {
       style: "text-only",
     },
   }),
+  [buildTemplateKey(DEFAULT_TEMPLATE_CLIENT_SLUG, "twoCards.menuPastel")]: createTemplateDef({
+    clientSlug: DEFAULT_TEMPLATE_CLIENT_SLUG,
+    templateName: "twoCards.menuPastel",
+    label: "SV Menu 2 pastel cards",
+    supportedTypes: ["two_columns"],
+    slotsSchema: {
+      left: {
+        type: "object",
+        fields: {
+          title: { type: "string", maxChars: 33 },
+          bullets: {
+            type: "array",
+            count: 6,
+            item: {
+              lead: { type: "string", maxChars: 24 },
+              text: { type: "string", maxChars: 64 },
+            },
+          },
+        },
+      },
+      right: {
+        type: "object",
+        fields: {
+          title: { type: "string", maxChars: 33 },
+          bullets: {
+            type: "array",
+            count: 6,
+            item: {
+              lead: { type: "string", maxChars: 24 },
+              text: { type: "string", maxChars: 64 },
+            },
+          },
+        },
+      },
+    },
+    defaultLayoutSpec: {
+      gapPx: 28,
+      radiusPx: 20,
+      paddingPx: 26,
+      leftBg: "#ffecb2",
+      rightBg: "#ffc8dd",
+      titleColor: "#0082ca",
+    },
+  }),
   [buildTemplateKey(DEFAULT_TEMPLATE_CLIENT_SLUG, "threeCards.text")]: createTemplateDef({
     clientSlug: DEFAULT_TEMPLATE_CLIENT_SLUG,
     templateName: "threeCards.text",
@@ -170,6 +220,35 @@ export const TEMPLATE_REGISTRY: Record<string, TemplateDef> = {
     defaultLayoutSpec: {
       imagePosition: "left",
       imageRatio: "4:3",
+    },
+  }),
+  [buildTemplateKey(DEFAULT_TEMPLATE_CLIENT_SLUG, "sideBySide.helpCta")]: createTemplateDef({
+    clientSlug: DEFAULT_TEMPLATE_CLIENT_SLUG,
+    templateName: "sideBySide.helpCta",
+    label: "SV Help side-by-side CTA",
+    supportedTypes: ["image_text_side_by_side"],
+    slotsSchema: {
+      image: {
+        type: "object",
+        fields: {
+          src: { type: "string", optional: true },
+          alt: { type: "string", maxChars: 90 },
+        },
+      },
+      content: {
+        type: "object",
+        fields: {
+          title: { type: "string", maxChars: 33 },
+          body: { type: "string", maxChars: 130 },
+          ctaLabel: { type: "string", maxChars: 40 },
+        },
+      },
+    },
+    defaultLayoutSpec: {
+      imageSide: "left",
+      imageWidthPct: 40,
+      gapPx: 24,
+      alignY: "center",
     },
   }),
 };

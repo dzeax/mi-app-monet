@@ -2,7 +2,9 @@
 
 import type { ReactElement } from "react";
 import { SvHeroSimpleV1 } from "@/components/crm/emailCopy/templates/components/SvHeroSimpleV1";
+import { SvSideBySideHelpCtaV1 } from "@/components/crm/emailCopy/templates/components/SvSideBySideHelpCtaV1";
 import { SvSideBySideImageTextV1 } from "@/components/crm/emailCopy/templates/components/SvSideBySideImageTextV1";
+import { SvTwoCardsMenuPastelV1 } from "@/components/crm/emailCopy/templates/components/SvTwoCardsMenuPastelV1";
 import { SvThreeCardsTextV1 } from "@/components/crm/emailCopy/templates/components/SvThreeCardsTextV1";
 import { SvTwoCardsTextV1 } from "@/components/crm/emailCopy/templates/components/SvTwoCardsTextV1";
 import type { BlockPreviewData, BrandTheme, TemplateComponentProps } from "@/components/crm/emailCopy/templates/types";
@@ -34,8 +36,10 @@ type BlockTemplateRendererProps = {
 const COMPONENT_BY_TEMPLATE_NAME: Record<TemplateName, (props: TemplateComponentProps) => ReactElement> = {
   "hero.simple": SvHeroSimpleV1,
   "twoCards.text": SvTwoCardsTextV1,
+  "twoCards.menuPastel": SvTwoCardsMenuPastelV1,
   "threeCards.text": SvThreeCardsTextV1,
   "sideBySide.imageText": SvSideBySideImageTextV1,
+  "sideBySide.helpCta": SvSideBySideHelpCtaV1,
 };
 
 export function BlockTemplateRenderer({

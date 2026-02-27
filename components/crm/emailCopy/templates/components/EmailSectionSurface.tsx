@@ -17,7 +17,7 @@ export function EmailSectionSurface({
   return (
     <section
       className={[
-        "px-5 py-5 text-[15px] leading-[1.6] sm:px-6 sm:py-6",
+        "bg-white px-5 py-5 text-[15px] leading-[1.6] sm:px-6 sm:py-6",
         variant === "divider" ? "border-t border-[color:var(--color-border)]/70" : "",
         className || "",
       ].join(" ")}

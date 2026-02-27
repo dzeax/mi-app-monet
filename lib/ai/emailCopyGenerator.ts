@@ -57,6 +57,13 @@ const EMAIL_COPY_ALLOWED_MODELS = new Set(['gpt-5.2', 'gpt-4.1', 'gpt-5-mini', '
 const EMAIL_COPY_OPENAI_TIMEOUT_MS = 18_000;
 const INFORMAL_FRENCH_PATTERN = /(?:\btu\b|\btoi\b|\bton\b|\bta\b|\btes\b|\bt['’])/i;
 const ARTIFACT_PATTERN = /(?:^\+|template|voir\s+bloc|inscription\s+newsletter|https?:\/\/)/i;
+const MENU_PASTEL_BULLET_MIN = 3;
+const MENU_PASTEL_BULLET_MAX = 5;
+const MENU_PASTEL_LEAD_SOFT_LIMIT = 24;
+const MENU_PASTEL_LEAD_HARD_LIMIT = 32;
+const MENU_PASTEL_TEXT_SOFT_LIMIT = 90;
+const MENU_PASTEL_TEXT_HARD_LIMIT = 110;
+const MARKDOWN_BOLD_PATTERN = /(?:\*\*|__)/g;
 
 const openaiClient = new OpenAI({
   apiKey: process.env.OPENAI_API_KEY,
@@ -305,6 +312,155 @@ function splitCardsFromContent(value: string, count: number, maxChars: number): 
   return chunks;
 }
 
+type LeadTextBullet = {
+  lead: string;
+  text: string;
+};
+
+function stripMarkdownBold(value: string): string {
+  return cleanGeneratedText(value.replace(MARKDOWN_BOLD_PATTERN, ''));
+}
+
+function splitLeadTextHeuristic(value: string): { lead: string; text: string } {
+  const safe = stripArtifacts(value);
+  const separatorCandidates = [
+    safe.indexOf(','),
+    safe.indexOf(' - '),
+    safe.indexOf(':'),
+  ].filter((index) => index > 0 && index < safe.length - 1);
+  if (separatorCandidates.length > 0) {
+    const separatorIndex = Math.min(...separatorCandidates);
+    return {
+      lead: cleanGeneratedText(safe.slice(0, separatorIndex)),
+      text: cleanGeneratedText(safe.slice(separatorIndex + 1)),
+    };
+  }
+
+  const words = safe.split(/\s+/).filter(Boolean);
+  if (words.length <= 1) return { lead: safe || 'Point cle', text: safe || 'Detail important' };
+  const leadWordCount = words.length >= 5 ? 3 : 2;
+  return {
+    lead: cleanGeneratedText(words.slice(0, leadWordCount).join(' ')),
+    text: cleanGeneratedText(words.slice(leadWordCount).join(' ')),
+  };
+}
+
+function normalizeMenuPastelBullet(input: {
+  entry: unknown;
+  side: 'left' | 'right';
+  index: number;
+  warnings: string[];
+  warningPrefix: string;
+}): LeadTextBullet | null {
+  const pushWarning = (warning: string) => {
+    input.warnings.push(`${input.warningPrefix}${warning}`);
+  };
+
+  let lead = '';
+  let text = '';
+  let usedHeuristic = false;
+  const entryRecord = toSafeRecord(input.entry);
+
+  if (entryRecord) {
+    lead = stripMarkdownBold(toSafeString(entryRecord.lead));
+    text = stripMarkdownBold(toSafeString(entryRecord.text));
+    if (!lead && text) {
+      const split = splitLeadTextHeuristic(text);
+      lead = split.lead;
+      text = split.text;
+      usedHeuristic = true;
+    }
+  } else {
+    const asString = toSafeString(input.entry);
+    if (!asString) return null;
+    const split = splitLeadTextHeuristic(asString);
+    lead = split.lead;
+    text = split.text;
+    usedHeuristic = true;
+  }
+
+  if (!lead && !text) return null;
+
+  if (!text) {
+    const split = splitLeadTextHeuristic(lead);
+    lead = split.lead;
+    text = split.text;
+    usedHeuristic = true;
+  }
+
+  if (usedHeuristic) {
+    pushWarning(`${input.side}.bullets[${input.index}] heuristic conversion applied`);
+  }
+
+  lead = cleanGeneratedText(lead.replace(/[.,;:!?-]+$/g, ''));
+  text = cleanGeneratedText(text);
+
+  if (!lead) {
+    lead = trimToLimit(text || 'Point cle', MENU_PASTEL_LEAD_SOFT_LIMIT);
+    text = cleanGeneratedText(text || 'Detail important');
+  }
+  if (!text) {
+    text = cleanGeneratedText(lead);
+    lead = trimToLimit(lead, Math.min(MENU_PASTEL_LEAD_SOFT_LIMIT, 12));
+    pushWarning(`${input.side}.bullets[${input.index}] heuristic conversion applied`);
+  }
+
+  if (charCount(lead) > MENU_PASTEL_LEAD_HARD_LIMIT) {
+    const leadChars = [...lead];
+    const leadOverflow = leadChars.slice(MENU_PASTEL_LEAD_HARD_LIMIT).join('').trim();
+    lead = cleanGeneratedText(leadChars.slice(0, MENU_PASTEL_LEAD_HARD_LIMIT).join(''));
+    text = cleanGeneratedText(`${leadOverflow} ${text}`);
+    pushWarning(`${input.side}.bullets[${input.index}].lead trimmed`);
+  } else if (charCount(lead) > MENU_PASTEL_LEAD_SOFT_LIMIT) {
+    pushWarning(`${input.side}.bullets[${input.index}].lead exceeds soft limit`);
+  }
+
+  if (charCount(text) > MENU_PASTEL_TEXT_SOFT_LIMIT) {
+    text = trimToLimit(text, MENU_PASTEL_TEXT_SOFT_LIMIT);
+    pushWarning(`${input.side}.bullets[${input.index}].text trimmed`);
+  } else if (charCount(text) > MENU_PASTEL_TEXT_HARD_LIMIT) {
+    text = trimToLimit(text, MENU_PASTEL_TEXT_HARD_LIMIT);
+    pushWarning(`${input.side}.bullets[${input.index}].text trimmed`);
+  }
+
+  return { lead, text };
+}
+
+function normalizeMenuPastelBulletArray(input: {
+  value: unknown;
+  fallback: string[];
+  side: 'left' | 'right';
+  warnings: string[];
+  warningPrefix: string;
+}): LeadTextBullet[] {
+  const sourceEntries = Array.isArray(input.value)
+    ? input.value
+    : (input.fallback.length ? input.fallback : ['Point cle: detail utile']);
+
+  const normalized = sourceEntries
+    .map((entry, index) =>
+      normalizeMenuPastelBullet({
+        entry,
+        side: input.side,
+        index,
+        warnings: input.warnings,
+        warningPrefix: input.warningPrefix,
+      })
+    )
+    .filter((entry): entry is LeadTextBullet => Boolean(entry));
+
+  if (normalized.length > MENU_PASTEL_BULLET_MAX) {
+    input.warnings.push(`${input.warningPrefix}${input.side}.bullets truncated to ${MENU_PASTEL_BULLET_MAX}`);
+    return normalized.slice(0, MENU_PASTEL_BULLET_MAX);
+  }
+
+  if (normalized.length < MENU_PASTEL_BULLET_MIN) {
+    input.warnings.push(`${input.warningPrefix}${input.side}.bullets fewer than ${MENU_PASTEL_BULLET_MIN}`);
+  }
+
+  return normalized;
+}
+
 function fallbackSubtitleByType(blockType: EmailCopyBriefBlock['blockType']): string {
   if (blockType === 'three_columns') return 'Des options claires, adaptees a vos besoins.';
   if (blockType === 'two_columns') return 'Choisissez la formule qui vous convient.';
@@ -337,10 +493,17 @@ function canonicalizeRenderSlots(input: {
   subtitle: string;
   content: string;
   ctaLabel: string;
+  warnings?: string[];
+  warningPrefix?: string;
 }): Record<string, unknown> {
   const sourceContent = stripArtifacts(input.sourceBlock.sourceContent || '');
   const incoming = toSafeRecord(input.incoming) ?? {};
   const templateName = getTemplateNameFromKey(input.templateKey);
+  const warnings = input.warnings ?? [];
+  const warningPrefix = input.warningPrefix ?? '';
+  const pushWarning = (warning: string) => {
+    warnings.push(`${warningPrefix}${warning}`);
+  };
 
   if (templateName === 'hero.simple') {
     return {
@@ -376,6 +539,47 @@ function canonicalizeRenderSlots(input: {
     };
   }
 
+  if (templateName === 'twoCards.menuPastel') {
+    const leftIncoming = toSafeRecord(incoming.left);
+    const rightIncoming = toSafeRecord(incoming.right);
+    const sourceBullets = splitContentIntoBullets(sourceContent || input.content, 10, MENU_PASTEL_TEXT_HARD_LIMIT);
+    const leftFallback = sourceBullets.slice(0, 4);
+    const rightFallback = sourceBullets.slice(4, 8);
+    const leftTitleInput = toSafeString(leftIncoming?.title) || trimToLimit(input.title || 'Menu 2', 33);
+    const rightTitleInput = toSafeString(rightIncoming?.title) || trimToLimit(input.title || 'Menu 2', 33);
+    const leftTitle = trimToLimit(leftTitleInput, EMAIL_COPY_CHAR_LIMITS.title);
+    const rightTitle = trimToLimit(rightTitleInput, EMAIL_COPY_CHAR_LIMITS.title);
+    if (leftTitle !== cleanGeneratedText(leftTitleInput)) {
+      pushWarning('left.title trimmed');
+    }
+    if (rightTitle !== cleanGeneratedText(rightTitleInput)) {
+      pushWarning('right.title trimmed');
+    }
+
+    return {
+      left: {
+        title: leftTitle,
+        bullets: normalizeMenuPastelBulletArray({
+          value: leftIncoming?.bullets,
+          fallback: leftFallback,
+          side: 'left',
+          warnings,
+          warningPrefix,
+        }),
+      },
+      right: {
+        title: rightTitle,
+        bullets: normalizeMenuPastelBulletArray({
+          value: rightIncoming?.bullets,
+          fallback: rightFallback.length ? rightFallback : leftFallback,
+          side: 'right',
+          warnings,
+          warningPrefix,
+        }),
+      },
+    };
+  }
+
   if (templateName === 'threeCards.text') {
     const incomingCards = Array.isArray(incoming.cards) ? incoming.cards : [];
     const fallbackBodies = splitCardsFromContent(sourceContent || input.content, 3, 65);
@@ -395,6 +599,34 @@ function canonicalizeRenderSlots(input: {
       body: trimToLimit(toSafeString(incoming.body) || input.content, EMAIL_COPY_BLOCK_CONTENT_LIMITS.image_text_side_by_side),
       ctaLabel: trimToLimit(toSafeString(incoming.ctaLabel) || input.ctaLabel, 40),
       imageAlt: trimToLimit(toSafeString(incoming.imageAlt), 90),
+    };
+  }
+
+  if (templateName === 'sideBySide.helpCta') {
+    const incomingImage = toSafeRecord(incoming.image);
+    const incomingContent = toSafeRecord(incoming.content);
+    return {
+      image: {
+        src: toSafeString(incomingImage?.src),
+        alt: trimToLimit(
+          toSafeString(incomingImage?.alt) || toSafeString(incoming.imageAlt),
+          90
+        ),
+      },
+      content: {
+        title: trimToLimit(
+          toSafeString(incomingContent?.title) || toSafeString(incoming.title) || input.title,
+          33
+        ),
+        body: trimToLimit(
+          toSafeString(incomingContent?.body) || toSafeString(incoming.body) || input.content,
+          EMAIL_COPY_BLOCK_CONTENT_LIMITS.image_text_side_by_side
+        ),
+        ctaLabel: trimToLimit(
+          toSafeString(incomingContent?.ctaLabel) || toSafeString(incoming.ctaLabel) || input.ctaLabel,
+          40
+        ),
+      },
     };
   }
 
@@ -439,6 +671,8 @@ function createFallbackBlock(
     subtitle,
     content,
     ctaLabel,
+    warnings,
+    warningPrefix: `Block ${sourceBlock.id} `,
   });
 
   return {
@@ -574,6 +808,8 @@ function normalizeBlock(
     subtitle,
     content,
     ctaLabel,
+    warnings,
+    warningPrefix: `Variant ${variantIndex} block ${sourceBlock.id} `,
   });
 
   checkPronoun(title, `Variant ${variantIndex} block ${sourceBlock.id} title`, warnings);
@@ -658,30 +894,25 @@ function buildPrompt(input: {
   brandProfile: EmailCopyBrandProfile;
   variantCount: number;
 }) {
-  const blockInstructions = input.brief.blocks.map((block) => ({
-    id: block.id,
-    blockType: block.blockType,
-    templateKey: block.templateKey || getDefaultTemplateForType(block.blockType, input.clientSlug),
-    layoutSpec:
-      block.layoutSpec ??
-      getTemplateDef(
-        block.templateKey || getDefaultTemplateForType(block.blockType, input.clientSlug),
-        input.clientSlug
-      )?.defaultLayoutSpec ??
-      {},
-    slotSchema:
-      getTemplateDef(
-        block.templateKey || getDefaultTemplateForType(block.blockType, input.clientSlug),
-        input.clientSlug
-      )?.slotsSchema ?? {},
-    titleLimit: EMAIL_COPY_CHAR_LIMITS.title,
-    subtitleLimit: EMAIL_COPY_CHAR_LIMITS.subtitle,
-    contentLimit: EMAIL_COPY_BLOCK_CONTENT_LIMITS[block.blockType],
-    sourceTitle: block.sourceTitle ?? '',
-    sourceContent: block.sourceContent ?? '',
-    ctaLabel: block.ctaLabel ?? '',
-    ctaUrl: block.ctaUrl ?? '',
-  }));
+  const blockInstructions = input.brief.blocks.map((block) => {
+    const templateKey = block.templateKey || getDefaultTemplateForType(block.blockType, input.clientSlug);
+    const templateDef = getTemplateDef(templateKey, input.clientSlug);
+    return {
+      id: block.id,
+      blockType: block.blockType,
+      templateKey,
+      templateName: getTemplateNameFromKey(templateKey),
+      layoutSpec: block.layoutSpec ?? templateDef?.defaultLayoutSpec ?? {},
+      slotSchema: templateDef?.slotsSchema ?? {},
+      titleLimit: EMAIL_COPY_CHAR_LIMITS.title,
+      subtitleLimit: EMAIL_COPY_CHAR_LIMITS.subtitle,
+      contentLimit: EMAIL_COPY_BLOCK_CONTENT_LIMITS[block.blockType],
+      sourceTitle: block.sourceTitle ?? '',
+      sourceContent: block.sourceContent ?? '',
+      ctaLabel: block.ctaLabel ?? '',
+      ctaUrl: block.ctaUrl ?? '',
+    };
+  });
 
   return [
     `Client slug: ${input.clientSlug}`,
@@ -703,6 +934,13 @@ function buildPrompt(input: {
     'Avoid repeating the exact same subtitle on every block.',
     'Preserve templateKey and layoutSpec from block instructions; do not invent template identifiers.',
     'Each block must include renderSlots aligned to templateKey and keep semantic consistency with title/subtitle/content/ctaLabel.',
+    'For templateKey "sv.twoCards.menuPastel.v1" OR templateName "twoCards.menuPastel":',
+    '- renderSlots must be {"left":{"title":"","bullets":[{"lead":"","text":""}]},"right":{"title":"","bullets":[{"lead":"","text":""}]}}.',
+    '- Generate 3 to 5 bullets per card.',
+    '- Each bullet lead must be 1 to 3 words, concise, with no trailing punctuation.',
+    '- Each bullet text must contain the complementary message only (no markdown markers).',
+    '- DO NOT output bullets as plain strings.',
+    '- DO NOT output markdown bold markers like ** or __.',
     'Return strict JSON only with this shape:',
     '{"variants":[{"subject":"","preheader":"","blocks":[{"blockId":"","type":"","templateKey":"","layoutSpec":{},"title":"","subtitle":"","content":"","ctaLabel":"","renderSlots":{}}]}]}',
     'Each variant must include all requested blocks and keep the same block ids.',

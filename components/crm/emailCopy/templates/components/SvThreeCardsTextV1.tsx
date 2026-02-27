@@ -17,7 +17,7 @@ export function SvThreeCardsTextV1({ brandTheme, data, inlineEditing }: Template
   const cards = Array.from({ length: 3 }, (_, index) => {
     const slot = recordValue(cardsSlot[index]);
     return {
-      title: stringValue(slot?.title) || `Card ${index + 1}`,
+      title: stringValue(slot?.title),
       body: stringValue(slot?.body) || fallbackBodies[index] || fallbackBodies[0] || "",
     };
   });
@@ -49,20 +49,24 @@ export function SvThreeCardsTextV1({ brandTheme, data, inlineEditing }: Template
           onBlur={(event) => inlineEditing.onContentCommit?.(event.currentTarget.value)}
         />
       ) : (
-        <div className="mt-4 grid gap-3 sm:grid-cols-3">
+        <div className="mt-4 grid gap-4 sm:grid-cols-3 sm:gap-5">
           {cards.map((card, index) => (
-            <div key={`${card.title}-${index}`} className="rounded-md border border-[color:var(--color-border)]/70 bg-white p-3">
-              <p className="text-xs font-semibold uppercase tracking-[0.08em] text-[color:var(--color-text)]/70">
-                {card.title}
+            <div key={`three-card-${index}`} className="rounded-sm border border-[color:var(--color-border)]/45 bg-white p-4">
+              {card.title ? (
+                <p className="text-[11px] font-medium tracking-[0.02em] text-[color:var(--color-text)]/58">
+                  {card.title}
+                </p>
+              ) : null}
+              <p className={[card.title ? "mt-2" : "", "text-[15px] leading-[1.6] text-[color:var(--color-text)]"].join(" ")}>
+                {card.body}
               </p>
-              <p className="mt-2 text-[15px] leading-[1.6] text-[color:var(--color-text)]">{card.body}</p>
             </div>
           ))}
         </div>
       )}
 
       <span
-        className="mt-5 inline-flex h-8 items-center rounded-md px-3 text-xs font-semibold"
+        className="mt-6 inline-flex h-8 items-center rounded-md px-3 text-xs font-semibold"
         style={{ backgroundColor: brandTheme.primaryColor, color: "#ffffff" }}
       >
         {ctaLabel}

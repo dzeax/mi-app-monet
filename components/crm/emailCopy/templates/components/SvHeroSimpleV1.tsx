@@ -5,10 +5,10 @@ import { EmailSectionSurface } from "@/components/crm/emailCopy/templates/compon
 import { parseContentForPreview, stringValue } from "@/components/crm/emailCopy/templates/components/contentUtils";
 
 export function SvHeroSimpleV1({ brandTheme, data, inlineEditing }: TemplateComponentProps) {
-  const title = stringValue(data.headline) || stringValue(data.title) || "Untitled hero";
+  const title = stringValue(data.headline) || stringValue(data.title) || "Titre principal";
   const subtitle = stringValue(data.subheadline) || stringValue(data.subtitle);
   const body = stringValue(data.body) || stringValue(data.content);
-  const ctaLabel = stringValue(data.ctaLabel) || "Call to action";
+  const ctaLabel = stringValue(data.ctaLabel) || "Découvrir";
   const content = parseContentForPreview(body);
 
   return (
@@ -18,16 +18,18 @@ export function SvHeroSimpleV1({ brandTheme, data, inlineEditing }: TemplateComp
     >
       {inlineEditing?.enabled ? (
         <input
-          className="input w-full text-lg font-semibold sm:text-xl"
+          className="input w-full text-xl font-semibold leading-[1.3] sm:text-[22px]"
           defaultValue={inlineEditing.titleValue ?? title}
           onClick={(event) => event.stopPropagation()}
           onBlur={(event) => inlineEditing.onTitleCommit?.(event.currentTarget.value)}
         />
       ) : (
-        <h4 className="text-lg font-semibold text-[color:var(--color-text)] sm:text-xl">{title}</h4>
+        <h4 className="text-xl font-semibold leading-[1.3] text-[color:var(--color-text)] sm:text-[22px]">
+          {title}
+        </h4>
       )}
       {subtitle ? (
-        <p className="mt-3 text-[15px] text-[color:var(--color-text)]/72">{subtitle}</p>
+        <p className="mt-3 max-w-[62ch] text-[15px] leading-[1.55] text-[color:var(--color-text)]/72">{subtitle}</p>
       ) : null}
 
       {inlineEditing?.enabled ? (
@@ -39,20 +41,20 @@ export function SvHeroSimpleV1({ brandTheme, data, inlineEditing }: TemplateComp
         />
       ) : (
         content.isList ? (
-          <ul className="mt-4 list-disc space-y-1.5 pl-5 text-[15px] leading-[1.6] text-[color:var(--color-text)]">
+          <ul className="mt-4 max-w-[64ch] list-disc space-y-1.5 pl-5 text-[15px] leading-[1.65] text-[color:var(--color-text)]">
             {content.items.map((item, index) => (
               <li key={`${item}-${index}`}>{item}</li>
             ))}
           </ul>
         ) : (
-          <p className="mt-4 text-[15px] leading-[1.6] text-[color:var(--color-text)]">
-            {content.text || "No content yet."}
+          <p className="mt-4 max-w-[64ch] text-[15px] leading-[1.65] text-[color:var(--color-text)]">
+            {content.text || "Ajoutez le message principal."}
           </p>
         )
       )}
 
       <span
-        className="mt-5 inline-flex h-8 items-center rounded-md px-3 text-xs font-semibold"
+        className="mt-6 inline-flex h-10 items-center justify-center rounded-lg px-5 text-sm font-semibold"
         style={{ backgroundColor: brandTheme.primaryColor, color: "#ffffff" }}
       >
         {ctaLabel}

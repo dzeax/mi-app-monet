@@ -53,15 +53,19 @@ const DEFAULT_MOBILE_CHARS_PER_LINE = 30;
 const TEMPLATE_LINE_LIMITS: Record<TemplateName, number> = {
   'hero.simple': 32,
   'twoCards.text': 30,
+  'twoCards.menuPastel': 30,
   'threeCards.text': 28,
   'sideBySide.imageText': 30,
+  'sideBySide.helpCta': 30,
 };
 
 const TEMPLATE_CTA_LIMITS: Record<TemplateName, number> = {
   'hero.simple': 26,
   'twoCards.text': 24,
+  'twoCards.menuPastel': 24,
   'threeCards.text': 24,
   'sideBySide.imageText': 24,
+  'sideBySide.helpCta': 24,
 };
 
 function clean(value: string): string {
@@ -250,7 +254,7 @@ export function runVisualQaForVariant(input: {
           'Subheadline may wrap to 3+ lines on mobile.'
         );
       }
-    } else if (templateName === 'twoCards.text') {
+    } else if (templateName === 'twoCards.text' || templateName === 'twoCards.menuPastel') {
       const cards = extractTwoCardSlots({ slots, fallbackTitle: title, fallbackContent: content });
       [
         { key: 'left', value: cards.left },
