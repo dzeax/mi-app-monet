@@ -63,6 +63,17 @@ const MENU_PASTEL_LEAD_SOFT_LIMIT = 24;
 const MENU_PASTEL_LEAD_HARD_LIMIT = 32;
 const MENU_PASTEL_TEXT_SOFT_LIMIT = 90;
 const MENU_PASTEL_TEXT_HARD_LIMIT = 110;
+const MENU3_CARD_COUNT = 3;
+const MENU3_TITLE_MAX = 33;
+const MENU3_TEXT_MIN = 60;
+const MENU3_TEXT_MAX = 95;
+const MENU3_CTA_MAX = 28;
+const MENU3_DEFAULT_CTA_LABEL = 'En savoir plus';
+const HERO_IMAGE_TOP_LINE1_MAX = 28;
+const HERO_IMAGE_TOP_LINE2_MAX = 32;
+const HERO_IMAGE_TOP_PARAGRAPH_MIN = 140;
+const HERO_IMAGE_TOP_PARAGRAPH_MAX = 220;
+const HERO_IMAGE_TOP_CTA_MAX = 28;
 const MARKDOWN_BOLD_PATTERN = /(?:\*\*|__)/g;
 
 const openaiClient = new OpenAI({
@@ -312,6 +323,150 @@ function splitCardsFromContent(value: string, count: number, maxChars: number): 
   return chunks;
 }
 
+function splitHeroImageTopHeadline(input: {
+  headline: string;
+  fallbackLine2?: string;
+}): { line1: string; line2: string; usedHeuristic: boolean } {
+  const safe = cleanGeneratedText(input.headline);
+  const fallbackLine2 = cleanGeneratedText(input.fallbackLine2 || '') || 'de portage de repas';
+  if (!safe) {
+    return {
+      line1: 'Bien plus qu’un service',
+      line2: fallbackLine2,
+      usedHeuristic: true,
+    };
+  }
+
+  const newlineParts = safe
+    .split(/\r?\n/)
+    .map((entry) => cleanGeneratedText(entry))
+    .filter(Boolean);
+  if (newlineParts.length >= 2) {
+    return {
+      line1: newlineParts[0],
+      line2: newlineParts.slice(1).join(' '),
+      usedHeuristic: false,
+    };
+  }
+
+  const punctuationMatch = safe.match(/^(.{8,80}?)[,:;!?]\s+(.{4,120})$/);
+  if (punctuationMatch?.[1] && punctuationMatch?.[2]) {
+    return {
+      line1: cleanGeneratedText(punctuationMatch[1]),
+      line2: cleanGeneratedText(punctuationMatch[2]),
+      usedHeuristic: true,
+    };
+  }
+
+  const words = safe.split(/\s+/).filter(Boolean);
+  if (words.length <= 3) {
+    return {
+      line1: safe,
+      line2: fallbackLine2,
+      usedHeuristic: true,
+    };
+  }
+
+  const midpoint = Math.max(2, Math.ceil(words.length / 2));
+  return {
+    line1: cleanGeneratedText(words.slice(0, midpoint).join(' ')),
+    line2: cleanGeneratedText(words.slice(midpoint).join(' ')),
+    usedHeuristic: true,
+  };
+}
+
+function paragraphSeedsFromText(value: string): string[] {
+  const safe = cleanGeneratedText(value);
+  if (!safe) return [];
+
+  const explicitParagraphs = value
+    .split(/\r?\n\s*\r?\n/)
+    .map((entry) => cleanGeneratedText(entry))
+    .filter(Boolean);
+  if (explicitParagraphs.length >= 2) return explicitParagraphs;
+
+  const sentenceParts = splitContentSentences(safe);
+  if (sentenceParts.length >= 4) {
+    const midpoint = Math.ceil(sentenceParts.length / 2);
+    return [
+      cleanGeneratedText(sentenceParts.slice(0, midpoint).join(' ')),
+      cleanGeneratedText(sentenceParts.slice(midpoint).join(' ')),
+    ].filter(Boolean);
+  }
+  if (sentenceParts.length >= 2) {
+    return sentenceParts;
+  }
+  return [safe];
+}
+
+function normalizeHeroImageTopParagraphs(input: {
+  value: unknown;
+  fallbackText: string;
+  warnings: string[];
+  warningPrefix: string;
+}): string[] {
+  const sourceArray = Array.isArray(input.value)
+    ? (input.value as unknown[])
+    : [];
+  const sourceString = typeof input.value === 'string' ? input.value : '';
+  const fallbackSeeds = paragraphSeedsFromText(input.fallbackText);
+
+  const fromArray = sourceArray
+    .map((entry) => cleanGeneratedText(stripArtifacts(toSafeString(entry)).replace(/https?:\/\/\S+/gi, '')))
+    .filter(Boolean);
+  const seeds = fromArray.length
+    ? fromArray
+    : paragraphSeedsFromText(stripArtifacts(sourceString)).length
+      ? paragraphSeedsFromText(stripArtifacts(sourceString))
+      : fallbackSeeds;
+
+  let paragraphs = seeds
+    .map((entry) => cleanGeneratedText(entry.replace(/https?:\/\/\S+/gi, '')))
+    .filter(Boolean);
+
+  if (paragraphs.length === 0) {
+    paragraphs = [
+      'Depuis 2001, Saveurs et Vie vous accompagne avec des repas adaptes a vos besoins, prepares par nos equipes et livres a domicile pour vous offrir une solution simple, humaine et rassurante au quotidien.',
+      'Nos menus allient plaisir gustatif, equilibre nutritionnel et souplesse de commande pour vous permettre de conserver vos habitudes, votre confort et votre autonomie, en toute serenite.',
+    ];
+    input.warnings.push(`${input.warningPrefix}body.paragraphs fallback applied`);
+  }
+
+  if (paragraphs.length === 1) {
+    const split = paragraphSeedsFromText(paragraphs[0]);
+    if (split.length >= 2) {
+      paragraphs = [split[0], split.slice(1).join(' ')];
+      input.warnings.push(`${input.warningPrefix}body.paragraphs split from single paragraph`);
+    } else {
+      const secondFallback =
+        fallbackSeeds[1] ||
+        'Decouvrez une offre claire et un accompagnement de proximite, pense pour faciliter votre quotidien avec un service fiable, chaleureux et adapte a votre rythme.';
+      paragraphs = [paragraphs[0], secondFallback];
+      input.warnings.push(`${input.warningPrefix}body.paragraphs completed to 2`);
+    }
+  }
+
+  if (paragraphs.length > 3) {
+    paragraphs = paragraphs.slice(0, 3);
+    input.warnings.push(`${input.warningPrefix}body.paragraphs truncated to 3`);
+  }
+
+  return paragraphs.map((paragraph, index) => {
+    const normalized = ensureWithinLimit(
+      paragraph,
+      HERO_IMAGE_TOP_PARAGRAPH_MAX,
+      `${input.warningPrefix}body.paragraphs[${index}]`,
+      input.warnings
+    );
+    if (charCount(normalized) < HERO_IMAGE_TOP_PARAGRAPH_MIN) {
+      input.warnings.push(
+        `${input.warningPrefix}body.paragraphs[${index}] below recommended ${HERO_IMAGE_TOP_PARAGRAPH_MIN} chars`
+      );
+    }
+    return normalized;
+  });
+}
+
 type LeadTextBullet = {
   lead: string;
   text: string;
@@ -514,6 +669,96 @@ function canonicalizeRenderSlots(input: {
     };
   }
 
+  if (templateName === 'hero.imageTop') {
+    const incomingImage = toSafeRecord(incoming.image);
+    const incomingHeadline = toSafeRecord(incoming.headline);
+    const incomingBody = toSafeRecord(incoming.body);
+    const incomingCta = toSafeRecord(incoming.cta);
+
+    const headlineSingle = toSafeString(incoming.headline);
+    const headlineLine1Raw = toSafeString(incomingHeadline?.line1);
+    const headlineLine2Raw = toSafeString(incomingHeadline?.line2);
+    const headlineFromFields = cleanGeneratedText(
+      `${headlineLine1Raw} ${headlineLine2Raw}`.trim()
+    );
+    const headlineSeed =
+      headlineSingle ||
+      headlineFromFields ||
+      input.title ||
+      'Bien plus qu’un service';
+    const headlineSplit = splitHeroImageTopHeadline({
+      headline: headlineSeed,
+      fallbackLine2: input.subtitle || 'de portage de repas',
+    });
+    const usedHeadlineFallback =
+      !!headlineSingle ||
+      (!headlineLine1Raw && !headlineLine2Raw);
+    if (usedHeadlineFallback && headlineSplit.usedHeuristic) {
+      pushWarning('headline split into line1/line2 by canonicalizer');
+    }
+
+    const line1 = ensureWithinLimit(
+      headlineLine1Raw || headlineSplit.line1,
+      HERO_IMAGE_TOP_LINE1_MAX,
+      `${warningPrefix}headline.line1`,
+      warnings
+    );
+    const line2 = ensureWithinLimit(
+      headlineLine2Raw || headlineSplit.line2,
+      HERO_IMAGE_TOP_LINE2_MAX,
+      `${warningPrefix}headline.line2`,
+      warnings
+    );
+
+    const greetingInput = toSafeString(incomingBody?.greeting);
+    const greeting =
+      greetingInput &&
+      /^bonjour/i.test(greetingInput) &&
+      /\{\s*PRENOM\s*\}/i.test(greetingInput)
+        ? trimToLimit(greetingInput, 90)
+        : 'Bonjour {PRENOM},';
+    if (greeting !== greetingInput && greetingInput) {
+      pushWarning('body.greeting normalized to "Bonjour {PRENOM},"');
+    }
+
+    const paragraphs = normalizeHeroImageTopParagraphs({
+      value: incomingBody?.paragraphs ?? incoming.body,
+      fallbackText: sourceContent || input.content,
+      warnings,
+      warningPrefix,
+    });
+
+    const ctaLabel = ensureWithinLimit(
+      toSafeString(incomingCta?.label) ||
+        toSafeString(incoming.ctaLabel) ||
+        input.ctaLabel,
+      HERO_IMAGE_TOP_CTA_MAX,
+      `${warningPrefix}cta.label`,
+      warnings
+    );
+
+    return {
+      image: {
+        src: toSafeString(incomingImage?.src),
+        alt: trimToLimit(
+          toSafeString(incomingImage?.alt) || toSafeString(incoming.imageAlt) || 'Visuel Saveurs et Vie',
+          90
+        ),
+      },
+      headline: {
+        line1,
+        line2,
+      },
+      body: {
+        greeting,
+        paragraphs,
+      },
+      cta: {
+        label: ctaLabel || 'Je découvre les menus',
+      },
+    };
+  }
+
   if (templateName === 'twoCards.text') {
     const leftIncoming = toSafeRecord(incoming.left);
     const rightIncoming = toSafeRecord(incoming.right);
@@ -577,6 +822,97 @@ function canonicalizeRenderSlots(input: {
           warningPrefix,
         }),
       },
+    };
+  }
+
+  if (templateName === 'threeCards.menu3') {
+    const incomingCards = Array.isArray(incoming.cards) ? incoming.cards : [];
+    const fallbackTexts = splitCardsFromContent(sourceContent || input.content, MENU3_CARD_COUNT, MENU3_TEXT_MAX);
+    const fallbackTitleBase = trimToLimit(input.title || 'Menu', MENU3_TITLE_MAX);
+    const fallbackCta =
+      trimToLimit(
+        toSafeString(input.sourceBlock.ctaLabel) || input.ctaLabel || MENU3_DEFAULT_CTA_LABEL,
+        MENU3_CTA_MAX
+      ) || MENU3_DEFAULT_CTA_LABEL;
+
+    let cards = incomingCards.map((entry, index) => {
+      const cardIncoming = toSafeRecord(entry);
+      const imageIncoming = toSafeRecord(cardIncoming?.image);
+      const ctaIncoming = toSafeRecord(cardIncoming?.cta);
+      const titleInput = toSafeString(cardIncoming?.title) || `${fallbackTitleBase} ${index + 1}`;
+      const textInput =
+        stripArtifacts(toSafeString(cardIncoming?.text) || toSafeString(cardIncoming?.body)) ||
+        fallbackTexts[index] ||
+        fallbackTexts[fallbackTexts.length - 1] ||
+        input.content;
+
+      const title = ensureWithinLimit(titleInput, MENU3_TITLE_MAX, `${warningPrefix}cards.${index}.title`, warnings);
+      if (charCount(title) < 10 || charCount(title) > 18) {
+        pushWarning(`cards.${index}.title outside preferred 10-18 chars`);
+      }
+
+      const text = ensureWithinLimit(textInput, MENU3_TEXT_MAX, `${warningPrefix}cards.${index}.text`, warnings);
+      if (charCount(text) < MENU3_TEXT_MIN) {
+        pushWarning(`cards.${index}.text below recommended ${MENU3_TEXT_MIN} chars`);
+      }
+
+      const ctaLabel =
+        ensureWithinLimit(
+          toSafeString(ctaIncoming?.label) || toSafeString(cardIncoming?.ctaLabel) || fallbackCta,
+          MENU3_CTA_MAX,
+          `${warningPrefix}cards.${index}.cta.label`,
+          warnings
+        ) || MENU3_DEFAULT_CTA_LABEL;
+
+      return {
+        image: {
+          src: toSafeString(imageIncoming?.src),
+          alt: trimToLimit(toSafeString(imageIncoming?.alt) || 'Visuel', 90),
+        },
+        title,
+        text,
+        cta: {
+          label: ctaLabel,
+        },
+      };
+    });
+
+    if (cards.length === 0) {
+      cards = Array.from({ length: MENU3_CARD_COUNT }, (_, index) => ({
+        image: { src: '', alt: 'Visuel' },
+        title: ensureWithinLimit(`${fallbackTitleBase} ${index + 1}`, MENU3_TITLE_MAX, `${warningPrefix}cards.${index}.title`, warnings),
+        text: ensureWithinLimit(
+          fallbackTexts[index] || fallbackTexts[0] || input.content,
+          MENU3_TEXT_MAX,
+          `${warningPrefix}cards.${index}.text`,
+          warnings
+        ),
+        cta: { label: fallbackCta },
+      }));
+      pushWarning('cards fallback applied');
+    }
+
+    if (cards.length < MENU3_CARD_COUNT) {
+      const lastCard = cards[cards.length - 1];
+      while (cards.length < MENU3_CARD_COUNT && lastCard) {
+        cards.push({
+          image: { ...lastCard.image },
+          title: lastCard.title,
+          text: lastCard.text,
+          cta: { ...lastCard.cta },
+        });
+      }
+      pushWarning(`cards duplicated to ${MENU3_CARD_COUNT}`);
+    }
+
+    if (cards.length > MENU3_CARD_COUNT) {
+      cards = cards.slice(0, MENU3_CARD_COUNT);
+      pushWarning(`cards truncated to ${MENU3_CARD_COUNT}`);
+    }
+
+    return {
+      bgColor: toSafeString(incoming.bgColor) || '#faf9f0',
+      cards,
     };
   }
 
@@ -934,6 +1270,21 @@ function buildPrompt(input: {
     'Avoid repeating the exact same subtitle on every block.',
     'Preserve templateKey and layoutSpec from block instructions; do not invent template identifiers.',
     'Each block must include renderSlots aligned to templateKey and keep semantic consistency with title/subtitle/content/ctaLabel.',
+    'For templateKey "sv.hero.imageTop.v1" OR templateName "hero.imageTop":',
+    '- renderSlots must be {"image":{"src":"","alt":""},"headline":{"line1":"","line2":""},"body":{"greeting":"","paragraphs":[""]},"cta":{"label":""}}.',
+    '- headline.line1 must be short and punchy (20 to 28 chars target).',
+    '- headline.line2 must be short and punchy (20 to 32 chars target).',
+    '- body.greeting must be exactly "Bonjour {PRENOM}," and keep vouvoiement style.',
+    '- body.paragraphs must contain 2 to 3 short paragraphs, each about 140 to 220 chars, with no medical claims.',
+    '- cta.label must be concise, action oriented, between 18 and 28 chars when possible.',
+    '- Do not include URLs, template notes, or artifacts in headline/body/cta.',
+    'For templateKey "sv.threeCards.menu3.v1" OR templateName "threeCards.menu3":',
+    '- renderSlots must be {"cards":[{"title":"","text":"","cta":{"label":""}},{"title":"","text":"","cta":{"label":""}},{"title":"","text":"","cta":{"label":""}}]}.',
+    '- Always return exactly 3 cards in renderSlots.cards.',
+    '- Card title should be concise (target 10 to 18 chars), readable in 1 to 2 lines.',
+    '- Card text should be short and clear (target 60 to 95 chars), about 2 to 3 short lines.',
+    '- cta.label should default to "En savoir plus" unless the brief explicitly requests another CTA.',
+    '- Use French vouvoiement, no markdown, no URLs, no medical claims.',
     'For templateKey "sv.twoCards.menuPastel.v1" OR templateName "twoCards.menuPastel":',
     '- renderSlots must be {"left":{"title":"","bullets":[{"lead":"","text":""}]},"right":{"title":"","bullets":[{"lead":"","text":""}]}}.',
     '- Generate 3 to 5 bullets per card.',

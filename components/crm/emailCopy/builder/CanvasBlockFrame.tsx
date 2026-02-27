@@ -93,7 +93,7 @@ export function CanvasBlockFrame({
 
         <div
           className={[
-            "absolute left-1.5 right-1.5 top-1.5 z-10 overflow-hidden transition-all duration-150",
+            "absolute left-1.5 right-1.5 top-1.5 z-10 overflow-visible transition-all duration-150",
             isSelected
               ? "max-h-10 opacity-100 pointer-events-auto"
               : "max-h-0 opacity-0 pointer-events-none group-hover:max-h-10 group-hover:opacity-100 group-hover:pointer-events-auto",

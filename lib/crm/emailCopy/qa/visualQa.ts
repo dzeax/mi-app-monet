@@ -52,18 +52,22 @@ const DEFAULT_MOBILE_CHARS_PER_LINE = 30;
 
 const TEMPLATE_LINE_LIMITS: Record<TemplateName, number> = {
   'hero.simple': 32,
+  'hero.imageTop': 32,
   'twoCards.text': 30,
   'twoCards.menuPastel': 30,
   'threeCards.text': 28,
+  'threeCards.menu3': 28,
   'sideBySide.imageText': 30,
   'sideBySide.helpCta': 30,
 };
 
 const TEMPLATE_CTA_LIMITS: Record<TemplateName, number> = {
   'hero.simple': 26,
+  'hero.imageTop': 26,
   'twoCards.text': 24,
   'twoCards.menuPastel': 24,
   'threeCards.text': 24,
+  'threeCards.menu3': 24,
   'sideBySide.imageText': 24,
   'sideBySide.helpCta': 24,
 };
@@ -177,7 +181,7 @@ function extractThreeCardSlots(input: {
           const card = asRecord(entry) ?? {};
           return {
             title: str(card.title),
-            body: str(card.body),
+            body: str(card.body) || str(card.text),
           };
         })
         .filter((entry) => entry.title || entry.body)
@@ -220,9 +224,16 @@ export function runVisualQaForVariant(input: {
     const ctaLabel = str(block.ctaLabel);
     const slots = asRecord(block.renderSlots);
 
-    if (templateName === 'hero.simple') {
-      const headline = str(slots?.headline) || title;
-      const subheadline = str(slots?.subheadline) || subtitle;
+    if (templateName === 'hero.simple' || templateName === 'hero.imageTop') {
+      const headlineRecord = asRecord(slots?.headline);
+      const headline =
+        templateName === 'hero.imageTop'
+          ? str(headlineRecord?.line1) || title
+          : str(slots?.headline) || title;
+      const subheadline =
+        templateName === 'hero.imageTop'
+          ? str(headlineRecord?.line2) || subtitle
+          : str(slots?.subheadline) || subtitle;
 
       if (charCount(headline) > TITLE_LIMIT) {
         pushWarning(
@@ -313,7 +324,7 @@ export function runVisualQaForVariant(input: {
           }
         });
       });
-    } else if (templateName === 'threeCards.text') {
+    } else if (templateName === 'threeCards.text' || templateName === 'threeCards.menu3') {
       const cards = extractThreeCardSlots({ slots, fallbackTitle: title, fallbackContent: content });
       cards.forEach((card, cardIndex) => {
         if (charCount(card.title) > TITLE_LIMIT) {

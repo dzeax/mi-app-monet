@@ -4,9 +4,11 @@ export const DEFAULT_TEMPLATE_CLIENT_SLUG = "saveurs-et-vie" as const;
 
 export type TemplateName =
   | "hero.simple"
+  | "hero.imageTop"
   | "twoCards.text"
   | "twoCards.menuPastel"
   | "threeCards.text"
+  | "threeCards.menu3"
   | "sideBySide.imageText"
   | "sideBySide.helpCta";
 
@@ -25,15 +27,17 @@ export type TemplateDef = {
 const TEMPLATE_NAME_BY_TYPE: Record<BrevoBlockType, TemplateName> = {
   hero: "hero.simple",
   two_columns: "twoCards.text",
-  three_columns: "threeCards.text",
+  three_columns: "threeCards.menu3",
   image_text_side_by_side: "sideBySide.imageText",
 };
 
 const LEGACY_TEMPLATE_ALIASES: Record<string, TemplateName> = {
   "sv.hero.simple.v1": "hero.simple",
+  "sv.hero.imageTop.v1": "hero.imageTop",
   "sv.twoCards.text.v1": "twoCards.text",
   "sv.twoCards.menuPastel.v1": "twoCards.menuPastel",
   "sv.threeCards.text.v1": "threeCards.text",
+  "sv.threeCards.menu3.v1": "threeCards.menu3",
   "sv.sideBySide.imageText.v1": "sideBySide.imageText",
   "sv.sideBySide.helpCta.v1": "sideBySide.helpCta",
 };
@@ -45,9 +49,11 @@ function normalizeClientSlug(clientSlug: string | null | undefined): string {
 function isTemplateName(value: string): value is TemplateName {
   return (
     value === "hero.simple" ||
+    value === "hero.imageTop" ||
     value === "twoCards.text" ||
     value === "twoCards.menuPastel" ||
     value === "threeCards.text" ||
+    value === "threeCards.menu3" ||
     value === "sideBySide.imageText" ||
     value === "sideBySide.helpCta"
   );
@@ -112,6 +118,50 @@ export const TEMPLATE_REGISTRY: Record<string, TemplateDef> = {
     defaultLayoutSpec: {
       align: "left",
       emphasis: "balanced",
+    },
+  }),
+  [buildTemplateKey(DEFAULT_TEMPLATE_CLIENT_SLUG, "hero.imageTop")]: createTemplateDef({
+    clientSlug: DEFAULT_TEMPLATE_CLIENT_SLUG,
+    templateName: "hero.imageTop",
+    label: "SV Hero image top",
+    supportedTypes: ["hero"],
+    slotsSchema: {
+      image: {
+        type: "object",
+        fields: {
+          src: { type: "string", optional: true },
+          alt: { type: "string", maxChars: 90 },
+        },
+      },
+      headline: {
+        type: "object",
+        fields: {
+          line1: { type: "string", maxChars: 45 },
+          line2: { type: "string", maxChars: 45 },
+        },
+      },
+      body: {
+        type: "object",
+        fields: {
+          greeting: { type: "string", maxChars: 90 },
+          paragraphs: { type: "array", itemMaxChars: 275 },
+        },
+      },
+      cta: {
+        type: "object",
+        fields: {
+          label: { type: "string", maxChars: 40 },
+        },
+      },
+    },
+    defaultLayoutSpec: {
+      headlineBlue: "#0082ca",
+      headlineYellow: "#fcbf00",
+      bodyMaxWidthPx: 520,
+      imageMaxWidthPct: 92,
+      imageRadiusPx: 0,
+      ctaBg: "#0082ca",
+      ctaRadius: "full",
     },
   }),
   [buildTemplateKey(DEFAULT_TEMPLATE_CLIENT_SLUG, "twoCards.text")]: createTemplateDef({
@@ -204,6 +254,42 @@ export const TEMPLATE_REGISTRY: Record<string, TemplateDef> = {
     defaultLayoutSpec: {
       cards: 3,
       style: "text-only",
+    },
+  }),
+  [buildTemplateKey(DEFAULT_TEMPLATE_CLIENT_SLUG, "threeCards.menu3")]: createTemplateDef({
+    clientSlug: DEFAULT_TEMPLATE_CLIENT_SLUG,
+    templateName: "threeCards.menu3",
+    label: "SV Menu 3 (3 cards w/ image)",
+    supportedTypes: ["three_columns"],
+    slotsSchema: {
+      bgColor: { type: "string", optional: true },
+      cards: {
+        type: "array",
+        count: 3,
+        item: {
+          image: {
+            type: "object",
+            fields: {
+              src: { type: "string", optional: true },
+              alt: { type: "string", maxChars: 90 },
+            },
+          },
+          title: { type: "string", maxChars: 33 },
+          text: { type: "string", maxChars: 130 },
+          cta: {
+            type: "object",
+            fields: {
+              label: { type: "string", maxChars: 40 },
+            },
+          },
+        },
+      },
+    },
+    defaultLayoutSpec: {
+      bgColor: "#faf9f0",
+      titleColor: "#0082ca",
+      buttonColor: "#0082ca",
+      imageRadius: 14,
     },
   }),
   [buildTemplateKey(DEFAULT_TEMPLATE_CLIENT_SLUG, "sideBySide.imageText")]: createTemplateDef({

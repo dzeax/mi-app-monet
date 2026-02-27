@@ -21,6 +21,7 @@ import {
 } from "@/lib/crm/emailCopyConfig";
 
 export const EMAIL_CANVAS_DROP_ZONE_ID = "email-copy-canvas-drop-zone";
+const EMAIL_PREVIEW_FONT_FAMILY = "Tahoma, Arial, sans-serif";
 
 type EmailCanvasProps = {
   clientSlug: string;
@@ -206,6 +207,13 @@ export function EmailCanvas({
   onRequestAddBlock,
 }: EmailCanvasProps) {
   const sortableIds = useMemo(() => blocks.map((block) => block.id), [blocks]);
+  const previewTheme = useMemo<BrandTheme>(
+    () => ({
+      ...brandTheme,
+      fontFamily: EMAIL_PREVIEW_FONT_FAMILY,
+    }),
+    [brandTheme],
+  );
   const { setNodeRef, isOver } = useDroppable({
     id: EMAIL_CANVAS_DROP_ZONE_ID,
     data: { source: "canvas-drop-zone" },
@@ -221,8 +229,11 @@ export function EmailCanvas({
       </div>
 
       <div className="mt-3 min-h-[560px] rounded-xl border border-dashed border-[color:var(--color-border)]/80 bg-[color:var(--color-surface-2)]/35 p-2.5 sm:p-4">
-        <div className="mx-auto w-full max-w-[720px] rounded-lg border border-[color:var(--color-border)] bg-white shadow-[0_2px_10px_rgba(15,23,42,0.08)]">
-          <div className="flex items-center justify-between border-b border-[color:var(--color-border)]/75 px-4 py-3">
+        <div
+          className="mx-auto w-full max-w-[800px] rounded-lg border border-[color:var(--color-border)] bg-white shadow-[0_2px_10px_rgba(15,23,42,0.08)]"
+          style={{ fontFamily: EMAIL_PREVIEW_FONT_FAMILY }}
+        >
+          <div className="flex items-center justify-between border-b border-[color:var(--color-border)]/75 px-3 py-3 sm:px-4">
             <p className="text-[11px] font-semibold uppercase tracking-[0.14em] text-slate-500">
               Email document preview
             </p>
@@ -234,7 +245,7 @@ export function EmailCanvas({
           <div
             ref={setNodeRef}
             className={[
-              "px-4 py-4 transition sm:px-5 sm:py-5",
+              "px-3 py-4 transition sm:px-4 sm:py-5",
               isOver ? "ring-2 ring-[color:var(--color-primary)]/35 ring-inset" : "",
             ].join(" ")}
           >
@@ -263,7 +274,7 @@ export function EmailCanvas({
                         index={index}
                         totalBlocks={blocks.length}
                         selectedBlockId={selectedBlockId}
-                        brandTheme={brandTheme}
+                        brandTheme={previewTheme}
                         inlineEditMode={inlineEditMode}
                         onInlineCommit={onInlineCommit}
                         onSelectBlock={onSelectBlock}
