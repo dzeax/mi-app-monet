@@ -3,7 +3,7 @@
 import type { ReactNode } from "react";
 import { useDraggable } from "@dnd-kit/core";
 import { CSS } from "@dnd-kit/utilities";
-import { ChevronLeft, ChevronRight, GripVertical, LibraryBig, Plus } from "lucide-react";
+import { ChevronLeft, ChevronRight, LibraryBig, Plus } from "lucide-react";
 
 import { BlockTemplateRenderer } from "@/components/crm/emailCopy/templates/BlockTemplateRenderer";
 import type { BlockPreviewData, BrandTheme } from "@/components/crm/emailCopy/templates/types";
@@ -200,13 +200,15 @@ function LibraryDraggableCard(input: {
           </button>
           <button
             type="button"
-            className="btn-ghost h-8 w-8 cursor-grab p-0 active:cursor-grabbing"
+            className="btn-ghost h-8 w-8 cursor-grab bg-[color:var(--color-surface)]/75 p-0 text-slate-600 active:cursor-grabbing hover:text-slate-900"
             onClick={(event) => event.stopPropagation()}
             aria-label={`Drag ${item.name} into canvas`}
             {...attributes}
             {...listeners}
           >
-            <GripVertical className="h-4 w-4" />
+            <span aria-hidden className="text-[11px] font-semibold leading-none tracking-[-0.5px]">
+              |||
+            </span>
           </button>
         </div>
       </div>
