@@ -71,11 +71,22 @@ function isHeaderTemplateKey(templateKey: string | null | undefined, clientSlug:
   return getTemplateDef(templateKey, clientSlug)?.templateName === "header.image";
 }
 
+function isSectionImageTemplateKey(templateKey: string | null | undefined, clientSlug: string): boolean {
+  return getTemplateDef(templateKey, clientSlug)?.templateName === "section.image";
+}
+
+function isFooterTemplateKey(templateKey: string | null | undefined, clientSlug: string): boolean {
+  return getTemplateDef(templateKey, clientSlug)?.templateName === "footer.beige";
+}
+
 function hasSourceInput(
   block: EmailCopyBrief["blocks"][number],
   clientSlug: string
 ): boolean {
-  if (isHeaderTemplateKey(block.templateKey, clientSlug)) {
+  if (
+    isHeaderTemplateKey(block.templateKey, clientSlug) ||
+    isSectionImageTemplateKey(block.templateKey, clientSlug)
+  ) {
     const templateDef = getTemplateDef(block.templateKey, clientSlug);
     const layoutSpec =
       block.layoutSpec && typeof block.layoutSpec === "object"
@@ -98,6 +109,25 @@ function hasSourceInput(
       stringFromUnknown(defaultImage.src) ||
       stringFromUnknown(block.sourceContent);
     return clean(src).length > 0;
+  }
+  if (isFooterTemplateKey(block.templateKey, clientSlug)) {
+    const layoutSpec =
+      block.layoutSpec && typeof block.layoutSpec === "object"
+        ? (block.layoutSpec as Record<string, unknown>)
+        : {};
+    const companyLines = Array.isArray(layoutSpec.companyLines)
+      ? layoutSpec.companyLines.filter((entry) => typeof entry === "string" && clean(entry).length > 0)
+      : [];
+    if (companyLines.length > 0) return true;
+    const templateDef = getTemplateDef(block.templateKey, clientSlug);
+    const defaultLayout =
+      templateDef?.defaultLayoutSpec && typeof templateDef.defaultLayoutSpec === "object"
+        ? (templateDef.defaultLayoutSpec as Record<string, unknown>)
+        : {};
+    const defaultLines = Array.isArray(defaultLayout.companyLines)
+      ? defaultLayout.companyLines.filter((entry) => typeof entry === "string" && clean(entry).length > 0)
+      : [];
+    return defaultLines.length > 0;
   }
   return clean(block.sourceTitle || "").length > 0 || clean(block.sourceContent || "").length > 0;
 }
@@ -172,7 +202,43 @@ function CanvasBlockNode({
   const templateKey =
     getTemplateDef(block.templateKey, clientSlug)?.key ||
     getDefaultTemplateForType(block.blockType, clientSlug);
+  const templateDef = getTemplateDef(templateKey, clientSlug);
+  const surfaceMode = templateDef?.surfaceMode ?? "default";
   const isInlineEditable = Boolean(inlineEditMode && isSelected && onInlineCommit);
+  const renderTemplate = (
+    <BlockTemplateRenderer
+      templateKey={templateKey}
+      blockType={block.blockType}
+      blockData={{
+        title: block.sourceTitle,
+        content: block.sourceContent,
+        ctaLabel: block.ctaLabel,
+      }}
+      brandTheme={brandTheme}
+      layoutSpec={block.layoutSpec}
+      inlineEditing={
+        isInlineEditable
+          ? {
+              enabled: true,
+              titleValue: block.sourceTitle || "",
+              contentValue: block.sourceContent || "",
+              onTitleCommit: (value) =>
+                onInlineCommit?.({
+                  blockId: block.id,
+                  field: "sourceTitle",
+                  value,
+                }),
+              onContentCommit: (value) =>
+                onInlineCommit?.({
+                  blockId: block.id,
+                  field: "sourceContent",
+                  value,
+                }),
+            }
+          : undefined
+      }
+    />
+  );
 
   return (
     <div
@@ -206,40 +272,13 @@ function CanvasBlockNode({
         onDelete={() => onDelete(blockIndex)}
         showDivider={showDivider}
       >
-        <EmailSectionSurface style={{ fontFamily: brandTheme.fontFamily }}>
-          <BlockTemplateRenderer
-            templateKey={templateKey}
-            blockType={block.blockType}
-            blockData={{
-              title: block.sourceTitle,
-              content: block.sourceContent,
-              ctaLabel: block.ctaLabel,
-            }}
-            brandTheme={brandTheme}
-            layoutSpec={block.layoutSpec}
-            inlineEditing={
-              isInlineEditable
-                ? {
-                    enabled: true,
-                    titleValue: block.sourceTitle || "",
-                    contentValue: block.sourceContent || "",
-                    onTitleCommit: (value) =>
-                      onInlineCommit?.({
-                        blockId: block.id,
-                        field: "sourceTitle",
-                        value,
-                      }),
-                    onContentCommit: (value) =>
-                      onInlineCommit?.({
-                        blockId: block.id,
-                        field: "sourceContent",
-                        value,
-                      }),
-                  }
-                : undefined
-            }
-          />
-        </EmailSectionSurface>
+        {surfaceMode === "transparent" ? (
+          renderTemplate
+        ) : (
+          <EmailSectionSurface style={{ fontFamily: brandTheme.fontFamily }}>
+            {renderTemplate}
+          </EmailSectionSurface>
+        )}
       </CanvasBlockFrame>
     </div>
   );
@@ -352,29 +391,56 @@ export function EmailCanvas({
             ].join(" ")}
           >
             {fixedHeaderBlock && headerTemplateKey ? (
-              <div className="mb-6">
-                <p className="mb-2 text-[10px] font-semibold uppercase tracking-[0.14em] text-[var(--color-muted)]">
+              <div className="mb-4">
+                <p className="mb-1.5 text-[10px] font-semibold uppercase tracking-[0.14em] text-[var(--color-muted)]">
                   Fixed header
                 </p>
-                <CanvasBlockFrame
-                  blockId={fixedHeaderBlock.block.id}
-                  blockLabel="Header image block"
-                  displayOrder={1}
-                  ready={headerReady}
-                  overSoft={false}
-                  hardRisk={false}
-                  metaText={`${fixedHeaderBlock.block.id} · fixed header image · title ${headerTitleChars}/${EMAIL_COPY_CHAR_LIMITS.title} · content ${headerContentChars}/${headerSoftLimit} soft`}
-                  isSelected={selectedBlockId === fixedHeaderBlock.block.id}
-                  isDragging={false}
-                  draggable={false}
-                  canMoveUp={false}
-                  canMoveDown={false}
-                  canDuplicate={false}
-                  canDelete={blocks.length > 1}
-                  onSelectBlock={onSelectBlock}
-                  onDelete={() => onDelete(fixedHeaderBlock.index)}
+                <section
+                  className={[
+                    "overflow-hidden rounded-lg border transition-all duration-150",
+                    selectedBlockId === fixedHeaderBlock.block.id
+                      ? "border-[color:var(--color-primary)] ring-1 ring-[color:var(--color-primary)]/40"
+                      : "border-[color:var(--color-border)]/75 hover:border-[color:var(--color-primary)]/45",
+                  ].join(" ")}
+                  role="button"
+                  tabIndex={0}
+                  title={`${fixedHeaderBlock.block.id} · fixed header image · title ${headerTitleChars}/${EMAIL_COPY_CHAR_LIMITS.title} · content ${headerContentChars}/${headerSoftLimit} soft`}
+                  onClick={() => onSelectBlock(fixedHeaderBlock.block.id)}
+                  onKeyDown={(event) => {
+                    if (event.key === "Enter" || event.key === " ") {
+                      event.preventDefault();
+                      onSelectBlock(fixedHeaderBlock.block.id);
+                    }
+                  }}
                 >
-                  <EmailSectionSurface style={{ fontFamily: previewTheme.fontFamily }}>
+                  <div className="flex items-center justify-between border-b border-[color:var(--color-border)]/70 px-3 py-1.5">
+                    <p className="truncate text-[11px] font-semibold text-[color:var(--color-text)]">
+                      Block 1 · Header image block
+                    </p>
+                    <div className="flex items-center gap-2">
+                      <span
+                        className={[
+                          "rounded-full px-1.5 py-0.5 text-[9px] font-semibold",
+                          headerReady ? "bg-emerald-100 text-emerald-700" : "bg-slate-100 text-slate-600",
+                        ].join(" ")}
+                      >
+                        {headerReady ? "Ready" : "Empty"}
+                      </span>
+                      <button
+                        type="button"
+                        className="btn-ghost h-6 px-2 text-[10px]"
+                        disabled={blocks.length <= 1}
+                        onClick={(event) => {
+                          event.preventDefault();
+                          event.stopPropagation();
+                          onDelete(fixedHeaderBlock.index);
+                        }}
+                      >
+                        Remove
+                      </button>
+                    </div>
+                  </div>
+                  <EmailSectionSurface className="py-1 sm:py-1.5" style={{ fontFamily: previewTheme.fontFamily }}>
                     <BlockTemplateRenderer
                       templateKey={headerTemplateKey}
                       blockType={fixedHeaderBlock.block.blockType}
@@ -387,7 +453,7 @@ export function EmailCanvas({
                       layoutSpec={fixedHeaderBlock.block.layoutSpec}
                     />
                   </EmailSectionSurface>
-                </CanvasBlockFrame>
+                </section>
               </div>
             ) : null}
 

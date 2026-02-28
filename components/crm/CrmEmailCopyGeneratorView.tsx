@@ -148,6 +148,7 @@ type BuilderDragState =
       source: "library";
       blockType: BrevoBlockType;
       templateKey?: string | null;
+      layoutSpec?: Record<string, unknown>;
       label: string;
       itemId: string;
     };
@@ -326,6 +327,27 @@ function isHeaderTemplateKey(templateKey: string | null | undefined, clientSlug:
   return getTemplateDef(templateKey, clientSlug)?.templateName === "header.image";
 }
 
+function isSectionImageTemplateKey(templateKey: string | null | undefined, clientSlug: string): boolean {
+  return getTemplateDef(templateKey, clientSlug)?.templateName === "section.image";
+}
+
+function isFooterTemplateKey(templateKey: string | null | undefined, clientSlug: string): boolean {
+  return getTemplateDef(templateKey, clientSlug)?.templateName === "footer.beige";
+}
+
+function isDecorativeHeroTemplate(templateKey: string | null | undefined, clientSlug: string): boolean {
+  const templateName = getTemplateDef(templateKey, clientSlug)?.templateName;
+  return (
+    templateName === "header.image" ||
+    templateName === "section.image" ||
+    templateName === "mosaic.images5.centerHero" ||
+    templateName === "cta.pill354" ||
+    templateName === "footer.beige" ||
+    templateName === "reassurance.navLinks" ||
+    templateName === "title.titre"
+  );
+}
+
 function getPreferredTemplateKeyForInsert(input: {
   clientSlug: string;
   blockType: BrevoBlockType;
@@ -365,14 +387,42 @@ function getHeaderImageSourceFromLayout(
   return typeof defaultImage.src === "string" ? defaultImage.src.trim() : "";
 }
 
+function getFooterLineCountFromLayout(
+  templateKey: string | null | undefined,
+  layoutSpec: Record<string, unknown> | null | undefined,
+  clientSlug: string
+): number {
+  const layout =
+    layoutSpec && typeof layoutSpec === "object" ? (layoutSpec as Record<string, unknown>) : {};
+  const lines = Array.isArray(layout.companyLines)
+    ? layout.companyLines.filter((line) => typeof line === "string" && clean(line).length > 0)
+    : [];
+  if (lines.length > 0) return lines.length;
+  const templateDef = getTemplateDef(templateKey, clientSlug);
+  const defaultLayout =
+    templateDef?.defaultLayoutSpec && typeof templateDef.defaultLayoutSpec === "object"
+      ? (templateDef.defaultLayoutSpec as Record<string, unknown>)
+      : {};
+  const defaultLines = Array.isArray(defaultLayout.companyLines)
+    ? defaultLayout.companyLines.filter((line) => typeof line === "string" && clean(line).length > 0)
+    : [];
+  return defaultLines.length;
+}
+
 function isBlockReadyForMapping(
   block: EmailCopyBrief["blocks"][number],
   clientSlug: string
 ): boolean {
   if (clean(block.id).length === 0) return false;
-  if (isHeaderTemplateKey(block.templateKey, clientSlug)) {
+  if (
+    isHeaderTemplateKey(block.templateKey, clientSlug) ||
+    isSectionImageTemplateKey(block.templateKey, clientSlug)
+  ) {
     const headerImageSrc = getHeaderImageSourceFromLayout(block.templateKey, block.layoutSpec, clientSlug);
     return clean(headerImageSrc).length > 0;
+  }
+  if (isFooterTemplateKey(block.templateKey, clientSlug)) {
+    return getFooterLineCountFromLayout(block.templateKey, block.layoutSpec, clientSlug) > 0;
   }
   return clean(block.sourceContent || block.sourceTitle || "").length > 0;
 }
@@ -492,14 +542,14 @@ function canonicalizeOptimizedBriefForBuilder(input: {
 
   const heroIndexes = blocks
     .map((block, index) =>
-      block.blockType === "hero" && !isHeaderTemplateKey(block.templateKey, input.clientSlug)
+      block.blockType === "hero" && !isDecorativeHeroTemplate(block.templateKey, input.clientSlug)
         ? index
         : -1
     )
     .filter((index) => index >= 0);
   if (heroIndexes.length === 0 && blocks.length > 0) {
     const firstContentIndex = blocks.findIndex(
-      (block) => !isHeaderTemplateKey(block.templateKey, input.clientSlug)
+      (block) => !isDecorativeHeroTemplate(block.templateKey, input.clientSlug)
     );
     if (firstContentIndex < 0) {
       return { ...normalized, blocks: ensureUniqueBriefBlockIds(blocks) };
@@ -1139,7 +1189,8 @@ export default function CrmEmailCopyGeneratorView({ clientSlug, clientLabel }: C
   const insertBlockAt = (
     blockType: BrevoBlockType,
     insertAtIndex?: number | null,
-    explicitTemplateKey?: string | null
+    explicitTemplateKey?: string | null,
+    explicitLayoutSpec?: Record<string, unknown> | null
   ) => {
     setBrief((prev) => {
       const nextId = createNextBlockId(prev.blocks);
@@ -1152,6 +1203,7 @@ export default function CrmEmailCopyGeneratorView({ clientSlug, clientLabel }: C
         clientSlug,
         blockType,
         templateKey: preferredTemplateKey,
+        layoutSpec: explicitLayoutSpec,
       });
       const isHeaderTemplate = isHeaderTemplateKey(templateState.templateKey, clientSlug);
       const existingHeader = prev.blocks.find((block) =>
@@ -1193,7 +1245,7 @@ export default function CrmEmailCopyGeneratorView({ clientSlug, clientLabel }: C
   };
 
   const addBlock = (input: AddBlockPayload = { blockType: "image_text_side_by_side" }) => {
-    insertBlockAt(input.blockType, null, input.templateKey);
+    insertBlockAt(input.blockType, null, input.templateKey, input.layoutSpec);
   };
 
   const removeBlock = (blockIndex: number) => {
@@ -1300,6 +1352,7 @@ export default function CrmEmailCopyGeneratorView({ clientSlug, clientLabel }: C
         blockId?: string;
         blockType?: BrevoBlockType;
         templateKey?: string | null;
+        layoutSpec?: Record<string, unknown>;
         name?: string;
         itemId?: string;
       };
@@ -1319,6 +1372,7 @@ export default function CrmEmailCopyGeneratorView({ clientSlug, clientLabel }: C
           source: "library",
           blockType: currentData.blockType,
           templateKey: currentData.templateKey,
+          layoutSpec: currentData.layoutSpec,
           itemId: currentData.itemId || String(event.active.id),
           label: currentData.name || "New block",
         });
@@ -1356,7 +1410,12 @@ export default function CrmEmailCopyGeneratorView({ clientSlug, clientLabel }: C
           insertIndexFromEvent ??
           (droppedOnCanvas ? brief.blocks.length : null);
         if (droppedOnCanvas && insertionIndex !== null) {
-          insertBlockAt(finalizedDrag.blockType, insertionIndex, finalizedDrag.templateKey);
+          insertBlockAt(
+            finalizedDrag.blockType,
+            insertionIndex,
+            finalizedDrag.templateKey,
+            finalizedDrag.layoutSpec
+          );
           setMobileLibraryOpen(false);
         }
         setDragInsertIndex(null);

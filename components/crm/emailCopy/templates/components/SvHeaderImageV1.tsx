@@ -46,12 +46,12 @@ export function SvHeaderImageV1({ brandTheme, data, layoutSpec }: TemplateCompon
     <img
       src={imageSrc}
       alt={imageAlt}
-      className="h-auto w-full max-w-full"
+      className="block h-auto w-full max-w-full"
       style={{ maxWidth: `${imageMaxWidthPx}px` }}
     />
   ) : (
     <div
-      className="flex h-28 w-full max-w-[580px] items-center justify-center bg-slate-100 text-sm text-slate-500"
+      className="flex w-full max-w-[580px] items-center justify-center bg-slate-100 px-4 py-6 text-sm text-slate-500"
       aria-label="Header image placeholder"
     >
       Header image
@@ -65,7 +65,7 @@ export function SvHeaderImageV1({ brandTheme, data, layoutSpec }: TemplateCompon
 
   return (
     <EmailSectionSurface
-      className="py-4 sm:py-5"
+      className="py-1 sm:py-1.5"
       style={{ fontFamily: brandTheme.fontFamily, borderRadius: brandTheme.radius }}
     >
       <div className={["flex w-full", alignClass(alignValue)].join(" ")}>

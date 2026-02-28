@@ -88,15 +88,17 @@ export function BlockInspectorPanel({
       ? (selectedBlock.layoutSpec as Record<string, unknown>)
       : (templateDef?.defaultLayoutSpec as Record<string, unknown>) || {};
   const isHeaderTemplate = templateDef?.templateName === "header.image";
-  const headerImageLayout =
-    isHeaderTemplate && layoutSpec.image && typeof layoutSpec.image === "object"
+  const isSectionImageTemplate = templateDef?.templateName === "section.image";
+  const supportsImageLayout = isHeaderTemplate || isSectionImageTemplate;
+  const imageLayout =
+    supportsImageLayout && layoutSpec.image && typeof layoutSpec.image === "object"
       ? (layoutSpec.image as Record<string, unknown>)
       : {};
-  const headerImageSrc = typeof headerImageLayout.src === "string" ? headerImageLayout.src : "";
-  const headerImageAlt = typeof headerImageLayout.alt === "string" ? headerImageLayout.alt : "";
-  const headerAlign = typeof layoutSpec.align === "string" ? layoutSpec.align : "center";
+  const imageSrc = typeof imageLayout.src === "string" ? imageLayout.src : "";
+  const imageAlt = typeof imageLayout.alt === "string" ? imageLayout.alt : "";
+  const imageAlign = typeof layoutSpec.align === "string" ? layoutSpec.align : "center";
   const layoutKeys = Object.keys(layoutSpec || {}).filter((layoutKey) => {
-    if (!isHeaderTemplate) return true;
+    if (!supportsImageLayout) return true;
     return layoutKey !== "image" && layoutKey !== "align";
   });
 
@@ -111,7 +113,9 @@ export function BlockInspectorPanel({
   const contentSoftExceeded = contentChars > contentSoft;
   const contentHardRisk = contentChars > contentHard * 2;
 
-  const blockReady = hasSourceInput(selectedBlock) && !contentSoftExceeded;
+  const blockReady =
+    (supportsImageLayout ? clean(imageSrc).length > 0 : hasSourceInput(selectedBlock)) &&
+    !contentSoftExceeded;
   const blockHardRisk = titleHardRisk || contentHardRisk;
 
   const sectionLabelClass = "text-[11px] font-semibold uppercase tracking-[0.14em] text-[var(--color-muted)]";
@@ -235,20 +239,20 @@ export function BlockInspectorPanel({
         <section className="rounded-xl border border-[color:var(--color-border)] bg-[color:var(--color-surface-2)]/35 p-3">
           <p className={sectionLabelClass}>Layout</p>
           <div className="mt-2.5">
-            {isHeaderTemplate ? (
+            {supportsImageLayout ? (
               <div className="mb-2.5 grid gap-2 sm:grid-cols-2">
                 <label className="space-y-1 sm:col-span-2">
                   <span className="text-[11px] uppercase tracking-[0.08em] text-[var(--color-muted)]">
-                    Header image URL
+                    Image URL
                   </span>
                   <input
                     className="input w-full"
-                    value={headerImageSrc}
+                    value={imageSrc}
                     onChange={(event) =>
                       onUpdateBlockField(selectedBlockIndex, "layoutSpec", {
                         ...layoutSpec,
                         image: {
-                          ...headerImageLayout,
+                          ...imageLayout,
                           src: event.target.value,
                         },
                       })
@@ -261,12 +265,12 @@ export function BlockInspectorPanel({
                   </span>
                   <input
                     className="input w-full"
-                    value={headerImageAlt}
+                    value={imageAlt}
                     onChange={(event) =>
                       onUpdateBlockField(selectedBlockIndex, "layoutSpec", {
                         ...layoutSpec,
                         image: {
-                          ...headerImageLayout,
+                          ...imageLayout,
                           alt: event.target.value,
                         },
                       })
@@ -279,7 +283,7 @@ export function BlockInspectorPanel({
                   </span>
                   <select
                     className="input w-full"
-                    value={headerAlign}
+                    value={imageAlign}
                     onChange={(event) =>
                       onUpdateBlockField(selectedBlockIndex, "layoutSpec", {
                         ...layoutSpec,

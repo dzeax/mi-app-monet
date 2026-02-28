@@ -25,23 +25,19 @@ type BlockLibraryPanelProps = {
 export type AddBlockPayload = {
   blockType: BrevoBlockType;
   templateKey?: string | null;
+  layoutSpec?: Record<string, unknown>;
 };
 
 type LibraryItem = {
   id: string;
   blockType: BrevoBlockType;
   templateKey: string;
+  layoutSpec?: Record<string, unknown>;
   name: string;
   shortLabel: string;
   description: string;
   previewData: BlockPreviewData;
   singleInstance?: boolean;
-};
-
-type FutureItem = {
-  id: string;
-  name: string;
-  description: string;
 };
 
 const LIBRARY_PREVIEW_THEME: BrandTheme = {
@@ -51,19 +47,6 @@ const LIBRARY_PREVIEW_THEME: BrandTheme = {
   radius: "0.75rem",
   fontFamily: "inherit",
 };
-
-const FUTURE_ITEMS: FutureItem[] = [
-  {
-    id: "image-grid",
-    name: "Image grid",
-    description: "Upcoming block for visual-heavy campaigns.",
-  },
-  {
-    id: "faq",
-    name: "FAQ fold",
-    description: "Upcoming block for answer-driven sections.",
-  },
-];
 
 function resolveTemplateKeyForItem(input: {
   clientSlug: string;
@@ -79,7 +62,12 @@ function resolveTemplateKeyForItem(input: {
 }
 
 function createCoreItems(clientSlug: string): LibraryItem[] {
-  const items: Array<Omit<LibraryItem, "templateKey"> & { preferredTemplateKey?: string | null }> = [
+  const items: Array<
+    Omit<LibraryItem, "templateKey"> & {
+      preferredTemplateKey?: string | null;
+      layoutSpecOverride?: Record<string, unknown>;
+    }
+  > = [
     {
       id: "header-image",
       blockType: "hero",
@@ -108,6 +96,201 @@ function createCoreItems(clientSlug: string): LibraryItem[] {
       },
     },
     {
+      id: "section-image",
+      blockType: "hero",
+      preferredTemplateKey: "sv.section.image.v1",
+      name: "Section image",
+      shortLabel: "Img",
+      description: "Single image content section.",
+      previewData: {
+        image: {
+          src: "https://img.mailinblue.com/2607945/images/content_library/original/69935409edfea40618a90d5b.png",
+          alt: "Formule reconductible",
+        },
+      },
+    },
+    {
+      id: "image-logo-centre",
+      blockType: "hero",
+      preferredTemplateKey: "sv.section.image.v1",
+      name: "Image logo centre",
+      shortLabel: "Logo",
+      description: "Single centered image logo section.",
+      previewData: {
+        image: {
+          src: "https://img.mailinblue.com/2607945/images/content_library/original/6993539aedfea40618a90d38.png",
+          alt: "Image logo centre",
+        },
+      },
+      layoutSpecOverride: {
+        image: {
+          src: "https://img.mailinblue.com/2607945/images/content_library/original/6993539aedfea40618a90d38.png",
+          alt: "Image logo centre",
+        },
+        align: "center",
+        maxWidth: 800,
+      },
+    },
+    {
+      id: "mosaic-images",
+      blockType: "hero",
+      preferredTemplateKey: "sv.mosaic.images5.centerHero.v1",
+      name: "Mosaique images",
+      shortLabel: "M5",
+      description: "Five-image mosaic with a large center visual.",
+      previewData: {
+        images: {
+          img1: {
+            src: "https://img.mailinblue.com/2607945/images/content_library/original/695ce6207cc7c28f805fa1c9.jpg",
+            alt: "Mosaïque image 1",
+          },
+          img2: {
+            src: "https://img.mailinblue.com/2607945/images/content_library/original/695ce62187ec1cf2e0721a41.jpg",
+            alt: "Mosaïque image 2",
+          },
+          img3: {
+            src: "https://img.mailinblue.com/2607945/images/content_library/original/695ce6217cc7c28f805fa1ca.jpg",
+            alt: "Mosaïque image 3",
+          },
+          img4: {
+            src: "https://img.mailinblue.com/2607945/images/content_library/original/695ce6742b2cc887da6c4210.jpg",
+            alt: "Mosaïque image 4",
+          },
+          img5: {
+            src: "https://img.mailinblue.com/2607945/images/content_library/original/695ce62167fe85e2c79ac611.jpg",
+            alt: "Mosaïque image 5",
+          },
+        },
+        radiusPx: 8,
+      },
+      layoutSpecOverride: {
+        radiusPx: 8,
+      },
+    },
+    {
+      id: "content-highlight",
+      blockType: "hero",
+      preferredTemplateKey: "sv.content.centerHighlight.v1",
+      name: "Contenu",
+      shortLabel: "Txt",
+      description: "Centered text with highlighted key phrase.",
+      previewData: {
+        paragraphs: [
+          {
+            parts: [
+              { text: "Le portage de repas est une solution particulièrement adaptée afin de " },
+              { text: "favoriser le maintien à domicile.", tone: "highlight" },
+            ],
+          },
+          {
+            parts: [{ text: "Vous pouvez commander nos formules directement sur notre site internet." }],
+          },
+        ],
+        align: "center",
+      },
+      layoutSpecOverride: {
+        align: "center",
+      },
+    },
+    {
+      id: "promo-blue-code-cta",
+      blockType: "hero",
+      preferredTemplateKey: "sv.promo.blueCodeCta.v1",
+      name: "Promo bleu CTA",
+      shortLabel: "Pr",
+      description: "Blue promo block with code and white CTA.",
+      previewData: {
+        discountLine: "-25 %*",
+        codeLineLabel: "CODE :",
+        codeValue: "BIENVENUE25",
+        finePrint: "*offre applicable sur la première commande en ligne",
+        cta: { label: "Je profite du code", url: "" },
+        align: "center",
+      },
+      layoutSpecOverride: {
+        discountLine: "-25 %*",
+        codeLineLabel: "CODE :",
+        codeValue: "BIENVENUE25",
+        finePrint: "*offre applicable sur la première commande en ligne",
+        cta: { label: "Je profite du code", url: "" },
+        align: "center",
+      },
+    },
+    {
+      id: "cta-pill-354",
+      blockType: "hero",
+      preferredTemplateKey: "sv.cta.pill354.v1",
+      name: "CTA",
+      shortLabel: "CTA",
+      description: "Centered fixed-width CTA pill.",
+      previewData: {
+        label: "DÉCOUVRIR LE MENU DUO",
+        url: "",
+        widthPx: 354,
+        radiusPx: 25,
+        align: "center",
+      },
+      layoutSpecOverride: {
+        label: "DÉCOUVRIR LE MENU DUO",
+        url: "",
+        widthPx: 354,
+        radiusPx: 25,
+        align: "center",
+      },
+    },
+    {
+      id: "reassurance-links",
+      blockType: "hero",
+      preferredTemplateKey: "sv.reassurance.navLinks.v1",
+      name: "Reassurance",
+      shortLabel: "Nav",
+      description: "Centered reassurance links on beige background.",
+      previewData: {
+        links: [
+          { label: "Nos services", url: "#" },
+          { label: "Qui sommes-nous", url: "#" },
+          { label: "Notre blog", url: "#" },
+        ],
+        gapPx: 16,
+        align: "center",
+      },
+      layoutSpecOverride: {
+        links: [
+          { label: "Nos services", url: "#" },
+          { label: "Qui sommes-nous", url: "#" },
+          { label: "Notre blog", url: "#" },
+        ],
+        gapPx: 16,
+        align: "center",
+      },
+    },
+    {
+      id: "texte-beige-cta",
+      blockType: "hero",
+      preferredTemplateKey: "sv.text.beigeCta.v1",
+      name: "Texte",
+      shortLabel: "Tx",
+      description: "Beige text section with centered CTA.",
+      previewData: {
+        title: "Découvrez les engagements au cœur\nde notre approche :",
+        bodyParagraphs: [
+          "Chez Saveurs et Vie, nous avons à coeur de proposer des recettes équilibrées et savoureuses.",
+          "Découvrez les engagements qui sont au coeur de notre approche :",
+        ],
+        cta: { label: "NOS ENGAGEMENTS", url: "" },
+        align: "left",
+      },
+      layoutSpecOverride: {
+        title: "Découvrez les engagements au cœur\nde notre approche :",
+        bodyParagraphs: [
+          "Chez Saveurs et Vie, nous avons à coeur de proposer des recettes équilibrées et savoureuses.",
+          "Découvrez les engagements qui sont au coeur de notre approche :",
+        ],
+        cta: { label: "NOS ENGAGEMENTS", url: "" },
+        align: "left",
+      },
+    },
+    {
       id: "two-columns",
       blockType: "two_columns",
       preferredTemplateKey: "sv.twoCards.menuPastel.v1",
@@ -118,6 +301,40 @@ function createCoreItems(clientSlug: string): LibraryItem[] {
         title: "Deux axes de valeur",
         content: "Option A\nOption B",
         ctaLabel: "Voir les options",
+      },
+    },
+    {
+      id: "image-gauche",
+      blockType: "two_columns",
+      preferredTemplateKey: "sv.twoColumns.imageLeft.v1",
+      name: "Image gauche",
+      shortLabel: "IG",
+      description: "Image left with title and check bullets.",
+      previewData: {
+        image: {
+          src: "https://img.mailinblue.com/2607945/images/content_library/original/68fb4f54a6c24e719b5a8c93.jpeg",
+          alt: "Le Nutritest",
+        },
+        title: "Le Nutritest",
+        bullets: [
+          "Auto-test gratuit",
+          "Rapide à réaliser",
+          "Contient 10 questions pour définir votre profil alimentaire",
+        ],
+      },
+      layoutSpecOverride: {
+        image: {
+          src: "https://img.mailinblue.com/2607945/images/content_library/original/68fb4f54a6c24e719b5a8c93.jpeg",
+          alt: "Le Nutritest",
+        },
+        title: "Le Nutritest",
+        bullets: [
+          "Auto-test gratuit",
+          "Rapide à réaliser",
+          "Contient 10 questions pour définir votre profil alimentaire",
+        ],
+        iconStyle: "checkGreen",
+        align: "left",
       },
     },
     {
@@ -146,6 +363,20 @@ function createCoreItems(clientSlug: string): LibraryItem[] {
         ctaLabel: "Explorer",
       },
     },
+    {
+      id: "footer-beige",
+      blockType: "hero",
+      preferredTemplateKey: "sv.footer.beige.v1",
+      name: "Footer beige",
+      shortLabel: "Ft",
+      description: "Social icons and legal footer content.",
+      previewData: {
+        companyLines: ["Saveurs et Vie", "Orly, France", "Cet email a été envoyé à EMAIL"],
+        recipientEmailLabel: "EMAIL",
+        gdprParagraph: "Informations RGPD",
+        unsubscribe: { label: "Se désinscrire", url: "" },
+      },
+    },
   ];
 
   return items.map((item): LibraryItem => {
@@ -155,15 +386,54 @@ function createCoreItems(clientSlug: string): LibraryItem[] {
       preferredTemplateKey: item.preferredTemplateKey,
     });
     const templateDef = getTemplateDef(templateKey, clientSlug);
+    const defaultLayoutSpec =
+      templateDef?.defaultLayoutSpec && typeof templateDef.defaultLayoutSpec === "object"
+        ? (templateDef.defaultLayoutSpec as Record<string, unknown>)
+        : {};
+    const overrideLayoutSpec =
+      item.layoutSpecOverride && typeof item.layoutSpecOverride === "object"
+        ? item.layoutSpecOverride
+        : {};
+    const mergedLayoutSpec = {
+      ...defaultLayoutSpec,
+      ...overrideLayoutSpec,
+      image:
+        defaultLayoutSpec.image && typeof defaultLayoutSpec.image === "object"
+          ? {
+              ...(defaultLayoutSpec.image as Record<string, unknown>),
+              ...((overrideLayoutSpec.image && typeof overrideLayoutSpec.image === "object"
+                ? (overrideLayoutSpec.image as Record<string, unknown>)
+                : {}) as Record<string, unknown>),
+            }
+          : overrideLayoutSpec.image,
+    } as Record<string, unknown>;
     return {
       ...item,
       templateKey: templateDef?.key || templateKey,
+      layoutSpec: mergedLayoutSpec,
       previewData: {
         ...item.previewData,
         templateKey: templateDef?.key || item.preferredTemplateKey || templateKey,
       },
     };
   });
+}
+
+function getPreviewScale(item: LibraryItem): number {
+  if (item.id === "footer-beige") return 0.58;
+  if (item.id === "header-image") return 0.74;
+  if (item.id === "section-image") return 0.78;
+  if (item.id === "image-logo-centre") return 0.82;
+  if (item.id === "mosaic-images") return 0.48;
+  if (item.id === "content-highlight") return 0.7;
+  if (item.id === "promo-blue-code-cta") return 0.72;
+  if (item.id === "cta-pill-354") return 0.82;
+  if (item.id === "reassurance-links") return 0.76;
+  if (item.id === "texte-beige-cta") return 0.62;
+  if (item.id === "image-gauche") return 0.6;
+  if (item.blockType === "hero") return 0.7;
+  if (item.blockType === "three_columns") return 0.68;
+  return 0.7;
 }
 
 function LibraryDraggableButton(input: {
@@ -181,6 +451,7 @@ function LibraryDraggableButton(input: {
       source: "library",
       blockType: item.blockType,
       templateKey: item.templateKey,
+      layoutSpec: item.layoutSpec,
       name: item.name,
       itemId: item.id,
     },
@@ -221,11 +492,13 @@ function LibraryDraggableCard(input: {
       source: "library",
       blockType: item.blockType,
       templateKey: item.templateKey,
+      layoutSpec: item.layoutSpec,
       name: item.name,
       itemId: item.id,
     },
   });
   const templateDef = getTemplateDef(item.templateKey);
+  const previewScale = getPreviewScale(item);
   return (
     <div
       ref={setNodeRef}
@@ -248,6 +521,7 @@ function LibraryDraggableCard(input: {
               onAddBlock({
                 blockType: item.blockType,
                 templateKey: item.templateKey,
+                layoutSpec: item.layoutSpec,
               })
             }
             disabled={disabled}
@@ -270,15 +544,23 @@ function LibraryDraggableCard(input: {
           </button>
         </div>
       </div>
-      <div className="mt-2 h-[94px] overflow-hidden rounded-lg border border-[color:var(--color-border)] bg-[color:var(--color-surface)]">
-        <div className="origin-top-left scale-[0.55] pr-[72%]">
-          <BlockTemplateRenderer
-            templateKey={templateDef?.key || item.templateKey}
-            blockType={item.blockType}
-            blockData={item.previewData}
-            brandTheme={LIBRARY_PREVIEW_THEME}
-            layoutSpec={templateDef?.defaultLayoutSpec}
-          />
+      <div className="mt-2 h-[120px] overflow-hidden rounded-lg border border-[color:var(--color-border)] bg-white">
+        <div className="h-full w-full overflow-hidden">
+          <div
+            className="origin-top-left"
+            style={{
+              transform: `scale(${previewScale})`,
+              width: `${100 / previewScale}%`,
+            }}
+          >
+            <BlockTemplateRenderer
+              templateKey={templateDef?.key || item.templateKey}
+              blockType={item.blockType}
+              blockData={item.previewData}
+              brandTheme={LIBRARY_PREVIEW_THEME}
+              layoutSpec={item.layoutSpec || templateDef?.defaultLayoutSpec}
+            />
+          </div>
         </div>
       </div>
     </div>
@@ -311,7 +593,7 @@ export function BlockLibraryPanel({
             </button>
           ) : null}
         </div>
-        <div className="mt-2 space-y-2">
+        <div className="mt-2 max-h-[calc(100vh-320px)] space-y-2 overflow-y-auto pr-0.5">
           {coreItems.map((item) => (
             <LibraryDraggableButton
               key={item.id}
@@ -322,6 +604,7 @@ export function BlockLibraryPanel({
                 onAddBlock({
                   blockType: item.blockType,
                   templateKey: item.templateKey,
+                  layoutSpec: item.layoutSpec,
                 })
               }
             >
@@ -355,35 +638,22 @@ export function BlockLibraryPanel({
       </div>
 
       <div className="mt-3 space-y-2.5">
-        <p className="text-[11px] uppercase tracking-[0.16em] text-[var(--color-muted)]">Core</p>
-        {coreItems.map((item) => (
-          <LibraryDraggableCard
-            key={item.id}
-            item={item}
-            disabled={Boolean(item.singleInstance && hasHeaderBlock)}
-            onAddBlock={onAddBlock}
-          />
-        ))}
-      </div>
-
-      <div className="mt-3 space-y-2.5">
-        <p className="text-[11px] uppercase tracking-[0.16em] text-[var(--color-muted)]">Coming next</p>
-        {FUTURE_ITEMS.map((item) => (
-          <div
-            key={item.id}
-            className="rounded-xl border border-dashed border-[color:var(--color-border)] bg-[color:var(--color-surface)]/50 px-2.5 py-2"
-          >
-            <div className="flex items-center justify-between gap-2">
-              <div className="min-w-0">
-                <p className="text-sm font-medium text-[color:var(--color-text)]">{item.name}</p>
-                <p className="text-xs text-[var(--color-muted)]">{item.description}</p>
-              </div>
-              <span className="rounded-full bg-slate-100 px-2 py-0.5 text-[10px] font-semibold uppercase tracking-[0.08em] text-slate-600">
-                Soon
-              </span>
-            </div>
-          </div>
-        ))}
+        <div className="flex items-center justify-between gap-2">
+          <p className="text-[11px] uppercase tracking-[0.16em] text-[var(--color-muted)]">Core</p>
+          <span className="rounded-full bg-slate-100 px-2 py-0.5 text-[10px] font-semibold text-slate-600">
+            {coreItems.length}
+          </span>
+        </div>
+        <div className="max-h-[calc(100vh-360px)] space-y-2.5 overflow-y-auto pr-1">
+          {coreItems.map((item) => (
+            <LibraryDraggableCard
+              key={item.id}
+              item={item}
+              disabled={Boolean(item.singleInstance && hasHeaderBlock)}
+              onAddBlock={onAddBlock}
+            />
+          ))}
+        </div>
       </div>
     </div>
   );

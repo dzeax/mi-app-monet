@@ -54,9 +54,20 @@ const DEFAULT_MOBILE_CHARS_PER_LINE = 30;
 
 const TEMPLATE_LINE_LIMITS: Record<TemplateName, number> = {
   'header.image': 32,
+  'section.image': 32,
+  'mosaic.images5.centerHero': 32,
+  'cta.pill354': 30,
+  'footer.beige': 34,
+  'reassurance.navLinks': 30,
+  'title.titre': 28,
+  'promo.codePill': 30,
+  'promo.blueCodeCta': 30,
+  'text.beigeCta': 30,
+  'content.centerHighlight': 30,
   'hero.simple': 32,
   'hero.imageTop': 32,
   'twoCards.text': 30,
+  'twoColumns.imageLeft': 30,
   'twoCards.formule2': 30,
   'twoCards.menuPastel': 30,
   'threeCards.text': 28,
@@ -67,9 +78,20 @@ const TEMPLATE_LINE_LIMITS: Record<TemplateName, number> = {
 
 const TEMPLATE_CTA_LIMITS: Record<TemplateName, number> = {
   'header.image': 24,
+  'section.image': 24,
+  'mosaic.images5.centerHero': 24,
+  'cta.pill354': 24,
+  'footer.beige': 26,
+  'reassurance.navLinks': 24,
+  'title.titre': 24,
+  'promo.codePill': 24,
+  'promo.blueCodeCta': 24,
+  'text.beigeCta': 24,
+  'content.centerHighlight': 24,
   'hero.simple': 26,
   'hero.imageTop': 26,
   'twoCards.text': 24,
+  'twoColumns.imageLeft': 24,
   'twoCards.formule2': 24,
   'twoCards.menuPastel': 24,
   'threeCards.text': 24,
@@ -252,7 +274,13 @@ export function runVisualQaForVariant(input: {
     const ctaLabel = str(block.ctaLabel);
     const slots = asRecord(block.renderSlots);
 
-    if (templateName === 'header.image') {
+    if (
+      templateName === 'header.image' ||
+      templateName === 'section.image' ||
+      templateName === 'mosaic.images5.centerHero' ||
+      templateName === 'cta.pill354' ||
+      templateName === 'footer.beige'
+    ) {
       // Header image template intentionally has no text-density checks.
     } else if (templateName === 'hero.simple' || templateName === 'hero.imageTop') {
       const headlineRecord = asRecord(slots?.headline);
@@ -355,6 +383,56 @@ export function runVisualQaForVariant(input: {
             );
           }
         });
+      });
+    } else if (templateName === 'twoColumns.imageLeft') {
+      const slotTitle = str(slots?.title) || title;
+      const bullets = toStringArray(slots?.bullets).length
+        ? toStringArray(slots?.bullets)
+        : extractBulletLines(content);
+
+      if (charCount(slotTitle) > TITLE_LIMIT) {
+        pushWarning(
+          warnings,
+          block.id,
+          blockIndex,
+          'TITLE_TOO_LONG_FOR_TEMPLATE',
+          'title',
+          `Title has ${charCount(slotTitle)} chars (max ${TITLE_LIMIT}).`
+        );
+      }
+
+      if (bullets.length > 5) {
+        pushWarning(
+          warnings,
+          block.id,
+          blockIndex,
+          'BULLETS_TOO_MANY',
+          'bullets',
+          `Bullets count is ${bullets.length} (max 5).`
+        );
+      }
+
+      bullets.forEach((bullet, bulletIndex) => {
+        if (charCount(bullet) > TWO_CARDS_FORMULE2_BULLET_LIMIT) {
+          pushWarning(
+            warnings,
+            block.id,
+            blockIndex,
+            'BULLET_TOO_LONG',
+            `bullets.${bulletIndex}`,
+            `Bullet ${bulletIndex + 1} has ${charCount(bullet)} chars (target <= ${TWO_CARDS_FORMULE2_BULLET_LIMIT}).`
+          );
+        }
+        if (estimateLineCount(bullet, charsPerLine) >= 3) {
+          pushWarning(
+            warnings,
+            block.id,
+            blockIndex,
+            'RISK_3_LINES_MOBILE',
+            `bullets.${bulletIndex}`,
+            `Bullet ${bulletIndex + 1} may wrap to 3+ lines on mobile.`
+          );
+        }
       });
     } else if (templateName === 'threeCards.text' || templateName === 'threeCards.menu3') {
       const cards = extractThreeCardSlots({ slots, fallbackTitle: title, fallbackContent: content });
