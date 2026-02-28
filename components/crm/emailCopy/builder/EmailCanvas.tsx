@@ -43,6 +43,11 @@ type EmailCanvasProps = {
   onRequestAddBlock?: () => void;
 };
 
+type IndexedBlock = {
+  index: number;
+  block: EmailCopyBrief["blocks"][number];
+};
+
 const TYPE_LABELS: Record<EmailCopyBrief["blocks"][number]["blockType"], string> = {
   hero: "Hero content",
   two_columns: "2 columns content block",
@@ -58,7 +63,42 @@ function countChars(value: string | null | undefined): number {
   return value ? [...value].length : 0;
 }
 
-function hasSourceInput(block: EmailCopyBrief["blocks"][number]): boolean {
+function stringFromUnknown(value: unknown): string {
+  return typeof value === "string" ? value.trim() : "";
+}
+
+function isHeaderTemplateKey(templateKey: string | null | undefined, clientSlug: string): boolean {
+  return getTemplateDef(templateKey, clientSlug)?.templateName === "header.image";
+}
+
+function hasSourceInput(
+  block: EmailCopyBrief["blocks"][number],
+  clientSlug: string
+): boolean {
+  if (isHeaderTemplateKey(block.templateKey, clientSlug)) {
+    const templateDef = getTemplateDef(block.templateKey, clientSlug);
+    const layoutSpec =
+      block.layoutSpec && typeof block.layoutSpec === "object"
+        ? (block.layoutSpec as Record<string, unknown>)
+        : {};
+    const layoutImage =
+      layoutSpec.image && typeof layoutSpec.image === "object"
+        ? (layoutSpec.image as Record<string, unknown>)
+        : {};
+    const defaultLayout =
+      templateDef?.defaultLayoutSpec && typeof templateDef.defaultLayoutSpec === "object"
+        ? (templateDef.defaultLayoutSpec as Record<string, unknown>)
+        : {};
+    const defaultImage =
+      defaultLayout.image && typeof defaultLayout.image === "object"
+        ? (defaultLayout.image as Record<string, unknown>)
+        : {};
+    const src =
+      stringFromUnknown(layoutImage.src) ||
+      stringFromUnknown(defaultImage.src) ||
+      stringFromUnknown(block.sourceContent);
+    return clean(src).length > 0;
+  }
   return clean(block.sourceTitle || "").length > 0 || clean(block.sourceContent || "").length > 0;
 }
 
@@ -70,10 +110,13 @@ function InsertionIndicator() {
   );
 }
 
-type SortableCanvasBlockProps = {
+type CanvasBlockNodeProps = {
   clientSlug: string;
   block: EmailCopyBrief["blocks"][number];
-  index: number;
+  blockIndex: number;
+  displayOrder: number;
+  sortableIndex: number;
+  sortableTotal: number;
   totalBlocks: number;
   selectedBlockId: string | null;
   brandTheme: BrandTheme;
@@ -88,12 +131,16 @@ type SortableCanvasBlockProps = {
   onMoveDown: (index: number) => void;
   onDuplicate: (index: number) => void;
   onDelete: (index: number) => void;
+  showDivider?: boolean;
 };
 
-function SortableCanvasBlock({
+function CanvasBlockNode({
   clientSlug,
   block,
-  index,
+  blockIndex,
+  displayOrder,
+  sortableIndex,
+  sortableTotal,
   totalBlocks,
   selectedBlockId,
   brandTheme,
@@ -104,7 +151,8 @@ function SortableCanvasBlock({
   onMoveDown,
   onDuplicate,
   onDelete,
-}: SortableCanvasBlockProps) {
+  showDivider = false,
+}: CanvasBlockNodeProps) {
   const { attributes, listeners, setNodeRef, transform, transition, isDragging } = useSortable({
     id: block.id,
     data: {
@@ -120,8 +168,10 @@ function SortableCanvasBlock({
   const hardContentLimit = EMAIL_COPY_BLOCK_CONTENT_LIMITS[block.blockType];
   const overSoft = sourceContentChars > softContentLimit;
   const hardRisk = sourceContentChars > hardContentLimit * 2;
-  const ready = hasSourceInput(block) && !overSoft;
-  const templateKey = getTemplateDef(block.templateKey, clientSlug)?.key || getDefaultTemplateForType(block.blockType, clientSlug);
+  const ready = hasSourceInput(block, clientSlug) && !overSoft;
+  const templateKey =
+    getTemplateDef(block.templateKey, clientSlug)?.key ||
+    getDefaultTemplateForType(block.blockType, clientSlug);
   const isInlineEditable = Boolean(inlineEditMode && isSelected && onInlineCommit);
 
   return (
@@ -135,8 +185,7 @@ function SortableCanvasBlock({
       <CanvasBlockFrame
         blockId={block.id}
         blockLabel={TYPE_LABELS[block.blockType]}
-        index={index}
-        totalBlocks={totalBlocks}
+        displayOrder={displayOrder}
         ready={ready}
         overSoft={overSoft}
         hardRisk={hardRisk}
@@ -145,12 +194,17 @@ function SortableCanvasBlock({
         isDragging={isDragging}
         dragAttributes={attributes}
         dragListeners={listeners}
+        draggable
+        canMoveUp={sortableIndex > 0}
+        canMoveDown={sortableIndex < sortableTotal - 1}
+        canDuplicate
+        canDelete={totalBlocks > 1}
         onSelectBlock={onSelectBlock}
-        onMoveUp={onMoveUp}
-        onMoveDown={onMoveDown}
-        onDuplicate={onDuplicate}
-        onDelete={onDelete}
-        showDivider={index > 0}
+        onMoveUp={() => onMoveUp(blockIndex)}
+        onMoveDown={() => onMoveDown(blockIndex)}
+        onDuplicate={() => onDuplicate(blockIndex)}
+        onDelete={() => onDelete(blockIndex)}
+        showDivider={showDivider}
       >
         <EmailSectionSurface style={{ fontFamily: brandTheme.fontFamily }}>
           <BlockTemplateRenderer
@@ -206,18 +260,66 @@ export function EmailCanvas({
   onDelete,
   onRequestAddBlock,
 }: EmailCanvasProps) {
-  const sortableIds = useMemo(() => blocks.map((block) => block.id), [blocks]);
+  const indexedBlocks = useMemo<IndexedBlock[]>(
+    () => blocks.map((block, index) => ({ block, index })),
+    [blocks]
+  );
+
+  const fixedHeaderBlock = useMemo<IndexedBlock | null>(
+    () =>
+      indexedBlocks.find((entry) => isHeaderTemplateKey(entry.block.templateKey, clientSlug)) ||
+      null,
+    [clientSlug, indexedBlocks]
+  );
+
+  const draggableBlocks = useMemo<IndexedBlock[]>(
+    () =>
+      indexedBlocks.filter(
+        (entry) => !(fixedHeaderBlock && entry.block.id === fixedHeaderBlock.block.id)
+      ),
+    [fixedHeaderBlock, indexedBlocks]
+  );
+
+  const sortableIds = useMemo(
+    () => draggableBlocks.map((entry) => entry.block.id),
+    [draggableBlocks]
+  );
+
   const previewTheme = useMemo<BrandTheme>(
     () => ({
       ...brandTheme,
       fontFamily: EMAIL_PREVIEW_FONT_FAMILY,
     }),
-    [brandTheme],
+    [brandTheme]
   );
+
+  const insertionOffset = fixedHeaderBlock ? 1 : 0;
+  const draggableInsertionIndex =
+    insertionIndex === null
+      ? null
+      : Math.max(
+          0,
+          Math.min(draggableBlocks.length, Number(insertionIndex || 0) - insertionOffset)
+        );
+
   const { setNodeRef, isOver } = useDroppable({
     id: EMAIL_CANVAS_DROP_ZONE_ID,
     data: { source: "canvas-drop-zone" },
   });
+
+  const renderEmptyState = !fixedHeaderBlock && draggableBlocks.length === 0;
+  const renderHeaderOnlyState = Boolean(fixedHeaderBlock && draggableBlocks.length === 0);
+
+  const headerTitleChars = countChars(fixedHeaderBlock?.block.sourceTitle);
+  const headerContentChars = countChars(fixedHeaderBlock?.block.sourceContent);
+  const headerSoftLimit = EMAIL_COPY_BLOCK_SOFT_CONTENT_LIMITS.hero;
+  const headerReady = fixedHeaderBlock
+    ? hasSourceInput(fixedHeaderBlock.block, clientSlug)
+    : false;
+  const headerTemplateKey = fixedHeaderBlock
+    ? getTemplateDef(fixedHeaderBlock.block.templateKey, clientSlug)?.key ||
+      getDefaultTemplateForType(fixedHeaderBlock.block.blockType, clientSlug)
+    : null;
 
   return (
     <section className="rounded-2xl border border-[color:var(--color-border)]/90 bg-[color:var(--color-surface-2)]/55 p-3 sm:p-4">
@@ -249,8 +351,48 @@ export function EmailCanvas({
               isOver ? "ring-2 ring-[color:var(--color-primary)]/35 ring-inset" : "",
             ].join(" ")}
           >
+            {fixedHeaderBlock && headerTemplateKey ? (
+              <div className="mb-6">
+                <p className="mb-2 text-[10px] font-semibold uppercase tracking-[0.14em] text-[var(--color-muted)]">
+                  Fixed header
+                </p>
+                <CanvasBlockFrame
+                  blockId={fixedHeaderBlock.block.id}
+                  blockLabel="Header image block"
+                  displayOrder={1}
+                  ready={headerReady}
+                  overSoft={false}
+                  hardRisk={false}
+                  metaText={`${fixedHeaderBlock.block.id} · fixed header image · title ${headerTitleChars}/${EMAIL_COPY_CHAR_LIMITS.title} · content ${headerContentChars}/${headerSoftLimit} soft`}
+                  isSelected={selectedBlockId === fixedHeaderBlock.block.id}
+                  isDragging={false}
+                  draggable={false}
+                  canMoveUp={false}
+                  canMoveDown={false}
+                  canDuplicate={false}
+                  canDelete={blocks.length > 1}
+                  onSelectBlock={onSelectBlock}
+                  onDelete={() => onDelete(fixedHeaderBlock.index)}
+                >
+                  <EmailSectionSurface style={{ fontFamily: previewTheme.fontFamily }}>
+                    <BlockTemplateRenderer
+                      templateKey={headerTemplateKey}
+                      blockType={fixedHeaderBlock.block.blockType}
+                      blockData={{
+                        title: fixedHeaderBlock.block.sourceTitle,
+                        content: fixedHeaderBlock.block.sourceContent,
+                        ctaLabel: fixedHeaderBlock.block.ctaLabel,
+                      }}
+                      brandTheme={previewTheme}
+                      layoutSpec={fixedHeaderBlock.block.layoutSpec}
+                    />
+                  </EmailSectionSurface>
+                </CanvasBlockFrame>
+              </div>
+            ) : null}
+
             <SortableContext items={sortableIds} strategy={verticalListSortingStrategy}>
-              {blocks.length === 0 ? (
+              {renderEmptyState ? (
                 <div className="flex min-h-[280px] items-center justify-center rounded-lg border border-dashed border-[color:var(--color-border)] bg-slate-50 px-4 py-7 text-center">
                   <div>
                     <p className="text-sm font-semibold text-slate-900">No blocks yet. Add blocks from the library.</p>
@@ -263,15 +405,33 @@ export function EmailCanvas({
                     </button>
                   </div>
                 </div>
+              ) : renderHeaderOnlyState ? (
+                <div className="flex min-h-[220px] items-center justify-center rounded-lg border border-dashed border-[color:var(--color-border)] bg-slate-50 px-4 py-7 text-center">
+                  <div>
+                    <p className="text-sm font-semibold text-slate-900">
+                      Header is configured. Add content blocks from the library.
+                    </p>
+                    <button
+                      type="button"
+                      className="btn-primary mt-3 h-8 px-3 text-xs"
+                      onClick={onRequestAddBlock}
+                    >
+                      Add content block
+                    </button>
+                  </div>
+                </div>
               ) : (
                 <div className="space-y-6 sm:space-y-8 lg:space-y-8">
-                  {blocks.map((block, index) => (
-                    <div key={block.id}>
-                      {insertionIndex === index ? <InsertionIndicator /> : null}
-                      <SortableCanvasBlock
+                  {draggableBlocks.map((entry, sortableIndex) => (
+                    <div key={entry.block.id}>
+                      {draggableInsertionIndex === sortableIndex ? <InsertionIndicator /> : null}
+                      <CanvasBlockNode
                         clientSlug={clientSlug}
-                        block={block}
-                        index={index}
+                        block={entry.block}
+                        blockIndex={entry.index}
+                        displayOrder={sortableIndex + 1 + insertionOffset}
+                        sortableIndex={sortableIndex}
+                        sortableTotal={draggableBlocks.length}
                         totalBlocks={blocks.length}
                         selectedBlockId={selectedBlockId}
                         brandTheme={previewTheme}
@@ -282,12 +442,13 @@ export function EmailCanvas({
                         onMoveDown={onMoveDown}
                         onDuplicate={onDuplicate}
                         onDelete={onDelete}
+                        showDivider={sortableIndex > 0}
                       />
                     </div>
                   ))}
                 </div>
               )}
-              {insertionIndex === blocks.length ? <InsertionIndicator /> : null}
+              {draggableInsertionIndex === draggableBlocks.length ? <InsertionIndicator /> : null}
             </SortableContext>
           </div>
         </div>

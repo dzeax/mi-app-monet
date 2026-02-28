@@ -7,8 +7,7 @@ import { ArrowDown, ArrowUp, CopyPlus, Trash2 } from "lucide-react";
 type CanvasBlockFrameProps = {
   blockId: string;
   blockLabel: string;
-  index: number;
-  totalBlocks: number;
+  displayOrder: number;
   ready: boolean;
   overSoft: boolean;
   hardRisk: boolean;
@@ -17,13 +16,18 @@ type CanvasBlockFrameProps = {
   isDragging: boolean;
   transform?: string;
   transition?: string;
-  dragAttributes: DraggableAttributes;
-  dragListeners: DraggableSyntheticListeners;
+  draggable?: boolean;
+  dragAttributes?: DraggableAttributes;
+  dragListeners?: DraggableSyntheticListeners;
+  canMoveUp?: boolean;
+  canMoveDown?: boolean;
+  canDuplicate?: boolean;
+  canDelete?: boolean;
   onSelectBlock: (blockId: string) => void;
-  onMoveUp: (index: number) => void;
-  onMoveDown: (index: number) => void;
-  onDuplicate: (index: number) => void;
-  onDelete: (index: number) => void;
+  onMoveUp?: () => void;
+  onMoveDown?: () => void;
+  onDuplicate?: () => void;
+  onDelete?: () => void;
   showDivider?: boolean;
   children: ReactNode;
 };
@@ -31,8 +35,7 @@ type CanvasBlockFrameProps = {
 export function CanvasBlockFrame({
   blockId,
   blockLabel,
-  index,
-  totalBlocks,
+  displayOrder,
   ready,
   overSoft,
   hardRisk,
@@ -41,8 +44,13 @@ export function CanvasBlockFrame({
   isDragging,
   transform,
   transition,
+  draggable = true,
   dragAttributes,
   dragListeners,
+  canMoveUp = false,
+  canMoveDown = false,
+  canDuplicate = true,
+  canDelete = true,
   onSelectBlock,
   onMoveUp,
   onMoveDown,
@@ -88,7 +96,10 @@ export function CanvasBlockFrame({
         }}
       >
         {isSelected ? (
-          <div className="pointer-events-none absolute left-1.5 right-1.5 top-1 h-0.5 rounded-full bg-[color:var(--color-primary)]/80" aria-hidden />
+          <div
+            className="pointer-events-none absolute left-1.5 right-1.5 top-1 h-0.5 rounded-full bg-[color:var(--color-primary)]/80"
+            aria-hidden
+          />
         ) : null}
 
         <div
@@ -101,21 +112,25 @@ export function CanvasBlockFrame({
         >
           <div className="flex items-center gap-1 rounded-md bg-[color:var(--color-surface)]/92 px-1.5 py-1 backdrop-blur-[1px]">
             <div className="flex min-w-0 flex-1 items-center gap-1">
-              <button
-                type="button"
-                className="btn-ghost h-6 w-6 cursor-grab bg-transparent p-0 text-slate-600 active:cursor-grabbing hover:text-slate-900"
-                onClick={(event) => event.stopPropagation()}
-                aria-label={`Drag ${blockId}`}
-                {...dragAttributes}
-                {...dragListeners}
-              >
-                <span aria-hidden className="text-[9px] font-semibold leading-none tracking-[-0.5px]">
-                  |||
-                </span>
-              </button>
+              {draggable ? (
+                <button
+                  type="button"
+                  className="btn-ghost h-6 w-6 cursor-grab bg-transparent p-0 text-slate-600 active:cursor-grabbing hover:text-slate-900"
+                  onClick={(event) => event.stopPropagation()}
+                  aria-label={`Drag ${blockId}`}
+                  {...(dragAttributes || {})}
+                  {...(dragListeners || {})}
+                >
+                  <span aria-hidden className="text-[9px] font-semibold leading-none tracking-[-0.5px]">
+                    |||
+                  </span>
+                </button>
+              ) : (
+                <span className="inline-flex h-6 w-6" aria-hidden />
+              )}
 
               <p className="truncate text-[11px] font-semibold text-[color:var(--color-text)]">
-                Block {index + 1} · {blockLabel}
+                Block {displayOrder} · {blockLabel}
               </p>
             </div>
 
@@ -151,51 +166,56 @@ export function CanvasBlockFrame({
 
                 <div
                   role="menu"
-                  aria-label={`Block ${index + 1} actions`}
+                  aria-label={`Block ${displayOrder} actions`}
                   className="absolute right-0 z-20 mt-1 min-w-[170px] rounded-lg border border-[color:var(--color-border)] bg-[color:var(--color-surface)] p-1 shadow-lg"
                 >
-                  <button
-                    type="button"
-                    role="menuitem"
-                    className="btn-ghost flex h-8 w-full items-center justify-start gap-2 px-2 text-xs"
-                    disabled={index === 0}
-                    onClick={(event) => {
-                      event.preventDefault();
-                      event.stopPropagation();
-                      onMoveUp(index);
-                      closeMenu(event.target);
-                    }}
-                    aria-label={`Move ${blockId} up`}
-                  >
-                    <ArrowUp className="h-3.5 w-3.5" />
-                    Move up
-                  </button>
+                  {draggable ? (
+                    <>
+                      <button
+                        type="button"
+                        role="menuitem"
+                        className="btn-ghost flex h-8 w-full items-center justify-start gap-2 px-2 text-xs"
+                        disabled={!canMoveUp}
+                        onClick={(event) => {
+                          event.preventDefault();
+                          event.stopPropagation();
+                          onMoveUp?.();
+                          closeMenu(event.target);
+                        }}
+                        aria-label={`Move ${blockId} up`}
+                      >
+                        <ArrowUp className="h-3.5 w-3.5" />
+                        Move up
+                      </button>
+
+                      <button
+                        type="button"
+                        role="menuitem"
+                        className="btn-ghost flex h-8 w-full items-center justify-start gap-2 px-2 text-xs"
+                        disabled={!canMoveDown}
+                        onClick={(event) => {
+                          event.preventDefault();
+                          event.stopPropagation();
+                          onMoveDown?.();
+                          closeMenu(event.target);
+                        }}
+                        aria-label={`Move ${blockId} down`}
+                      >
+                        <ArrowDown className="h-3.5 w-3.5" />
+                        Move down
+                      </button>
+                    </>
+                  ) : null}
 
                   <button
                     type="button"
                     role="menuitem"
                     className="btn-ghost flex h-8 w-full items-center justify-start gap-2 px-2 text-xs"
-                    disabled={index === totalBlocks - 1}
+                    disabled={!canDuplicate}
                     onClick={(event) => {
                       event.preventDefault();
                       event.stopPropagation();
-                      onMoveDown(index);
-                      closeMenu(event.target);
-                    }}
-                    aria-label={`Move ${blockId} down`}
-                  >
-                    <ArrowDown className="h-3.5 w-3.5" />
-                    Move down
-                  </button>
-
-                  <button
-                    type="button"
-                    role="menuitem"
-                    className="btn-ghost flex h-8 w-full items-center justify-start gap-2 px-2 text-xs"
-                    onClick={(event) => {
-                      event.preventDefault();
-                      event.stopPropagation();
-                      onDuplicate(index);
+                      onDuplicate?.();
                       closeMenu(event.target);
                     }}
                     aria-label={`Duplicate ${blockId}`}
@@ -208,11 +228,11 @@ export function CanvasBlockFrame({
                     type="button"
                     role="menuitem"
                     className="btn-ghost flex h-8 w-full items-center justify-start gap-2 px-2 text-xs"
-                    disabled={totalBlocks <= 1}
+                    disabled={!canDelete}
                     onClick={(event) => {
                       event.preventDefault();
                       event.stopPropagation();
-                      onDelete(index);
+                      onDelete?.();
                       closeMenu(event.target);
                     }}
                     aria-label={`Delete ${blockId}`}

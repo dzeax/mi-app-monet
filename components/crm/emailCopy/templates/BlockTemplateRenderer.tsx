@@ -1,10 +1,12 @@
 "use client";
 
 import type { ReactElement } from "react";
+import { SvHeaderImageV1 } from "@/components/crm/emailCopy/templates/components/SvHeaderImageV1";
 import { SvHeroImageTopV1 } from "@/components/crm/emailCopy/templates/components/SvHeroImageTopV1";
 import { SvHeroSimpleV1 } from "@/components/crm/emailCopy/templates/components/SvHeroSimpleV1";
 import { SvSideBySideHelpCtaV1 } from "@/components/crm/emailCopy/templates/components/SvSideBySideHelpCtaV1";
 import { SvSideBySideImageTextV1 } from "@/components/crm/emailCopy/templates/components/SvSideBySideImageTextV1";
+import { SvTwoCardsFormule2V1 } from "@/components/crm/emailCopy/templates/components/SvTwoCardsFormule2V1";
 import { SvThreeCardsMenu3V1 } from "@/components/crm/emailCopy/templates/components/SvThreeCardsMenu3V1";
 import { SvTwoCardsMenuPastelV1 } from "@/components/crm/emailCopy/templates/components/SvTwoCardsMenuPastelV1";
 import { SvThreeCardsTextV1 } from "@/components/crm/emailCopy/templates/components/SvThreeCardsTextV1";
@@ -36,9 +38,11 @@ type BlockTemplateRendererProps = {
 };
 
 const COMPONENT_BY_TEMPLATE_NAME: Record<TemplateName, (props: TemplateComponentProps) => ReactElement> = {
+  "header.image": SvHeaderImageV1,
   "hero.simple": SvHeroSimpleV1,
   "hero.imageTop": SvHeroImageTopV1,
   "twoCards.text": SvTwoCardsTextV1,
+  "twoCards.formule2": SvTwoCardsFormule2V1,
   "twoCards.menuPastel": SvTwoCardsMenuPastelV1,
   "threeCards.text": SvThreeCardsTextV1,
   "threeCards.menu3": SvThreeCardsMenu3V1,

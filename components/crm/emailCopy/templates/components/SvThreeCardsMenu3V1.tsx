@@ -117,7 +117,7 @@ export function SvThreeCardsMenu3V1({ brandTheme, data, layoutSpec, inlineEditin
                 {card.title}
               </h4>
 
-              <p className="mt-2 text-center text-[14px] leading-[1.45] text-[color:var(--color-text)]">
+              <p className="mt-2 text-center text-[14px] leading-[1.45]" style={{ color: titleColor }}>
                 {card.text}
               </p>
 

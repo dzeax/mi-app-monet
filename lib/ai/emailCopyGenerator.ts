@@ -63,6 +63,11 @@ const MENU_PASTEL_LEAD_SOFT_LIMIT = 24;
 const MENU_PASTEL_LEAD_HARD_LIMIT = 32;
 const MENU_PASTEL_TEXT_SOFT_LIMIT = 90;
 const MENU_PASTEL_TEXT_HARD_LIMIT = 110;
+const FORMULE2_CARD_COUNT = 2;
+const FORMULE2_TITLE_MAX = 28;
+const FORMULE2_BULLETS_MIN = 1;
+const FORMULE2_BULLETS_MAX = 2;
+const FORMULE2_BULLET_CHAR_MAX = 110;
 const MENU3_CARD_COUNT = 3;
 const MENU3_TITLE_MAX = 33;
 const MENU3_TEXT_MIN = 60;
@@ -616,6 +621,57 @@ function normalizeMenuPastelBulletArray(input: {
   return normalized;
 }
 
+function normalizeFormule2Bullets(input: {
+  value: unknown;
+  fallback: string[];
+  cardIndex: number;
+  warnings: string[];
+  warningPrefix: string;
+}): string[] {
+  const source = Array.isArray(input.value)
+    ? input.value
+    : (typeof input.value === 'string' && input.value ? [input.value] : []);
+
+  let bullets = source
+    .map((entry) => stripArtifacts(toSafeString(entry)).replace(/https?:\/\/\S+/gi, ''))
+    .map((entry) => cleanGeneratedText(entry))
+    .filter(Boolean);
+
+  if (bullets.length === 0) {
+    bullets = input.fallback
+      .map((entry) => cleanGeneratedText(entry))
+      .filter(Boolean);
+  }
+
+  if (bullets.length === 0) {
+    bullets = ['Une formule claire et adaptée à vos besoins.'];
+    input.warnings.push(`${input.warningPrefix}cards.${input.cardIndex}.bullets fallback applied`);
+  }
+
+  if (bullets.length > FORMULE2_BULLETS_MAX) {
+    bullets = bullets.slice(0, FORMULE2_BULLETS_MAX);
+    input.warnings.push(
+      `${input.warningPrefix}cards.${input.cardIndex}.bullets truncated to ${FORMULE2_BULLETS_MAX}`
+    );
+  }
+
+  if (bullets.length < FORMULE2_BULLETS_MIN) {
+    bullets = [bullets[0] || 'Une formule claire et adaptée à vos besoins.'];
+    input.warnings.push(
+      `${input.warningPrefix}cards.${input.cardIndex}.bullets completed to ${FORMULE2_BULLETS_MIN}`
+    );
+  }
+
+  return bullets.map((bullet, bulletIndex) =>
+    ensureWithinLimit(
+      bullet,
+      FORMULE2_BULLET_CHAR_MAX,
+      `${input.warningPrefix}cards.${input.cardIndex}.bullets[${bulletIndex}]`,
+      input.warnings
+    )
+  );
+}
+
 function fallbackSubtitleByType(blockType: EmailCopyBriefBlock['blockType']): string {
   if (blockType === 'three_columns') return 'Des options claires, adaptees a vos besoins.';
   if (blockType === 'two_columns') return 'Choisissez la formule qui vous convient.';
@@ -756,6 +812,91 @@ function canonicalizeRenderSlots(input: {
       cta: {
         label: ctaLabel || 'Je découvre les menus',
       },
+    };
+  }
+
+  if (templateName === 'twoCards.formule2') {
+    const incomingCards = Array.isArray(incoming.cards) ? incoming.cards : [];
+    const fallbackBullets = splitContentIntoBullets(
+      sourceContent || input.content,
+      FORMULE2_CARD_COUNT * FORMULE2_BULLETS_MAX,
+      FORMULE2_BULLET_CHAR_MAX
+    );
+    const fallbackTitleBase = trimToLimit(input.title || 'Formule', FORMULE2_TITLE_MAX);
+
+    let cards = incomingCards.map((entry, index) => {
+      const cardIncoming = toSafeRecord(entry);
+      const titleInput = toSafeString(cardIncoming?.title) || `${fallbackTitleBase} ${index + 1}`;
+      const title = ensureWithinLimit(
+        titleInput,
+        FORMULE2_TITLE_MAX,
+        `${warningPrefix}cards.${index}.title`,
+        warnings
+      );
+      const bulletsFallbackSlice = fallbackBullets.slice(
+        index * FORMULE2_BULLETS_MAX,
+        index * FORMULE2_BULLETS_MAX + FORMULE2_BULLETS_MAX
+      );
+      const bullets = normalizeFormule2Bullets({
+        value: cardIncoming?.bullets ?? cardIncoming?.text ?? cardIncoming?.body,
+        fallback:
+          bulletsFallbackSlice.length > 0
+            ? bulletsFallbackSlice
+            : [
+                'Une formule flexible et sans engagement.',
+                'Un service simple, humain et rassurant.',
+              ],
+        cardIndex: index,
+        warnings,
+        warningPrefix,
+      });
+
+      return { title, bullets };
+    });
+
+    if (cards.length === 0) {
+      cards = Array.from({ length: FORMULE2_CARD_COUNT }, (_, index) => ({
+        title: ensureWithinLimit(
+          `${fallbackTitleBase} ${index + 1}`,
+          FORMULE2_TITLE_MAX,
+          `${warningPrefix}cards.${index}.title`,
+          warnings
+        ),
+        bullets: normalizeFormule2Bullets({
+          value: [],
+          fallback: [
+            'Une formule flexible et sans engagement.',
+            'Un service simple, humain et rassurant.',
+          ],
+          cardIndex: index,
+          warnings,
+          warningPrefix,
+        }),
+      }));
+      pushWarning('cards fallback applied');
+    }
+
+    if (cards.length < FORMULE2_CARD_COUNT) {
+      const lastCard = cards[cards.length - 1];
+      while (cards.length < FORMULE2_CARD_COUNT && lastCard) {
+        cards.push({
+          title: lastCard.title,
+          bullets: [...lastCard.bullets],
+        });
+      }
+      pushWarning(`cards duplicated to ${FORMULE2_CARD_COUNT}`);
+    }
+
+    if (cards.length > FORMULE2_CARD_COUNT) {
+      cards = cards.slice(0, FORMULE2_CARD_COUNT);
+      pushWarning(`cards truncated to ${FORMULE2_CARD_COUNT}`);
+    }
+
+    return {
+      backgroundImageUrl:
+        toSafeString(incoming.backgroundImageUrl) ||
+        'https://img.mailinblue.com/2607945/images/content_library/original/686fd8c89addba0b7fd582a7.png',
+      cards,
     };
   }
 
@@ -1278,6 +1419,13 @@ function buildPrompt(input: {
     '- body.paragraphs must contain 2 to 3 short paragraphs, each about 140 to 220 chars, with no medical claims.',
     '- cta.label must be concise, action oriented, between 18 and 28 chars when possible.',
     '- Do not include URLs, template notes, or artifacts in headline/body/cta.',
+    'For templateKey "sv.twoCards.formule2.v1" OR templateName "twoCards.formule2":',
+    '- renderSlots must be {"cards":[{"title":"","bullets":[""]},{"title":"","bullets":[""]}]}.',
+    '- Always return exactly 2 cards in renderSlots.cards.',
+    '- Each title must be concise and <= 28 chars.',
+    '- Each card must have 1 to 2 bullet lines, each <= 110 chars.',
+    '- Keep bullets short, concrete, and easy to scan.',
+    '- Use French vouvoiement, no markdown, no URLs, and no medical claims.',
     'For templateKey "sv.threeCards.menu3.v1" OR templateName "threeCards.menu3":',
     '- renderSlots must be {"cards":[{"title":"","text":"","cta":{"label":""}},{"title":"","text":"","cta":{"label":""}},{"title":"","text":"","cta":{"label":""}}]}.',
     '- Always return exactly 3 cards in renderSlots.cards.',

@@ -3,9 +3,11 @@ import type { BrevoBlockType } from "@/lib/crm/emailCopyConfig";
 export const DEFAULT_TEMPLATE_CLIENT_SLUG = "saveurs-et-vie" as const;
 
 export type TemplateName =
+  | "header.image"
   | "hero.simple"
   | "hero.imageTop"
   | "twoCards.text"
+  | "twoCards.formule2"
   | "twoCards.menuPastel"
   | "threeCards.text"
   | "threeCards.menu3"
@@ -32,9 +34,11 @@ const TEMPLATE_NAME_BY_TYPE: Record<BrevoBlockType, TemplateName> = {
 };
 
 const LEGACY_TEMPLATE_ALIASES: Record<string, TemplateName> = {
+  "sv.header.image.v1": "header.image",
   "sv.hero.simple.v1": "hero.simple",
   "sv.hero.imageTop.v1": "hero.imageTop",
   "sv.twoCards.text.v1": "twoCards.text",
+  "sv.twoCards.formule2.v1": "twoCards.formule2",
   "sv.twoCards.menuPastel.v1": "twoCards.menuPastel",
   "sv.threeCards.text.v1": "threeCards.text",
   "sv.threeCards.menu3.v1": "threeCards.menu3",
@@ -48,9 +52,11 @@ function normalizeClientSlug(clientSlug: string | null | undefined): string {
 
 function isTemplateName(value: string): value is TemplateName {
   return (
+    value === "header.image" ||
     value === "hero.simple" ||
     value === "hero.imageTop" ||
     value === "twoCards.text" ||
+    value === "twoCards.formule2" ||
     value === "twoCards.menuPastel" ||
     value === "threeCards.text" ||
     value === "threeCards.menu3" ||
@@ -104,6 +110,31 @@ function createTemplateDef(input: {
 }
 
 export const TEMPLATE_REGISTRY: Record<string, TemplateDef> = {
+  [buildTemplateKey(DEFAULT_TEMPLATE_CLIENT_SLUG, "header.image")]: createTemplateDef({
+    clientSlug: DEFAULT_TEMPLATE_CLIENT_SLUG,
+    templateName: "header.image",
+    label: "SV Header (image)",
+    supportedTypes: ["hero"],
+    slotsSchema: {
+      image: {
+        type: "object",
+        fields: {
+          src: { type: "string", optional: true },
+          alt: { type: "string", maxChars: 90 },
+        },
+      },
+      linkUrl: { type: "string", optional: true },
+      align: { type: "string", enum: ["center", "left", "right"], optional: true },
+    },
+    defaultLayoutSpec: {
+      image: {
+        src: "https://img.mailinblue.com/2607945/images/content_library/original/6864f260ce04ba0eb2f03ec5.png",
+        alt: "Saveurs et Vie",
+      },
+      align: "center",
+      imageMaxWidthPx: 580,
+    },
+  }),
   [buildTemplateKey(DEFAULT_TEMPLATE_CLIENT_SLUG, "hero.simple")]: createTemplateDef({
     clientSlug: DEFAULT_TEMPLATE_CLIENT_SLUG,
     templateName: "hero.simple",
@@ -190,6 +221,31 @@ export const TEMPLATE_REGISTRY: Record<string, TemplateDef> = {
     defaultLayoutSpec: {
       cards: 2,
       style: "text-only",
+    },
+  }),
+  [buildTemplateKey(DEFAULT_TEMPLATE_CLIENT_SLUG, "twoCards.formule2")]: createTemplateDef({
+    clientSlug: DEFAULT_TEMPLATE_CLIENT_SLUG,
+    templateName: "twoCards.formule2",
+    label: "SV Formule 2 (bg image + checks)",
+    supportedTypes: ["two_columns"],
+    slotsSchema: {
+      backgroundImageUrl: { type: "string", optional: true },
+      cards: {
+        type: "array",
+        count: 2,
+        item: {
+          title: { type: "string", maxChars: 33 },
+          bullets: { type: "array", itemMaxChars: 110 },
+        },
+      },
+    },
+    defaultLayoutSpec: {
+      backgroundImageUrl:
+        "https://img.mailinblue.com/2607945/images/content_library/original/686fd8c89addba0b7fd582a7.png",
+      innerBg: "#FFF7E7",
+      borderColor: "#0082ca",
+      titleFont: "Tahoma 15",
+      bulletFont: "Tahoma 15",
     },
   }),
   [buildTemplateKey(DEFAULT_TEMPLATE_CLIENT_SLUG, "twoCards.menuPastel")]: createTemplateDef({

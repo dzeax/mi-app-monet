@@ -15,19 +15,27 @@ import type { BrevoBlockType } from "@/lib/crm/emailCopyConfig";
 
 type BlockLibraryPanelProps = {
   clientSlug: string;
+  hasHeaderBlock?: boolean;
   collapsed?: boolean;
   showCollapseToggle?: boolean;
   onToggleCollapsed?: () => void;
-  onAddBlock: (blockType: BrevoBlockType) => void;
+  onAddBlock: (input: AddBlockPayload) => void;
+};
+
+export type AddBlockPayload = {
+  blockType: BrevoBlockType;
+  templateKey?: string | null;
 };
 
 type LibraryItem = {
   id: string;
   blockType: BrevoBlockType;
+  templateKey: string;
   name: string;
   shortLabel: string;
   description: string;
   previewData: BlockPreviewData;
+  singleInstance?: boolean;
 };
 
 type FutureItem = {
@@ -57,11 +65,38 @@ const FUTURE_ITEMS: FutureItem[] = [
   },
 ];
 
+function resolveTemplateKeyForItem(input: {
+  clientSlug: string;
+  blockType: BrevoBlockType;
+  preferredTemplateKey?: string | null;
+}): string {
+  const preferred = input.preferredTemplateKey
+    ? getTemplateDef(input.preferredTemplateKey, input.clientSlug)?.key
+    : null;
+  if (preferred) return preferred;
+  const defaultTemplate = getDefaultTemplateForType(input.blockType, input.clientSlug);
+  return getTemplateDef(defaultTemplate, input.clientSlug)?.key || defaultTemplate;
+}
+
 function createCoreItems(clientSlug: string): LibraryItem[] {
-  const items: LibraryItem[] = [
+  const items: Array<Omit<LibraryItem, "templateKey"> & { preferredTemplateKey?: string | null }> = [
+    {
+      id: "header-image",
+      blockType: "hero",
+      preferredTemplateKey: "sv.header.image.v1",
+      name: "Header",
+      shortLabel: "Hd",
+      description: "Single image header block pinned to top.",
+      previewData: {
+        title: "Header image",
+        subtitle: "Logo et signature de marque",
+      },
+      singleInstance: true,
+    },
     {
       id: "hero",
       blockType: "hero",
+      preferredTemplateKey: "sv.hero.imageTop.v1",
       name: "Hero",
       shortLabel: "H",
       description: "Primary headline, context, and CTA.",
@@ -75,6 +110,7 @@ function createCoreItems(clientSlug: string): LibraryItem[] {
     {
       id: "two-columns",
       blockType: "two_columns",
+      preferredTemplateKey: "sv.twoCards.menuPastel.v1",
       name: "2 cards",
       shortLabel: "2C",
       description: "Compare or split two propositions.",
@@ -87,6 +123,7 @@ function createCoreItems(clientSlug: string): LibraryItem[] {
     {
       id: "three-columns",
       blockType: "three_columns",
+      preferredTemplateKey: "sv.threeCards.menu3.v1",
       name: "3 cards",
       shortLabel: "3C",
       description: "Highlight three concise points.",
@@ -99,6 +136,7 @@ function createCoreItems(clientSlug: string): LibraryItem[] {
     {
       id: "image-text",
       blockType: "image_text_side_by_side",
+      preferredTemplateKey: "sv.sideBySide.helpCta.v1",
       name: "Image + text",
       shortLabel: "I+T",
       description: "Combine visual context with message.",
@@ -111,13 +149,18 @@ function createCoreItems(clientSlug: string): LibraryItem[] {
   ];
 
   return items.map((item): LibraryItem => {
-    const templateKey = getDefaultTemplateForType(item.blockType, clientSlug);
+    const templateKey = resolveTemplateKeyForItem({
+      clientSlug,
+      blockType: item.blockType,
+      preferredTemplateKey: item.preferredTemplateKey,
+    });
     const templateDef = getTemplateDef(templateKey, clientSlug);
     return {
       ...item,
+      templateKey: templateDef?.key || templateKey,
       previewData: {
         ...item.previewData,
-        templateKey: templateDef?.key || templateKey,
+        templateKey: templateDef?.key || item.preferredTemplateKey || templateKey,
       },
     };
   });
@@ -125,16 +168,19 @@ function createCoreItems(clientSlug: string): LibraryItem[] {
 
 function LibraryDraggableButton(input: {
   item: LibraryItem;
+  disabled?: boolean;
   className: string;
   onClick: () => void;
   children: ReactNode;
 }) {
-  const { item, className, onClick, children } = input;
+  const { item, disabled = false, className, onClick, children } = input;
   const { attributes, listeners, setNodeRef, transform, isDragging } = useDraggable({
     id: `library-item:${item.id}`,
+    disabled,
     data: {
       source: "library",
       blockType: item.blockType,
+      templateKey: item.templateKey,
       name: item.name,
       itemId: item.id,
     },
@@ -145,7 +191,11 @@ function LibraryDraggableButton(input: {
       type="button"
       className={className}
       title={`Add ${item.name}`}
-      onClick={onClick}
+      onClick={() => {
+        if (disabled) return;
+        onClick();
+      }}
+      disabled={disabled}
       style={{
         transform: CSS.Translate.toString(transform),
         opacity: isDragging ? 0.72 : 1,
@@ -160,28 +210,29 @@ function LibraryDraggableButton(input: {
 
 function LibraryDraggableCard(input: {
   item: LibraryItem;
-  clientSlug: string;
-  onAddBlock: (blockType: BrevoBlockType) => void;
+  disabled?: boolean;
+  onAddBlock: (input: AddBlockPayload) => void;
 }) {
-  const { item, clientSlug, onAddBlock } = input;
+  const { item, disabled = false, onAddBlock } = input;
   const { attributes, listeners, setNodeRef, transform, isDragging } = useDraggable({
     id: `library-item:${item.id}`,
+    disabled,
     data: {
       source: "library",
       blockType: item.blockType,
+      templateKey: item.templateKey,
       name: item.name,
       itemId: item.id,
     },
   });
-  const templateKey = getDefaultTemplateForType(item.blockType, clientSlug);
-  const templateDef = getTemplateDef(templateKey, clientSlug);
+  const templateDef = getTemplateDef(item.templateKey);
   return (
     <div
       ref={setNodeRef}
       className="rounded-xl border border-[color:var(--color-border)] bg-[color:var(--color-surface-2)]/45 p-2.5"
       style={{
         transform: CSS.Translate.toString(transform),
-        opacity: isDragging ? 0.72 : 1,
+        opacity: disabled ? 0.62 : isDragging ? 0.72 : 1,
       }}
     >
       <div className="flex items-start justify-between gap-2">
@@ -193,16 +244,23 @@ function LibraryDraggableCard(input: {
           <button
             type="button"
             className="btn-ghost h-8 px-2 text-xs"
-            onClick={() => onAddBlock(item.blockType)}
+            onClick={() =>
+              onAddBlock({
+                blockType: item.blockType,
+                templateKey: item.templateKey,
+              })
+            }
+            disabled={disabled}
           >
             <Plus className="mr-1 h-3.5 w-3.5" />
-            Add
+            {disabled ? "Added" : "Add"}
           </button>
           <button
             type="button"
             className="btn-ghost h-8 w-8 cursor-grab bg-[color:var(--color-surface)]/75 p-0 text-slate-600 active:cursor-grabbing hover:text-slate-900"
             onClick={(event) => event.stopPropagation()}
             aria-label={`Drag ${item.name} into canvas`}
+            disabled={disabled}
             {...attributes}
             {...listeners}
           >
@@ -215,7 +273,7 @@ function LibraryDraggableCard(input: {
       <div className="mt-2 h-[94px] overflow-hidden rounded-lg border border-[color:var(--color-border)] bg-[color:var(--color-surface)]">
         <div className="origin-top-left scale-[0.55] pr-[72%]">
           <BlockTemplateRenderer
-            templateKey={templateDef?.key || templateKey}
+            templateKey={templateDef?.key || item.templateKey}
             blockType={item.blockType}
             blockData={item.previewData}
             brandTheme={LIBRARY_PREVIEW_THEME}
@@ -229,6 +287,7 @@ function LibraryDraggableCard(input: {
 
 export function BlockLibraryPanel({
   clientSlug,
+  hasHeaderBlock = false,
   collapsed = false,
   showCollapseToggle = true,
   onToggleCollapsed,
@@ -257,10 +316,16 @@ export function BlockLibraryPanel({
             <LibraryDraggableButton
               key={item.id}
               item={item}
+              disabled={Boolean(item.singleInstance && hasHeaderBlock)}
               className="flex h-10 w-full items-center justify-center rounded-lg border border-[color:var(--color-border)] bg-[color:var(--color-surface-2)]/55 text-xs font-semibold text-[color:var(--color-text)] transition hover:bg-[color:var(--color-surface-2)]"
-              onClick={() => onAddBlock(item.blockType)}
+              onClick={() =>
+                onAddBlock({
+                  blockType: item.blockType,
+                  templateKey: item.templateKey,
+                })
+              }
             >
-              {item.shortLabel}
+              {item.singleInstance && hasHeaderBlock ? "OK" : item.shortLabel}
             </LibraryDraggableButton>
           ))}
         </div>
@@ -292,7 +357,12 @@ export function BlockLibraryPanel({
       <div className="mt-3 space-y-2.5">
         <p className="text-[11px] uppercase tracking-[0.16em] text-[var(--color-muted)]">Core</p>
         {coreItems.map((item) => (
-          <LibraryDraggableCard key={item.id} item={item} clientSlug={clientSlug} onAddBlock={onAddBlock} />
+          <LibraryDraggableCard
+            key={item.id}
+            item={item}
+            disabled={Boolean(item.singleInstance && hasHeaderBlock)}
+            onAddBlock={onAddBlock}
+          />
         ))}
       </div>
 

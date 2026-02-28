@@ -30,7 +30,7 @@ import {
 } from "lucide-react";
 
 import { parseEmailCopyBrief } from "@/lib/crm/emailCopyBriefParser";
-import { BlockLibraryPanel } from "@/components/crm/emailCopy/builder/BlockLibraryPanel";
+import { BlockLibraryPanel, type AddBlockPayload } from "@/components/crm/emailCopy/builder/BlockLibraryPanel";
 import { EMAIL_CANVAS_DROP_ZONE_ID, EmailCanvas } from "@/components/crm/emailCopy/builder/EmailCanvas";
 import { BlockInspectorPanel } from "@/components/crm/emailCopy/builder/BlockInspectorPanel";
 import {
@@ -147,6 +147,7 @@ type BuilderDragState =
   | {
       source: "library";
       blockType: BrevoBlockType;
+      templateKey?: string | null;
       label: string;
       itemId: string;
     };
@@ -321,7 +322,110 @@ function countChars(value: string | null | undefined): number {
   return value ? [...value].length : 0;
 }
 
+function isHeaderTemplateKey(templateKey: string | null | undefined, clientSlug: string): boolean {
+  return getTemplateDef(templateKey, clientSlug)?.templateName === "header.image";
+}
+
+function getPreferredTemplateKeyForInsert(input: {
+  clientSlug: string;
+  blockType: BrevoBlockType;
+  explicitTemplateKey?: string | null;
+}): string | null {
+  if (input.explicitTemplateKey) return input.explicitTemplateKey;
+  if (input.clientSlug !== "saveurs-et-vie") return null;
+  if (input.blockType === "hero") return "sv.hero.imageTop.v1";
+  if (input.blockType === "image_text_side_by_side") return "sv.sideBySide.helpCta.v1";
+  if (input.blockType === "three_columns") return "sv.threeCards.menu3.v1";
+  if (input.blockType === "two_columns") return "sv.twoCards.menuPastel.v1";
+  return null;
+}
+
+function getHeaderImageSourceFromLayout(
+  templateKey: string | null | undefined,
+  layoutSpec: Record<string, unknown> | null | undefined,
+  clientSlug: string
+): string {
+  const layout =
+    layoutSpec && typeof layoutSpec === "object" ? (layoutSpec as Record<string, unknown>) : {};
+  const layoutImage =
+    layout.image && typeof layout.image === "object"
+      ? (layout.image as Record<string, unknown>)
+      : {};
+  const layoutSrc = typeof layoutImage.src === "string" ? layoutImage.src.trim() : "";
+  if (layoutSrc) return layoutSrc;
+  const templateDef = getTemplateDef(templateKey, clientSlug);
+  const defaultLayout =
+    templateDef?.defaultLayoutSpec && typeof templateDef.defaultLayoutSpec === "object"
+      ? (templateDef.defaultLayoutSpec as Record<string, unknown>)
+      : {};
+  const defaultImage =
+    defaultLayout.image && typeof defaultLayout.image === "object"
+      ? (defaultLayout.image as Record<string, unknown>)
+      : {};
+  return typeof defaultImage.src === "string" ? defaultImage.src.trim() : "";
+}
+
+function isBlockReadyForMapping(
+  block: EmailCopyBrief["blocks"][number],
+  clientSlug: string
+): boolean {
+  if (clean(block.id).length === 0) return false;
+  if (isHeaderTemplateKey(block.templateKey, clientSlug)) {
+    const headerImageSrc = getHeaderImageSourceFromLayout(block.templateKey, block.layoutSpec, clientSlug);
+    return clean(headerImageSrc).length > 0;
+  }
+  return clean(block.sourceContent || block.sourceTitle || "").length > 0;
+}
+
 function normalizeBrief(brief: EmailCopyBrief, clientSlug: string): EmailCopyBrief {
+  const normalizedBlocks = brief.blocks.map((block, idx) => ({
+    ...resolveTemplateState({
+      clientSlug,
+      blockType: block.blockType,
+      templateKey: block.templateKey,
+      layoutSpec: block.layoutSpec,
+    }),
+    id: clean(block.id) || `block-${idx + 1}`,
+    blockType: block.blockType,
+    sourceTitle: block.sourceTitle ? block.sourceTitle.trim() : null,
+    sourceContent: block.sourceContent ? block.sourceContent.trim() : null,
+    ctaLabel: block.ctaLabel ? clean(block.ctaLabel) : null,
+    ctaUrl: block.ctaUrl ? clean(block.ctaUrl) : null,
+  }));
+  const firstHeaderIndex = normalizedBlocks.findIndex((block) =>
+    isHeaderTemplateKey(block.templateKey, clientSlug)
+  );
+  const orderedBlocks =
+    firstHeaderIndex > 0
+      ? [
+          normalizedBlocks[firstHeaderIndex],
+          ...normalizedBlocks.filter((_, index) => index !== firstHeaderIndex),
+        ]
+      : normalizedBlocks;
+  let hasHeader = false;
+  const dedupedHeaderBlocks = orderedBlocks.map((block) => {
+    if (!isHeaderTemplateKey(block.templateKey, clientSlug)) return block;
+    if (!hasHeader) {
+      hasHeader = true;
+      return block;
+    }
+    const fallbackTemplateState = resolveTemplateState({
+      clientSlug,
+      blockType: "hero",
+      templateKey: getPreferredTemplateKeyForInsert({
+        clientSlug,
+        blockType: "hero",
+      }),
+      layoutSpec: block.layoutSpec,
+    });
+    return {
+      ...block,
+      blockType: "hero" as const,
+      templateKey: fallbackTemplateState.templateKey,
+      layoutSpec: fallbackTemplateState.layoutSpec,
+    };
+  });
+
   return {
     ...brief,
     campaignName: clean(brief.campaignName || "Nouvelle campagne"),
@@ -335,20 +439,7 @@ function normalizeBrief(brief: EmailCopyBrief, clientSlug: string): EmailCopyBri
     comments: brief.comments ? brief.comments.trim() : null,
     sourceSubject: brief.sourceSubject ? clean(brief.sourceSubject) : null,
     sourcePreheader: brief.sourcePreheader ? clean(brief.sourcePreheader) : null,
-    blocks: brief.blocks.map((block, idx) => ({
-      ...resolveTemplateState({
-        clientSlug,
-        blockType: block.blockType,
-        templateKey: block.templateKey,
-        layoutSpec: block.layoutSpec,
-      }),
-      id: clean(block.id) || `block-${idx + 1}`,
-      blockType: block.blockType,
-      sourceTitle: block.sourceTitle ? block.sourceTitle.trim() : null,
-      sourceContent: block.sourceContent ? block.sourceContent.trim() : null,
-      ctaLabel: block.ctaLabel ? clean(block.ctaLabel) : null,
-      ctaUrl: block.ctaUrl ? clean(block.ctaUrl) : null,
-    })),
+    blocks: dedupedHeaderBlocks,
   };
 }
 
@@ -400,17 +491,27 @@ function canonicalizeOptimizedBriefForBuilder(input: {
   });
 
   const heroIndexes = blocks
-    .map((block, index) => (block.blockType === "hero" ? index : -1))
+    .map((block, index) =>
+      block.blockType === "hero" && !isHeaderTemplateKey(block.templateKey, input.clientSlug)
+        ? index
+        : -1
+    )
     .filter((index) => index >= 0);
   if (heroIndexes.length === 0 && blocks.length > 0) {
+    const firstContentIndex = blocks.findIndex(
+      (block) => !isHeaderTemplateKey(block.templateKey, input.clientSlug)
+    );
+    if (firstContentIndex < 0) {
+      return { ...normalized, blocks: ensureUniqueBriefBlockIds(blocks) };
+    }
     const templateState = resolveTemplateState({
       clientSlug: input.clientSlug,
       blockType: "hero",
-      templateKey: blocks[0].templateKey,
-      layoutSpec: blocks[0].layoutSpec,
+      templateKey: blocks[firstContentIndex].templateKey,
+      layoutSpec: blocks[firstContentIndex].layoutSpec,
     });
-    blocks[0] = {
-      ...blocks[0],
+    blocks[firstContentIndex] = {
+      ...blocks[firstContentIndex],
       blockType: "hero",
       templateKey: templateState.templateKey,
       layoutSpec: templateState.layoutSpec,
@@ -619,6 +720,11 @@ export default function CrmEmailCopyGeneratorView({ clientSlug, clientLabel }: C
     () => (selectedBlockIndex >= 0 ? brief.blocks[selectedBlockIndex] : null),
     [brief.blocks, selectedBlockIndex]
   );
+  const headerBlockId = useMemo(
+    () =>
+      brief.blocks.find((block) => isHeaderTemplateKey(block.templateKey, clientSlug))?.id || null,
+    [brief.blocks, clientSlug]
+  );
   const dndSensors = useSensors(
     useSensor(PointerSensor, { activationConstraint: { distance: 6 } }),
     useSensor(KeyboardSensor, { coordinateGetter: sortableKeyboardCoordinates })
@@ -628,25 +734,20 @@ export default function CrmEmailCopyGeneratorView({ clientSlug, clientLabel }: C
   const blocksReady = useMemo(
     () =>
       brief.blocks.length > 0 &&
-      brief.blocks.every((block) => clean(block.id).length > 0 && clean(block.sourceContent || block.sourceTitle || "").length > 0),
-    [brief.blocks]
+      brief.blocks.every((block) => isBlockReadyForMapping(block, clientSlug)),
+    [brief.blocks, clientSlug]
   );
   const generatedReady = variants.length > 0;
   const mappedBlocksCount = useMemo(
-    () =>
-      brief.blocks.filter(
-        (block) => clean(block.id).length > 0 && clean(block.sourceContent || block.sourceTitle || "").length > 0
-      ).length,
-    [brief.blocks]
+    () => brief.blocks.filter((block) => isBlockReadyForMapping(block, clientSlug)).length,
+    [brief.blocks, clientSlug]
   );
   const incompleteBlockIds = useMemo(
     () =>
       brief.blocks
-        .filter(
-          (block) => !(clean(block.id).length > 0 && clean(block.sourceContent || block.sourceTitle || "").length > 0)
-        )
+        .filter((block) => !isBlockReadyForMapping(block, clientSlug))
         .map((block) => block.id),
-    [brief.blocks]
+    [brief.blocks, clientSlug]
   );
   const readinessPercent = useMemo(() => {
     if (!brief.blocks.length) return 0;
@@ -899,11 +1000,28 @@ export default function CrmEmailCopyGeneratorView({ clientSlug, clientLabel }: C
         const templateKey =
           (value as string | null) || getDefaultTemplateForType(currentBlock.blockType, clientSlug);
         const templateDef = getTemplateDef(templateKey, clientSlug);
+        const nextTemplateKey = templateDef?.key || templateKey;
+        const nextTemplateIsHeader = isHeaderTemplateKey(nextTemplateKey, clientSlug);
+        const otherHeader = nextBlocks.find(
+          (block, index) =>
+            index !== blockIndex && isHeaderTemplateKey(block.templateKey, clientSlug)
+        );
+        if (nextTemplateIsHeader && otherHeader) {
+          setSelectedBlockId(otherHeader.id);
+          showError("Header block already exists. Remove it first to assign another.");
+          return prev;
+        }
+
         nextBlocks[blockIndex] = {
           ...currentBlock,
-          templateKey: templateDef?.key || templateKey,
+          templateKey: nextTemplateKey,
           layoutSpec: cloneLayoutSpec(templateDef?.defaultLayoutSpec),
         };
+
+        if (nextTemplateIsHeader && blockIndex > 0) {
+          const [headerBlock] = nextBlocks.splice(blockIndex, 1);
+          nextBlocks.unshift(headerBlock);
+        }
         return { ...prev, blocks: nextBlocks };
       }
 
@@ -1018,32 +1136,45 @@ export default function CrmEmailCopyGeneratorView({ clientSlug, clientLabel }: C
     setDragInsertIndex(null);
   };
 
-  const insertBlockAt = (blockType: BrevoBlockType, insertAtIndex?: number | null) => {
+  const insertBlockAt = (
+    blockType: BrevoBlockType,
+    insertAtIndex?: number | null,
+    explicitTemplateKey?: string | null
+  ) => {
     setBrief((prev) => {
       const nextId = createNextBlockId(prev.blocks);
-      const preferredTemplateKey =
-        clientSlug === "saveurs-et-vie"
-          ? blockType === "hero"
-            ? "sv.hero.imageTop.v1"
-            : blockType === "image_text_side_by_side"
-              ? "sv.sideBySide.helpCta.v1"
-              : blockType === "three_columns"
-                ? "sv.threeCards.menu3.v1"
-              : blockType === "two_columns"
-                ? "sv.twoCards.menuPastel.v1"
-                : null
-          : null;
+      const preferredTemplateKey = getPreferredTemplateKeyForInsert({
+        clientSlug,
+        blockType,
+        explicitTemplateKey,
+      });
       const templateState = resolveTemplateState({
         clientSlug,
         blockType,
         templateKey: preferredTemplateKey,
       });
+      const isHeaderTemplate = isHeaderTemplateKey(templateState.templateKey, clientSlug);
+      const existingHeader = prev.blocks.find((block) =>
+        isHeaderTemplateKey(block.templateKey, clientSlug)
+      );
+      if (isHeaderTemplate && existingHeader) {
+        setSelectedBlockId(existingHeader.id);
+        showError("Header block is already added.");
+        return prev;
+      }
+
+      const minInsertIndex = existingHeader ? prev.blocks.findIndex((block) => block.id === existingHeader.id) + 1 : 0;
       const nextIndex =
-        typeof insertAtIndex === "number"
+        isHeaderTemplate
+          ? 0
+          : typeof insertAtIndex === "number"
           ? Math.min(Math.max(insertAtIndex, 0), prev.blocks.length)
           : prev.blocks.length;
+      const constrainedIndex = isHeaderTemplate
+        ? 0
+        : Math.max(minInsertIndex, nextIndex);
       const nextBlocks = [...prev.blocks];
-      nextBlocks.splice(nextIndex, 0, {
+      nextBlocks.splice(constrainedIndex, 0, {
         id: nextId,
         blockType,
         sourceTitle: null,
@@ -1061,8 +1192,8 @@ export default function CrmEmailCopyGeneratorView({ clientSlug, clientLabel }: C
     });
   };
 
-  const addBlock = (blockType: BrevoBlockType = "image_text_side_by_side") => {
-    insertBlockAt(blockType, null);
+  const addBlock = (input: AddBlockPayload = { blockType: "image_text_side_by_side" }) => {
+    insertBlockAt(input.blockType, null, input.templateKey);
   };
 
   const removeBlock = (blockIndex: number) => {
@@ -1092,12 +1223,24 @@ export default function CrmEmailCopyGeneratorView({ clientSlug, clientLabel }: C
       ) {
         return prev;
       }
+      const headerIndex = prev.blocks.findIndex((block) =>
+        isHeaderTemplateKey(block.templateKey, clientSlug)
+      );
+      if (headerIndex >= 0 && (fromIndex === headerIndex || toIndex === headerIndex)) {
+        return prev;
+      }
       const nextBlocks = arrayMove(prev.blocks, fromIndex, toIndex);
       return { ...prev, blocks: nextBlocks };
     });
   };
 
   const duplicateBlock = (blockIndex: number) => {
+    const sourceBlock = brief.blocks[blockIndex];
+    if (sourceBlock && isHeaderTemplateKey(sourceBlock.templateKey, clientSlug)) {
+      setSelectedBlockId(sourceBlock.id);
+      showError("Header block can only be added once.");
+      return;
+    }
     setBrief((prev) => {
       const source = prev.blocks[blockIndex];
       if (!source) return prev;
@@ -1156,6 +1299,7 @@ export default function CrmEmailCopyGeneratorView({ clientSlug, clientLabel }: C
         source?: "canvas" | "library";
         blockId?: string;
         blockType?: BrevoBlockType;
+        templateKey?: string | null;
         name?: string;
         itemId?: string;
       };
@@ -1174,6 +1318,7 @@ export default function CrmEmailCopyGeneratorView({ clientSlug, clientLabel }: C
         setActiveDragState({
           source: "library",
           blockType: currentData.blockType,
+          templateKey: currentData.templateKey,
           itemId: currentData.itemId || String(event.active.id),
           label: currentData.name || "New block",
         });
@@ -1211,7 +1356,7 @@ export default function CrmEmailCopyGeneratorView({ clientSlug, clientLabel }: C
           insertIndexFromEvent ??
           (droppedOnCanvas ? brief.blocks.length : null);
         if (droppedOnCanvas && insertionIndex !== null) {
-          insertBlockAt(finalizedDrag.blockType, insertionIndex);
+          insertBlockAt(finalizedDrag.blockType, insertionIndex, finalizedDrag.templateKey);
           setMobileLibraryOpen(false);
         }
         setDragInsertIndex(null);
@@ -2226,9 +2371,10 @@ export default function CrmEmailCopyGeneratorView({ clientSlug, clientLabel }: C
                 <aside id="email-copy-block-library" className="hidden lg:block">
                   <BlockLibraryPanel
                     clientSlug={clientSlug}
+                    hasHeaderBlock={Boolean(headerBlockId)}
                     collapsed={libraryCollapsed}
                     onToggleCollapsed={() => setLibraryCollapsed((prev) => !prev)}
-                    onAddBlock={(blockType) => addBlock(blockType)}
+                    onAddBlock={(payload) => addBlock(payload)}
                   />
                 </aside>
 
@@ -2282,9 +2428,10 @@ export default function CrmEmailCopyGeneratorView({ clientSlug, clientLabel }: C
                   </div>
                   <BlockLibraryPanel
                     clientSlug={clientSlug}
+                    hasHeaderBlock={Boolean(headerBlockId)}
                     showCollapseToggle={false}
-                    onAddBlock={(blockType) => {
-                      addBlock(blockType);
+                    onAddBlock={(payload) => {
+                      addBlock(payload);
                       setMobileLibraryOpen(false);
                     }}
                   />

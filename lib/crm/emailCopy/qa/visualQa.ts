@@ -47,13 +47,17 @@ type GenericSlots = Record<string, unknown>;
 const TITLE_LIMIT = 33;
 const BULLET_LIMIT = 40;
 const TWO_CARDS_MAX_BULLETS = 4;
+const TWO_CARDS_FORMULE2_MAX_BULLETS = 2;
+const TWO_CARDS_FORMULE2_BULLET_LIMIT = 110;
 const THREE_CARDS_MAX_BODY_LINES = 2;
 const DEFAULT_MOBILE_CHARS_PER_LINE = 30;
 
 const TEMPLATE_LINE_LIMITS: Record<TemplateName, number> = {
+  'header.image': 32,
   'hero.simple': 32,
   'hero.imageTop': 32,
   'twoCards.text': 30,
+  'twoCards.formule2': 30,
   'twoCards.menuPastel': 30,
   'threeCards.text': 28,
   'threeCards.menu3': 28,
@@ -62,9 +66,11 @@ const TEMPLATE_LINE_LIMITS: Record<TemplateName, number> = {
 };
 
 const TEMPLATE_CTA_LIMITS: Record<TemplateName, number> = {
+  'header.image': 24,
   'hero.simple': 26,
   'hero.imageTop': 26,
   'twoCards.text': 24,
+  'twoCards.formule2': 24,
   'twoCards.menuPastel': 24,
   'threeCards.text': 24,
   'threeCards.menu3': 24,
@@ -150,6 +156,28 @@ function extractTwoCardSlots(input: {
   fallbackTitle: string;
   fallbackContent: string;
 }) {
+  const cards = Array.isArray(input.slots?.cards)
+    ? (input.slots?.cards as unknown[])
+    : [];
+  if (cards.length >= 2) {
+    const leftCard = asRecord(cards[0]) ?? {};
+    const rightCard = asRecord(cards[1]) ?? {};
+    return {
+      left: {
+        title: str(leftCard.title) || input.fallbackTitle,
+        bullets: toStringArray(leftCard.bullets).length
+          ? toStringArray(leftCard.bullets)
+          : extractBulletLines(str(leftCard.text) || input.fallbackContent),
+      },
+      right: {
+        title: str(rightCard.title) || input.fallbackTitle,
+        bullets: toStringArray(rightCard.bullets).length
+          ? toStringArray(rightCard.bullets)
+          : extractBulletLines(str(rightCard.text) || input.fallbackContent),
+      },
+    };
+  }
+
   const left = asRecord(input.slots?.left) ?? {};
   const right = asRecord(input.slots?.right) ?? {};
 
@@ -224,7 +252,9 @@ export function runVisualQaForVariant(input: {
     const ctaLabel = str(block.ctaLabel);
     const slots = asRecord(block.renderSlots);
 
-    if (templateName === 'hero.simple' || templateName === 'hero.imageTop') {
+    if (templateName === 'header.image') {
+      // Header image template intentionally has no text-density checks.
+    } else if (templateName === 'hero.simple' || templateName === 'hero.imageTop') {
       const headlineRecord = asRecord(slots?.headline);
       const headline =
         templateName === 'hero.imageTop'
@@ -265,8 +295,10 @@ export function runVisualQaForVariant(input: {
           'Subheadline may wrap to 3+ lines on mobile.'
         );
       }
-    } else if (templateName === 'twoCards.text' || templateName === 'twoCards.menuPastel') {
+    } else if (templateName === 'twoCards.text' || templateName === 'twoCards.menuPastel' || templateName === 'twoCards.formule2') {
       const cards = extractTwoCardSlots({ slots, fallbackTitle: title, fallbackContent: content });
+      const maxBullets = templateName === 'twoCards.formule2' ? TWO_CARDS_FORMULE2_MAX_BULLETS : TWO_CARDS_MAX_BULLETS;
+      const bulletLimit = templateName === 'twoCards.formule2' ? TWO_CARDS_FORMULE2_BULLET_LIMIT : BULLET_LIMIT;
       [
         { key: 'left', value: cards.left },
         { key: 'right', value: cards.right },
@@ -281,14 +313,14 @@ export function runVisualQaForVariant(input: {
             `${card.key} title has ${charCount(card.value.title)} chars (max ${TITLE_LIMIT}).`
           );
         }
-        if (card.value.bullets.length > TWO_CARDS_MAX_BULLETS) {
+        if (card.value.bullets.length > maxBullets) {
           pushWarning(
             warnings,
             block.id,
             blockIndex,
             'BULLETS_TOO_MANY',
             `${card.key}.bullets`,
-            `${card.key} card has ${card.value.bullets.length} bullets (max ${TWO_CARDS_MAX_BULLETS}).`
+            `${card.key} card has ${card.value.bullets.length} bullets (max ${maxBullets}).`
           );
         }
         if (charCount(card.value.title) > 0 && estimateLineCount(card.value.title, charsPerLine) >= 3) {
@@ -302,14 +334,14 @@ export function runVisualQaForVariant(input: {
           );
         }
         card.value.bullets.forEach((bullet, bulletIndex) => {
-          if (charCount(bullet) > BULLET_LIMIT) {
+          if (charCount(bullet) > bulletLimit) {
             pushWarning(
               warnings,
               block.id,
               blockIndex,
               'BULLET_TOO_LONG',
               `${card.key}.bullets.${bulletIndex}`,
-              `${card.key} bullet ${bulletIndex + 1} has ${charCount(bullet)} chars (target <= ${BULLET_LIMIT}).`
+              `${card.key} bullet ${bulletIndex + 1} has ${charCount(bullet)} chars (target <= ${bulletLimit}).`
             );
           }
           if (estimateLineCount(bullet, charsPerLine) >= 3) {

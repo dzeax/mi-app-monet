@@ -87,7 +87,18 @@ export function BlockInspectorPanel({
     selectedBlock.layoutSpec && typeof selectedBlock.layoutSpec === "object"
       ? (selectedBlock.layoutSpec as Record<string, unknown>)
       : (templateDef?.defaultLayoutSpec as Record<string, unknown>) || {};
-  const layoutKeys = Object.keys(layoutSpec || {});
+  const isHeaderTemplate = templateDef?.templateName === "header.image";
+  const headerImageLayout =
+    isHeaderTemplate && layoutSpec.image && typeof layoutSpec.image === "object"
+      ? (layoutSpec.image as Record<string, unknown>)
+      : {};
+  const headerImageSrc = typeof headerImageLayout.src === "string" ? headerImageLayout.src : "";
+  const headerImageAlt = typeof headerImageLayout.alt === "string" ? headerImageLayout.alt : "";
+  const headerAlign = typeof layoutSpec.align === "string" ? layoutSpec.align : "center";
+  const layoutKeys = Object.keys(layoutSpec || {}).filter((layoutKey) => {
+    if (!isHeaderTemplate) return true;
+    return layoutKey !== "image" && layoutKey !== "align";
+  });
 
   const titleChars = countChars(selectedBlock.sourceTitle);
   const titleHard = EMAIL_COPY_CHAR_LIMITS.title;
@@ -119,6 +130,7 @@ export function BlockInspectorPanel({
           <button
             type="button"
             className="btn-ghost h-8 px-2 text-xs"
+            disabled={isHeaderTemplate}
             onClick={() => onDuplicateBlock(selectedBlockIndex)}
           >
             <CopyPlus className="mr-1 h-3.5 w-3.5" />
@@ -223,6 +235,65 @@ export function BlockInspectorPanel({
         <section className="rounded-xl border border-[color:var(--color-border)] bg-[color:var(--color-surface-2)]/35 p-3">
           <p className={sectionLabelClass}>Layout</p>
           <div className="mt-2.5">
+            {isHeaderTemplate ? (
+              <div className="mb-2.5 grid gap-2 sm:grid-cols-2">
+                <label className="space-y-1 sm:col-span-2">
+                  <span className="text-[11px] uppercase tracking-[0.08em] text-[var(--color-muted)]">
+                    Header image URL
+                  </span>
+                  <input
+                    className="input w-full"
+                    value={headerImageSrc}
+                    onChange={(event) =>
+                      onUpdateBlockField(selectedBlockIndex, "layoutSpec", {
+                        ...layoutSpec,
+                        image: {
+                          ...headerImageLayout,
+                          src: event.target.value,
+                        },
+                      })
+                    }
+                  />
+                </label>
+                <label className="space-y-1 sm:col-span-2">
+                  <span className="text-[11px] uppercase tracking-[0.08em] text-[var(--color-muted)]">
+                    Image alt text
+                  </span>
+                  <input
+                    className="input w-full"
+                    value={headerImageAlt}
+                    onChange={(event) =>
+                      onUpdateBlockField(selectedBlockIndex, "layoutSpec", {
+                        ...layoutSpec,
+                        image: {
+                          ...headerImageLayout,
+                          alt: event.target.value,
+                        },
+                      })
+                    }
+                  />
+                </label>
+                <label className="space-y-1">
+                  <span className="text-[11px] uppercase tracking-[0.08em] text-[var(--color-muted)]">
+                    Align
+                  </span>
+                  <select
+                    className="input w-full"
+                    value={headerAlign}
+                    onChange={(event) =>
+                      onUpdateBlockField(selectedBlockIndex, "layoutSpec", {
+                        ...layoutSpec,
+                        align: event.target.value,
+                      })
+                    }
+                  >
+                    <option value="left">left</option>
+                    <option value="center">center</option>
+                    <option value="right">right</option>
+                  </select>
+                </label>
+              </div>
+            ) : null}
             {layoutKeys.length > 0 ? (
               <div className="grid gap-2 sm:grid-cols-2">
                 {layoutKeys.map((layoutKey) => {
